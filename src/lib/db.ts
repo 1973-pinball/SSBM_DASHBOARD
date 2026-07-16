@@ -40,6 +40,15 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("games").clear();
       });
+    // v4 added counter hits + beneficial trades; same missing-field reasoning.
+    this.version(4)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("games").clear();
+      });
   }
 }
 

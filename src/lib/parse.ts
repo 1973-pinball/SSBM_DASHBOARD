@@ -49,6 +49,8 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       damagePerOpening: overall?.damagePerOpening?.ratio ?? null,
       inputsPerMinute: overall?.inputsPerMinute?.ratio ?? null,
       neutralWins: overall?.neutralWinRatio?.count ?? 0,
+      counterHits: overall?.counterHitRatio?.count ?? 0,
+      beneficialTrades: overall?.beneficialTradeRatio?.count ?? 0,
       lCancelSuccess: actions?.lCancelCount?.success ?? 0,
       lCancelFail: actions?.lCancelCount?.fail ?? 0,
       actions: {

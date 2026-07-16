@@ -201,6 +201,38 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
   };
 }
 
+export interface NeutralSummaryRow {
+  label: string;
+  mine: number;
+  theirs: number;
+  perGame: number;
+  share: number | null; // mine / (mine + theirs)
+}
+
+/** Aggregate neutral-exchange counts: who's winning neutral, countering, and trading well. */
+export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
+  const rows = [
+    { label: "Neutral wins", pick: (p: { neutralWins: number }) => p.neutralWins },
+    { label: "Counter hits", pick: (p: { counterHits: number }) => p.counterHits },
+    { label: "Beneficial trades", pick: (p: { beneficialTrades: number }) => p.beneficialTrades },
+  ];
+  return rows.map(({ label, pick }) => {
+    let mine = 0;
+    let theirs = 0;
+    for (const g of games) {
+      mine += pick(g.me) ?? 0;
+      theirs += pick(g.opp) ?? 0;
+    }
+    return {
+      label,
+      mine,
+      theirs,
+      perGame: games.length ? mine / games.length : 0,
+      share: mine + theirs > 0 ? mine / (mine + theirs) : null,
+    };
+  });
+}
+
 export interface ActionAverageRow {
   key: keyof ActionCounts;
   label: string;

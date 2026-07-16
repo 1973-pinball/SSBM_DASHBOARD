@@ -38,6 +38,8 @@ export interface PlayerSide {
   damagePerOpening: number | null;
   inputsPerMinute: number | null;
   neutralWins: number;
+  counterHits: number;
+  beneficialTrades: number;
   lCancelSuccess: number;
   lCancelFail: number;
   actions: ActionCounts;

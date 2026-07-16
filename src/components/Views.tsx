@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
@@ -239,6 +239,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
   const lcVolume = useMemo(() => lCancelSeries(games), [games]);
   const actions = useMemo(() => actionAverages(games), [games]);
+  const neutral = useMemo(() => neutralSummary(games), [games]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
@@ -262,13 +263,14 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
         <h2>L-cancel volume — per game</h2>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-            <XAxis dataKey="index" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+            {/* One point per game, labeled by date — same-day games share a tick. */}
+            <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
-                const d = payload?.[0]?.payload?.date;
-                return d ? `Game ${v} — ${d}` : `Game ${v}`;
+                const idx = payload?.[0]?.payload?.index;
+                return idx ? `Game ${idx} — ${v}` : String(v);
               }}
               formatter={(v, name) => [int(Number(v)), name]}
             />
@@ -280,6 +282,36 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
         <div className="hint">
           Each point is one game{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()})` : ""}. The gap
           between the lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Neutral summary</h2>
+        <table>
+          <thead>
+            <tr>
+              <th />
+              <th className="data">Me</th>
+              <th className="data">Opponents</th>
+              <th className="data">Per game</th>
+              <th className="data">My share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {neutral.map((r) => (
+              <tr key={r.label}>
+                <td>{r.label}</td>
+                <td className="data">{r.mine.toLocaleString()}</td>
+                <td className="data">{r.theirs.toLocaleString()}</td>
+                <td className="data">{num(r.perGame, 1)}</td>
+                <td className="data" style={{ color: winRateColor(r.share) }}>{pct(r.share, 0)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="hint">
+          Share is your count ÷ the game total — over 50% means you're winning that kind of exchange more often than your
+          opponents across the filtered games.
         </div>
       </div>
 
@@ -313,13 +345,19 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
 
 // ---------------- Game log ----------------
 
-const DETAIL_STATS: { label: string; value: (p: PlayerSide) => string }[] = [
+/** Count plus this player's share of the game total, e.g. "13 (57%)". */
+const withShare = (mine: number, theirs: number) =>
+  mine + theirs > 0 ? `${mine} (${pct(mine / (mine + theirs), 0)})` : "0";
+
+const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) => string }[] = [
   { label: "Kills", value: (p) => int(p.kills) },
   { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
-  { label: "Total damage", value: (p) => int(p.totalDamage) },
+  { label: "Damage done", value: (p) => int(p.totalDamage) },
   { label: "Damage / opening", value: (p) => num(p.damagePerOpening, 1) },
   { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
-  { label: "Neutral wins", value: (p) => int(p.neutralWins) },
+  { label: "Neutral wins", value: (p, o) => withShare(p.neutralWins, o.neutralWins) },
+  { label: "Counter hits", value: (p, o) => withShare(p.counterHits, o.counterHits) },
+  { label: "Beneficial trades", value: (p, o) => withShare(p.beneficialTrades, o.beneficialTrades) },
   {
     label: "L-cancels",
     value: (p) => {
@@ -355,8 +393,8 @@ function GameDetail({ g }: { g: ResolvedGame }) {
               {DETAIL_STATS.map((s) => (
                 <tr key={s.label}>
                   <td>{s.label}</td>
-                  <td className="data">{s.value(g.me)}</td>
-                  <td className="data">{s.value(g.opp)}</td>
+                  <td className="data">{s.value(g.me, g.opp)}</td>
+                  <td className="data">{s.value(g.opp, g.me)}</td>
                 </tr>
               ))}
             </tbody>

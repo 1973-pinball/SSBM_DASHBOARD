@@ -2,6 +2,8 @@ import type { Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/t
 import { charName, stageName } from "../lib/melee";
 import { useMemo } from "react";
 import { DEFAULT_FILTERS } from "../lib/types";
+import { localDay } from "../lib/stats";
+import { shortDate } from "../lib/format";
 
 interface Props {
   filters: Filters;
@@ -24,13 +26,21 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
     const stages = new Set<number>();
     const oppCodes = new Map<string, number>();
     const mateCodes = new Map<string, number>();
+    const dayCounts = new Map<string, number>();
     const bump = (code: string | null) => {
       if (code) oppCodes.set(code, (oppCodes.get(code) ?? 0) + 1);
+    };
+    const bumpDay = (d: Date | null) => {
+      if (d) {
+        const day = localDay(d);
+        dayCounts.set(day, (dayCounts.get(day) ?? 0) + 1);
+      }
     };
     if (isTeams) {
       for (const g of teamGames) {
         myChars.add(g.me.characterId);
         stages.add(g.rec.stageId);
+        bumpDay(g.date);
         if (g.teammate.connectCode) {
           mateCodes.set(g.teammate.connectCode, (mateCodes.get(g.teammate.connectCode) ?? 0) + 1);
         }
@@ -45,6 +55,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
         oppChars.add(g.opp.characterId);
         stages.add(g.rec.stageId);
         bump(g.opp.connectCode);
+        bumpDay(g.date);
       }
     }
     const topCodes = (m: Map<string, number>) =>
@@ -58,6 +69,10 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
       stages: Array.from(stages).sort((a, b) => a - b),
       codes: topCodes(oppCodes),
       mateCodes: topCodes(mateCodes),
+      // Most recent session first — that's almost always the one being looked up.
+      days: Array.from(dayCounts.entries())
+        .sort((a, b) => b[0].localeCompare(a[0]))
+        .map(([day, count]) => ({ day, count })),
     };
   }, [games, teamGames, isTeams]);
 
@@ -106,17 +121,14 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
       </label>
       <label>
         Day
-        <input
-          type="date"
-          className="day-input"
-          value={filters.day ?? ""}
-          onChange={(e) => set({ day: e.target.value || null })}
-        />
-        {filters.day !== null && (
-          <button className="ghost mini" onClick={() => set({ day: null })} aria-label="Clear day">
-            ✕
-          </button>
-        )}
+        <select value={filters.day ?? ""} onChange={(e) => set({ day: e.target.value || null })}>
+          <option value="">Any day</option>
+          {opts.days.map((d) => (
+            <option key={d.day} value={d.day}>
+              {shortDate(new Date(`${d.day}T12:00:00`))} ({d.count})
+            </option>
+          ))}
+        </select>
       </label>
       <label>
         Me

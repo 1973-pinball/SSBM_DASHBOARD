@@ -43,7 +43,15 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
       },
       {
         term: "Neutral wins",
-        def: "Openings that started from a clean neutral exchange only — counter-attacks and trades excluded.",
+        def: "Openings that started from a clean neutral exchange only — counter-attacks and trades excluded. The share % is your count ÷ the game total, so over 50% means you won neutral more often than they did.",
+      },
+      {
+        term: "Counter hits",
+        def: "Openings you earned by hitting the opponent during their punish on you — escaping pressure and turning it around, rather than winning a clean neutral exchange.",
+      },
+      {
+        term: "Beneficial trades",
+        def: "Both players hit each other at once, and the trade favored you — either your hit killed and theirs didn't, or yours simply dealt more damage.",
       },
     ],
   },
