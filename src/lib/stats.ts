@@ -356,6 +356,33 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
   return out;
 }
 
+export interface LCancelPoint {
+  index: number;
+  date: string;
+  attempts: number;
+  success: number;
+}
+
+/**
+ * Raw L-cancel volume, one point per game (no rolling window — this chart is
+ * about per-game counts, unlike executionTrend's smoothed rates). Capped to the
+ * most recent `limit` games to keep the chart renderable on 30k-game libraries.
+ */
+export function lCancelSeries(games: ResolvedGame[], limit = 500): LCancelPoint[] {
+  const start = Math.max(0, games.length - limit);
+  const out: LCancelPoint[] = [];
+  for (let i = start; i < games.length; i++) {
+    const g = games[i];
+    out.push({
+      index: i + 1,
+      date: g.date?.toISOString().slice(0, 10) ?? "",
+      attempts: g.me.lCancelSuccess + g.me.lCancelFail,
+      success: g.me.lCancelSuccess,
+    });
+  }
+  return out;
+}
+
 export interface ModeRow extends WL {
   mode: GameType | "overall";
   killsPerGame: number | null;

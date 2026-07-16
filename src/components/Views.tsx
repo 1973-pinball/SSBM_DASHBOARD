@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
-import type { Filters, ResolvedGame } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend } from "../lib/stats";
-import { pct, int, shortDate, duration, winRateColor } from "../lib/format";
+import { Fragment, useMemo, useState } from "react";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries } from "../lib/stats";
+import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
 const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
@@ -236,30 +236,109 @@ const EXEC_CHARTS = [
 
 export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
+  const lcVolume = useMemo(() => lCancelSeries(games), [games]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
-    <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-      {EXEC_CHARTS.map((c) => (
-        <div className="panel" key={c.key}>
-          <h2>{c.label}</h2>
-          <ResponsiveContainer width="100%" height={180}>
-            <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-              <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
-              <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={c.unit} />
-              <Tooltip {...tooltipStyle} formatter={(v) => [`${Number(v).toFixed(1)}${c.unit}`, c.label]} />
-              <Line type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
-            </LineChart>
-          </ResponsiveContainer>
+    <>
+      <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+        {EXEC_CHARTS.map((c) => (
+          <div className="panel" key={c.key}>
+            <h2>{c.label}</h2>
+            <ResponsiveContainer width="100%" height={180}>
+              <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+                <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+                <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={c.unit} />
+                <Tooltip {...tooltipStyle} formatter={(v) => [`${Number(v).toFixed(1)}${c.unit}`, c.label]} />
+                <Line type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+        ))}
+      </div>
+
+      <div className="panel">
+        <h2>L-cancel volume — per game</h2>
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+            <XAxis dataKey="index" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+            <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
+            <Tooltip
+              {...tooltipStyle}
+              labelFormatter={(v, payload) => {
+                const d = payload?.[0]?.payload?.date;
+                return d ? `Game ${v} — ${d}` : `Game ${v}`;
+              }}
+              formatter={(v, name) => [int(Number(v)), name]}
+            />
+            <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
+            <Line type="monotone" dataKey="attempts" name="Attempts" stroke="var(--accent)" strokeWidth={1.5} dot={false} />
+            <Line type="monotone" dataKey="success" name="Successful" stroke="#3fcf8e" strokeWidth={1.5} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+        <div className="hint">
+          Each point is one game{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()})` : ""}. The gap
+          between the lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
         </div>
-      ))}
-    </div>
+      </div>
+    </>
   );
 }
 
 // ---------------- Game log ----------------
 
+const DETAIL_STATS: { label: string; value: (p: PlayerSide) => string }[] = [
+  { label: "Kills", value: (p) => int(p.kills) },
+  { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
+  { label: "Total damage", value: (p) => int(p.totalDamage) },
+  { label: "Damage / opening", value: (p) => num(p.damagePerOpening, 1) },
+  { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
+  { label: "Neutral wins", value: (p) => int(p.neutralWins) },
+  {
+    label: "L-cancels",
+    value: (p) => {
+      const attempts = p.lCancelSuccess + p.lCancelFail;
+      return attempts === 0 ? "—" : `${p.lCancelSuccess}/${attempts} (${pct(p.lCancelSuccess / attempts, 0)})`;
+    },
+  },
+  { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
+];
+
+function GameDetail({ g }: { g: ResolvedGame }) {
+  return (
+    <tr className="detail-row">
+      <td colSpan={8}>
+        <div className="detail-grid">
+          <table>
+            <thead>
+              <tr>
+                <th />
+                <th className="data">
+                  Me — {charName(g.me.characterId)} (P{g.me.port})
+                </th>
+                <th className="data">
+                  {g.opp.displayName ?? g.opp.connectCode ?? "Opponent"} — {charName(g.opp.characterId)} (P{g.opp.port})
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {DETAIL_STATS.map((s) => (
+                <tr key={s.label}>
+                  <td>{s.label}</td>
+                  <td className="data">{s.value(g.me)}</td>
+                  <td className="data">{s.value(g.opp)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
 export function GameLog({ games }: { games: ResolvedGame[] }) {
   const recent = useMemo(() => [...games].reverse().slice(0, 300), [games]);
+  const [openId, setOpenId] = useState<string | null>(null);
 
   const exportCsv = () => {
     const header = "date,my_character,opp_character,opponent_code,stage,mode,result,my_kills,opp_kills,duration_s\n";
@@ -313,36 +392,40 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
         </thead>
         <tbody>
           {recent.map((g) => (
-            <tr key={g.rec.id}>
-              <td className="data">{shortDate(g.date)}</td>
-              <td>
-                {charName(g.me.characterId)} <span style={{ color: "var(--faint)" }}>vs</span> {charName(g.opp.characterId)}
-              </td>
-              <td style={{ fontFamily: "var(--font-data)" }}>{g.opp.connectCode ?? "—"}</td>
-              <td>{stageName(g.rec.stageId)}</td>
-              <td>
-                <span className="badge">{g.rec.gameType}</span>
-              </td>
-              <td className="data">
-                {g.isWin === null ? (
-                  <span className="badge" title="Indeterminate result (quit-out or very short game)">
-                    n/a
-                  </span>
-                ) : g.isWin ? (
-                  <span className="wl-pill up">W</span>
-                ) : (
-                  <span className="wl-pill down">L</span>
-                )}
-              </td>
-              <td className="data">
-                {int(g.me.kills)}–{int(g.opp.kills)}
-              </td>
-              <td className="data">{duration(g.rec.durationFrames / 60)}</td>
-            </tr>
+            <Fragment key={g.rec.id}>
+              <tr className="clickable" onClick={() => setOpenId(openId === g.rec.id ? null : g.rec.id)}>
+                <td className="data">{shortDate(g.date)}</td>
+                <td>
+                  {charName(g.me.characterId)} <span style={{ color: "var(--faint)" }}>vs</span> {charName(g.opp.characterId)}
+                </td>
+                <td style={{ fontFamily: "var(--font-data)" }}>{g.opp.connectCode ?? "—"}</td>
+                <td>{stageName(g.rec.stageId)}</td>
+                <td>
+                  <span className="badge">{g.rec.gameType}</span>
+                </td>
+                <td className="data">
+                  {g.isWin === null ? (
+                    <span className="badge" title="Indeterminate result (quit-out or very short game)">
+                      n/a
+                    </span>
+                  ) : g.isWin ? (
+                    <span className="wl-pill up">W</span>
+                  ) : (
+                    <span className="wl-pill down">L</span>
+                  )}
+                </td>
+                <td className="data">
+                  {int(g.me.kills)}–{int(g.opp.kills)}
+                </td>
+                <td className="data">{duration(g.rec.durationFrames / 60)}</td>
+              </tr>
+              {openId === g.rec.id && <GameDetail g={g} />}
+            </Fragment>
           ))}
         </tbody>
       </table>
       {games.length > 300 && <div className="hint">Showing latest 300 of {games.length.toLocaleString()} — export CSV for the full set.</div>}
+      <div className="hint">Click a game to see the full stat line for both players.</div>
     </div>
   );
 }

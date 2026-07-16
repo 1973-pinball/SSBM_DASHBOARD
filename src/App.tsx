@@ -10,6 +10,7 @@ import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
 import { Overview } from "./components/Overview";
 import { Teams } from "./components/Teams";
+import { MetricsGuide } from "./components/MetricsGuide";
 import { Matchups, Stages, Opponents, Execution, GameLog } from "./components/Views";
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
@@ -32,6 +33,7 @@ export default function App() {
   const [myCodes, setMyCodesState] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [isDemo, setIsDemo] = useState(false);
+  const [showGuide, setShowGuide] = useState(false);
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const autoSyncDone = useRef(false);
@@ -200,6 +202,9 @@ export default function App() {
                     : "Refresh"}
                 </button>
               )}
+              <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowGuide(true)}>
+                Metrics guide
+              </button>
               <button className="ghost" style={{ marginLeft: 10 }} onClick={reset}>
                 {isDemo ? "Exit demo" : "Change folder"}
               </button>
@@ -273,6 +278,8 @@ export default function App() {
           )}
         </>
       )}
+
+      {showGuide && <MetricsGuide onClose={() => setShowGuide(false)} />}
     </div>
   );
 }

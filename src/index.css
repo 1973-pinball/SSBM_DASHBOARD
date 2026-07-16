@@ -293,6 +293,63 @@ tr.clickable:hover td { background: var(--panel-2); cursor: pointer; }
 
 .empty-note { color: var(--muted); padding: 24px; text-align: center; }
 
+/* ---- Modal (metrics guide) ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(10, 8, 24, 0.72);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6vh 20px 20px;
+  z-index: 50;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  max-width: 640px;
+  width: 100%;
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--line);
+}
+.modal-head h2 {
+  font-size: 14px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.modal-body { padding: 6px 18px 16px; overflow-y: auto; }
+.modal-body section h3 {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin: 16px 0 4px;
+}
+.modal-body dl { margin: 0; }
+.metric-def { padding: 8px 0; border-bottom: 1px solid rgba(52, 48, 90, 0.45); }
+.metric-def:last-child { border-bottom: none; }
+.metric-def dt { font-family: var(--font-data); font-size: 13px; font-weight: 600; }
+.metric-def dd { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+
+/* ---- Game log detail ---- */
+tr.detail-row td {
+  background: var(--bg-raised);
+  white-space: normal;
+  padding: 12px 14px;
+}
+.detail-grid table { max-width: 560px; }
+.detail-grid th:first-child { width: 180px; }
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }
