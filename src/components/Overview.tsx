@@ -50,6 +50,7 @@ export function Overview({ games, allGames, filters, onSelectMyCharacter, onSele
         <Kpi label="Total kills" value={int(stats.totalKills)} />
         <Kpi label="Kills / game" value={num(stats.killsPerGame, 2)} />
         <Kpi label="Deaths / game" value={num(stats.deathsPerGame, 2)} />
+        <Kpi label="Damage / game" value={int(stats.damagePerGame)} />
         <Kpi label="Avg length" value={duration(stats.avgGameSeconds)} />
         <Kpi
           label="Streak"

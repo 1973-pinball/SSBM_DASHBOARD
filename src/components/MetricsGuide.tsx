@@ -17,6 +17,10 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
         def: "Stocks you took (or lost) per game, averaged over the filtered set. 4–0 sweeps and last-stock nail-biters weigh the same.",
       },
       {
+        term: "Damage per game",
+        def: "Total percent you dealt per game, averaged over the filtered set. Includes damage on stocks you didn't close out.",
+      },
+      {
         term: "Streak",
         def: "Current run of consecutive wins (W) or losses (L) over decided games, most recent first.",
       },
@@ -53,6 +57,10 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
       {
         term: "Inputs per minute",
         def: "Total controller inputs (buttons, sticks, triggers) per minute of game time. A speed gauge, not a quality one — high IPM with low damage per opening is just noise.",
+      },
+      {
+        term: "Actions per game",
+        def: "Counts of detected movement and defensive actions — rolls, air dodges, spot dodges, wavedashes, wavelands, dash dances, ledge grabs. High roll counts usually signal panic options; wavedash/dash-dance volume tracks movement-heavy play. The per-minute column is fairer when comparing filters with different game lengths.",
       },
     ],
   },

@@ -1,5 +1,19 @@
-import type { GameRecord, PlayerSide } from "./types";
+import type { ActionCounts, GameRecord, PlayerSide } from "./types";
 import { LEGAL_STAGE_IDS } from "./melee";
+
+/** Plausible per-game action counts, scaled by game length; `tech` in [0,1] raises movement actions. */
+function mkActions(rand: () => number, minutes: number, tech: number): ActionCounts {
+  const per = (base: number, spread: number) => Math.round(minutes * (base + rand() * spread));
+  return {
+    rolls: per(4 - tech * 2, 4),
+    airDodges: per(2, 3),
+    spotDodges: per(1, 2.5),
+    wavedashes: per(6 + tech * 10, 8),
+    wavelands: per(2 + tech * 4, 3),
+    dashDances: per(12 + tech * 14, 10),
+    ledgeGrabs: per(1.5, 2),
+  };
+}
 
 // Deterministic PRNG so the demo dashboard is stable between loads.
 function mulberry32(seed: number) {
@@ -106,6 +120,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       neutralWins: Math.floor(6 + rand() * 14),
       lCancelSuccess: isMe ? Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * (0.6 + rand() * 0.3)),
       lCancelFail: isMe ? lcAttempts - Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * 0.3),
+      actions: mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5),
     });
 
     const me = mkSide(myKills, oppKills, true);
@@ -175,6 +190,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       neutralWins: Math.floor(5 + rand() * 16),
       lCancelSuccess: Math.floor(durationFrames / 3600 * (26 + rand() * 12)),
       lCancelFail: Math.floor(durationFrames / 3600 * (2 + rand() * 6)),
+      actions: mkActions(rand, durationFrames / 3600, 0.3 + rand() * 0.5),
     });
 
     const myKills = Math.round(ourKills * split);

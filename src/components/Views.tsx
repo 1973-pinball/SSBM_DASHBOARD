@@ -1,7 +1,8 @@
 import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries } from "../lib/stats";
+import { ACTION_LABELS } from "../lib/types";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
@@ -237,6 +238,7 @@ const EXEC_CHARTS = [
 export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
   const lcVolume = useMemo(() => lCancelSeries(games), [games]);
+  const actions = useMemo(() => actionAverages(games), [games]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
@@ -280,6 +282,31 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
           between the lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
         </div>
       </div>
+
+      <div className="panel">
+        <h2>Actions per game</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Action</th>
+              <th className="data">Per game</th>
+              <th className="data">Per minute</th>
+            </tr>
+          </thead>
+          <tbody>
+            {actions.map((a) => (
+              <tr key={a.key}>
+                <td>{a.label}</td>
+                <td className="data">{num(a.perGame, 1)}</td>
+                <td className="data">{num(a.perMinute, 1)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="hint">
+          Averages over the filtered games. Per-minute normalizes for game length — better for comparing across filters.
+        </div>
+      </div>
     </>
   );
 }
@@ -301,6 +328,10 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide) => string }[] = [
     },
   },
   { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
+  ...ACTION_LABELS.map(({ key, label }) => ({
+    label,
+    value: (p: PlayerSide) => int(p.actions?.[key] ?? null),
+  })),
 ];
 
 function GameDetail({ g }: { g: ResolvedGame }) {

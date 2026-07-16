@@ -51,6 +51,15 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       neutralWins: overall?.neutralWinRatio?.count ?? 0,
       lCancelSuccess: actions?.lCancelCount?.success ?? 0,
       lCancelFail: actions?.lCancelCount?.fail ?? 0,
+      actions: {
+        rolls: actions?.rollCount ?? 0,
+        airDodges: actions?.airDodgeCount ?? 0,
+        spotDodges: actions?.spotDodgeCount ?? 0,
+        wavedashes: actions?.wavedashCount ?? 0,
+        wavelands: actions?.wavelandCount ?? 0,
+        dashDances: actions?.dashDanceCount ?? 0,
+        ledgeGrabs: actions?.ledgegrabCount ?? 0,
+      },
     };
   });
 

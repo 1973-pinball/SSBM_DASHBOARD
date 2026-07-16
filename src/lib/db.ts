@@ -29,6 +29,17 @@ class SsbmDb extends Dexie {
           .filter((r) => r.isTeams === true)
           .delete();
       });
+    // v3 added per-player action counts, which every older row is missing, so
+    // averaging over a mixed cache would silently understate them. Drop all
+    // rows; the folder rescan re-parses the library once.
+    this.version(3)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("games").clear();
+      });
   }
 }
 

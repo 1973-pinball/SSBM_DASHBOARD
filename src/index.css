@@ -64,7 +64,8 @@ button.primary {
 button.primary:hover { background: #a094ff; }
 button.ghost { background: transparent; }
 
-select {
+select,
+input.day-input {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
@@ -72,6 +73,9 @@ select {
   padding: 6px 10px;
   font-family: var(--font-body);
 }
+select:disabled { opacity: 0.45; }
+input.day-input { font-family: var(--font-data); font-size: 12px; color-scheme: dark; }
+button.mini { padding: 2px 7px; font-size: 11px; }
 
 /* ---- App shell ---- */
 .shell { max-width: 1180px; margin: 0 auto; padding: 24px 20px 80px; }

@@ -3,6 +3,27 @@ export type GameType = "ranked" | "unranked" | "direct" | "offline" | "unknown";
 /** Singles vs teams is a separate axis from GameType: a 2v2 is also ranked/direct/offline. */
 export type Format = "singles" | "teams";
 
+/** Movement/defensive action counts for one player in one game. */
+export interface ActionCounts {
+  rolls: number;
+  airDodges: number;
+  spotDodges: number;
+  wavedashes: number;
+  wavelands: number;
+  dashDances: number;
+  ledgeGrabs: number;
+}
+
+export const ACTION_LABELS: { key: keyof ActionCounts; label: string }[] = [
+  { key: "rolls", label: "Rolls" },
+  { key: "airDodges", label: "Air dodges" },
+  { key: "spotDodges", label: "Spot dodges" },
+  { key: "wavedashes", label: "Wavedashes" },
+  { key: "wavelands", label: "Wavelands" },
+  { key: "dashDances", label: "Dash dances" },
+  { key: "ledgeGrabs", label: "Ledge grabs" },
+];
+
 export interface PlayerSide {
   port: number;
   connectCode: string | null;
@@ -19,6 +40,7 @@ export interface PlayerSide {
   neutralWins: number;
   lCancelSuccess: number;
   lCancelFail: number;
+  actions: ActionCounts;
 }
 
 /**
@@ -42,6 +64,7 @@ export interface GameRecord {
 export interface Filters {
   format: Format;
   range: "all" | "30d" | "90d" | "1y";
+  day: string | null; // local YYYY-MM-DD; overrides range when set
   myCharacter: number | null;
   oppCharacter: number | null;
   stageId: number | null;
@@ -53,6 +76,7 @@ export interface Filters {
 export const DEFAULT_FILTERS: Filters = {
   format: "singles",
   range: "all",
+  day: null,
   myCharacter: null,
   oppCharacter: null,
   stageId: null,

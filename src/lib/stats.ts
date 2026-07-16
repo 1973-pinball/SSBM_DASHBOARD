@@ -1,4 +1,11 @@
-import type { Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
+import type { ActionCounts, Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
+import { ACTION_LABELS } from "./types";
+
+/** Local-timezone YYYY-MM-DD, matching the dates the user sees in the UI. */
+export function localDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
 
 // ---------- Identity ----------
 
@@ -78,9 +85,12 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
 const RANGE_DAYS: Record<Exclude<Filters["range"], "all">, number> = { "30d": 30, "90d": 90, "1y": 365 };
 
 export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] {
+  // A picked day overrides the relative range — combining them could only
+  // produce "day inside range" (redundant) or "day outside range" (empty).
   let cutoff: number | null = null;
-  if (f.range !== "all") cutoff = Date.now() - RANGE_DAYS[f.range] * 86_400_000;
+  if (f.day === null && f.range !== "all") cutoff = Date.now() - RANGE_DAYS[f.range] * 86_400_000;
   return games.filter((g) => {
+    if (f.day !== null && (!g.date || localDay(g.date) !== f.day)) return false;
     if (cutoff !== null && (!g.date || g.date.getTime() < cutoff)) return false;
     if (f.myCharacter !== null && g.me.characterId !== f.myCharacter) return false;
     if (f.oppCharacter !== null && g.opp.characterId !== f.oppCharacter) return false;
@@ -94,8 +104,9 @@ export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] 
 /** Same filters against a 2v2 game; opponent-side predicates match if *either* opponent matches. */
 export function applyTeamFilters(games: ResolvedTeamGame[], f: Filters): ResolvedTeamGame[] {
   let cutoff: number | null = null;
-  if (f.range !== "all") cutoff = Date.now() - RANGE_DAYS[f.range] * 86_400_000;
+  if (f.day === null && f.range !== "all") cutoff = Date.now() - RANGE_DAYS[f.range] * 86_400_000;
   return games.filter((g) => {
+    if (f.day !== null && (!g.date || localDay(g.date) !== f.day)) return false;
     if (cutoff !== null && (!g.date || g.date.getTime() < cutoff)) return false;
     if (f.myCharacter !== null && g.me.characterId !== f.myCharacter) return false;
     if (f.oppCharacter !== null && !g.opps.some((o) => o.characterId === f.oppCharacter)) return false;
@@ -150,6 +161,7 @@ export interface OverviewStats extends WL {
   totalKills: number;
   killsPerGame: number | null;
   deathsPerGame: number | null;
+  damagePerGame: number | null;
   avgGameSeconds: number | null;
   currentStreak: { kind: "W" | "L"; length: number } | null;
   prevWinRate: number | null; // same-length window immediately before the current one
@@ -159,10 +171,12 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
   const base = tally(games);
   let kills = 0;
   let deaths = 0;
+  let damage = 0;
   let frames = 0;
   for (const g of games) {
     kills += g.me.kills;
     deaths += g.opp.kills;
+    damage += g.me.totalDamage;
     frames += g.rec.durationFrames;
   }
   const streak = streakOf(games);
@@ -180,10 +194,38 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
     totalKills: kills,
     killsPerGame: games.length ? kills / games.length : null,
     deathsPerGame: games.length ? deaths / games.length : null,
+    damagePerGame: games.length ? damage / games.length : null,
     avgGameSeconds: games.length ? frames / 60 / games.length : null,
     currentStreak: streak,
     prevWinRate,
   };
+}
+
+export interface ActionAverageRow {
+  key: keyof ActionCounts;
+  label: string;
+  perGame: number;
+  perMinute: number;
+}
+
+/** Average action counts per game (and per minute, for length-independent comparison). */
+export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
+  if (games.length === 0) return [];
+  const totals: Record<keyof ActionCounts, number> = {
+    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0,
+  };
+  let frames = 0;
+  for (const g of games) {
+    frames += g.rec.durationFrames;
+    for (const { key } of ACTION_LABELS) totals[key] += g.me.actions?.[key] ?? 0;
+  }
+  const minutes = frames / 3600;
+  return ACTION_LABELS.map(({ key, label }) => ({
+    key,
+    label,
+    perGame: totals[key] / games.length,
+    perMinute: minutes > 0 ? totals[key] / minutes : 0,
+  }));
 }
 
 export interface RollingPoint {

@@ -66,6 +66,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
 
   const isDefault =
     filters.range === "all" &&
+    filters.day === null &&
     filters.myCharacter === null &&
     filters.oppCharacter === null &&
     filters.stageId === null &&
@@ -91,12 +92,31 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
       )}
       <label>
         Range
-        <select value={filters.range} onChange={(e) => set({ range: e.target.value as Filters["range"] })}>
+        {/* Disabled while a specific day is picked — the day wins (see applyFilters). */}
+        <select
+          value={filters.range}
+          disabled={filters.day !== null}
+          onChange={(e) => set({ range: e.target.value as Filters["range"] })}
+        >
           <option value="all">All time</option>
           <option value="30d">Last 30 days</option>
           <option value="90d">Last 90 days</option>
           <option value="1y">Last year</option>
         </select>
+      </label>
+      <label>
+        Day
+        <input
+          type="date"
+          className="day-input"
+          value={filters.day ?? ""}
+          onChange={(e) => set({ day: e.target.value || null })}
+        />
+        {filters.day !== null && (
+          <button className="ghost mini" onClick={() => set({ day: null })} aria-label="Clear day">
+            ✕
+          </button>
+        )}
       </label>
       <label>
         Me
