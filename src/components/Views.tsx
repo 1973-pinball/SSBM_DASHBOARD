@@ -263,14 +263,23 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
         <h2>L-cancel volume — per game</h2>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-            {/* One point per game, labeled by date — same-day games share a tick. */}
-            <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+            {/* The axis must key on the unique game index — keying on `date` makes
+                recharts treat same-day games as one category, so every hover
+                resolves to the first game of that day. Ticks still render dates. */}
+            <XAxis
+              dataKey="index"
+              tick={axisStyle}
+              tickLine={false}
+              axisLine={{ stroke: "#34305a" }}
+              minTickGap={48}
+              tickFormatter={(v: number) => lcVolume[v - lcVolume[0].index]?.date ?? ""}
+            />
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
-                const idx = payload?.[0]?.payload?.index;
-                return idx ? `Game ${idx} — ${v}` : String(v);
+                const d = payload?.[0]?.payload?.date;
+                return d ? `Game ${v} — ${d}` : `Game ${v}`;
               }}
               formatter={(v, name) => [int(Number(v)), name]}
             />
