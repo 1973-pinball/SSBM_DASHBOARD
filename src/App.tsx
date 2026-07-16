@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline } from "./lib/pool";
-import { allRecords, clearAll, getMyCodes, setMyCodes } from "./lib/db";
-import { inferIdentity, resolveGames, applyFilters } from "./lib/stats";
+import { allRecords, clearAll, getMyCodes, setMyCodes, getDirHandle, setDirHandle } from "./lib/db";
+import { inferIdentity, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
 import { generateDemoRecords, DEMO_CODE } from "./lib/demo";
 import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
 import { Overview } from "./components/Overview";
+import { Teams } from "./components/Teams";
 import { Matchups, Stages, Opponents, Execution, GameLog } from "./components/Views";
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
@@ -31,13 +32,17 @@ export default function App() {
   const [myCodes, setMyCodesState] = useState<string[]>([]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [isDemo, setIsDemo] = useState(false);
+  const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
+  const [syncing, setSyncing] = useState<ParseProgress | null>(null);
+  const autoSyncDone = useRef(false);
 
   const supportsFsAccess = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
   // Restore cache on load: if records + identity exist, go straight to dashboard.
   useEffect(() => {
     void (async () => {
-      const [cached, codes] = await Promise.all([allRecords(), getMyCodes()]);
+      const [cached, codes, handle] = await Promise.all([allRecords(), getMyCodes(), getDirHandle()]);
+      if (handle) setDirHandleState(handle);
       if (cached.length > 0) {
         setRecords(cached);
         if (codes.length > 0) {
@@ -82,9 +87,53 @@ export default function App() {
     [],
   );
 
+  /**
+   * Incremental rescan of the remembered folder. Unlike startPipeline this leaves
+   * the dashboard on screen — the cache dedups on path|size|mtime, so only replays
+   * added since the last scan actually parse.
+   */
+  const syncFolder = useCallback(async (handle: FileSystemDirectoryHandle) => {
+    setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0 });
+    try {
+      const files = await discoverFromHandle(handle);
+      await runParsePipeline(files, (p, newRecords) => {
+        setSyncing(p);
+        if (newRecords.length) setRecords((prev) => [...prev, ...newRecords]);
+      });
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSyncing(null);
+    }
+  }, []);
+
+  // Pick up replays added since the last visit with no click at all — possible
+  // only while the folder permission is still live (same browser session).
+  useEffect(() => {
+    if (phase !== "dashboard" || isDemo || !dirHandle || autoSyncDone.current) return;
+    autoSyncDone.current = true;
+    void (async () => {
+      const perm = await dirHandle.queryPermission({ mode: "read" });
+      if (perm === "granted") await syncFolder(dirHandle);
+    })();
+  }, [phase, isDemo, dirHandle, syncFolder]);
+
+  // After a browser restart the permission lapses; re-requesting it needs a user
+  // gesture, which this click provides.
+  const onRefresh = useCallback(() => {
+    if (!dirHandle) return;
+    void (async () => {
+      let perm = await dirHandle.queryPermission({ mode: "read" });
+      if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
+      if (perm === "granted") await syncFolder(dirHandle);
+    })();
+  }, [dirHandle, syncFolder]);
+
   const onPickDirectory = useCallback(() => {
     void startPipeline(async () => {
-      const dir = await window.showDirectoryPicker();
+      const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read" });
+      setDirHandleState(dir);
+      await setDirHandle(dir);
       return discoverFromHandle(dir);
     });
   }, [startPipeline]);
@@ -110,17 +159,25 @@ export default function App() {
   }, []);
 
   const reset = useCallback(() => {
-    if (!isDemo) void clearAll();
+    if (!isDemo) void clearAll(); // also drops the stored dirHandle
     setRecords([]);
     setMyCodesState([]);
     setFilters(DEFAULT_FILTERS);
     setIsDemo(false);
+    setDirHandleState(null);
+    autoSyncDone.current = false;
     setPhase("landing");
   }, [isDemo]);
 
   const resolved = useMemo(() => resolveGames(records, new Set(myCodes)), [records, myCodes]);
+  const resolvedTeams = useMemo(() => resolveTeamGames(records, new Set(myCodes)), [records, myCodes]);
   const filtered = useMemo(() => applyFilters(resolved, filters), [resolved, filters]);
+  const filteredTeams = useMemo(() => applyTeamFilters(resolvedTeams, filters), [resolvedTeams, filters]);
   const candidates = useMemo(() => (phase === "identity" ? inferIdentity(records) : []), [phase, records]);
+
+  // Never strand the user in a teams view they have no games for.
+  const hasTeamGames = resolvedTeams.length > 0;
+  const showTeams = hasTeamGames && filters.format === "teams";
 
   return (
     <div className="shell">
@@ -132,7 +189,17 @@ export default function App() {
           </div>
           {phase === "dashboard" && (
             <div className="identity">
-              <b>{myCodes.join(", ") || "—"}</b> · {resolved.length.toLocaleString()} games{" "}
+              <b>{myCodes.join(", ") || "—"}</b> ·{" "}
+              {(showTeams ? resolvedTeams.length : resolved.length).toLocaleString()} {showTeams ? "2v2 games" : "games"}
+              {!isDemo && dirHandle && (
+                <button className="ghost" style={{ marginLeft: 10 }} onClick={onRefresh} disabled={syncing !== null}>
+                  {syncing
+                    ? syncing.total === 0
+                      ? "Scanning…"
+                      : `Parsing ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
+                    : "Refresh"}
+                </button>
+              )}
               <button className="ghost" style={{ marginLeft: 10 }} onClick={reset}>
                 {isDemo ? "Exit demo" : "Change folder"}
               </button>
@@ -151,7 +218,19 @@ export default function App() {
 
       {phase === "dashboard" && (
         <>
-          <FilterBar filters={filters} setFilters={setFilters} games={resolved} />
+          <FilterBar
+            filters={filters}
+            setFilters={setFilters}
+            games={resolved}
+            teamGames={resolvedTeams}
+            hasTeamGames={hasTeamGames}
+          />
+          {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
+              consolidated view rather than the singles tab set. */}
+          {showTeams ? (
+            <Teams games={filteredTeams} onSelectTeammate={(code) => setFilters({ ...filters, teammateCode: code })} />
+          ) : (
+        <>
           <div className="tabs" role="tablist">
             {TABS.map((t) => (
               <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
@@ -190,6 +269,8 @@ export default function App() {
           )}
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "log" && <GameLog games={filtered} />}
+        </>
+          )}
         </>
       )}
     </div>

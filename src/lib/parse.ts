@@ -41,6 +41,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       displayName: p.displayName || null,
       characterId: p.characterId ?? -1,
       colorId: p.characterColor ?? 0,
+      teamId: isTeams ? p.teamId ?? null : null,
       stocksRemaining: post?.stocksRemaining ?? null,
       kills: overall?.killCount ?? 0,
       totalDamage: overall?.totalDamage ?? 0,
@@ -81,6 +82,52 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     if (durationFrames < MIN_GAME_SECONDS * 60) winnerIndex = null;
   }
 
+  // --- Win/loss determination (teams) ---
+  // Same ladder as singles, resolved to a team rather than a player.
+  let winnerTeamId: number | null = null;
+  const teamIds = new Set(players.map((p) => p.teamId).filter((t): t is number => t !== null));
+  if (isTeams && players.length === 4 && teamIds.size === 2) {
+    const teamOfPlayerIndex = (playerIndex: number): number | null => {
+      const idx = settings.players.findIndex((p) => p.playerIndex === playerIndex);
+      return idx >= 0 ? players[idx].teamId : null;
+    };
+
+    const first = gameEnd?.placements?.find((pl) => pl.position === 0);
+    if (first?.playerIndex !== null && first?.playerIndex !== undefined) {
+      winnerTeamId = teamOfPlayerIndex(first.playerIndex);
+    }
+    if (winnerTeamId === null) {
+      if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
+        // Stock-out: the team with stocks left wins.
+        const stocks = new Map<number, number>();
+        let complete = true;
+        for (const p of players) {
+          if (p.teamId === null || p.stocksRemaining === null) {
+            complete = false;
+            break;
+          }
+          stocks.set(p.teamId, (stocks.get(p.teamId) ?? 0) + p.stocksRemaining);
+        }
+        if (complete && stocks.size === 2) {
+          const [[tA, sA], [tB, sB]] = Array.from(stocks.entries());
+          if (sA !== sB) winnerTeamId = sA > sB ? tA : tB;
+        }
+      } else if (
+        gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST &&
+        gameEnd.lrasInitiatorIndex !== null &&
+        gameEnd.lrasInitiatorIndex !== undefined &&
+        gameEnd.lrasInitiatorIndex >= 0
+      ) {
+        // Quit-out: the quitter's team takes the loss.
+        const quitterTeam = teamOfPlayerIndex(gameEnd.lrasInitiatorIndex);
+        if (quitterTeam !== null) {
+          winnerTeamId = Array.from(teamIds).find((t) => t !== quitterTeam) ?? null;
+        }
+      }
+    }
+    if (durationFrames < MIN_GAME_SECONDS * 60) winnerTeamId = null;
+  }
+
   return {
     id,
     path,
@@ -91,5 +138,6 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     isTeams,
     players,
     winnerIndex,
+    winnerTeamId,
   };
 }

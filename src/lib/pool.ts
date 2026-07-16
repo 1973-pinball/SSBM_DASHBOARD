@@ -115,6 +115,7 @@ export async function runParsePipeline(
             isTeams: false,
             players: [],
             winnerIndex: null,
+            winnerTeamId: null,
             parseError: res.error ?? "parse failed",
           });
         }

@@ -1,4 +1,4 @@
-import type { Filters, GameRecord, GameType, ResolvedGame } from "./types";
+import type { Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
 
 // ---------- Identity ----------
 
@@ -14,7 +14,8 @@ export function inferIdentity(records: GameRecord[]): CodeCandidate[] {
   const counts = new Map<string, { games: number; displayName: string | null }>();
   let withCodes = 0;
   for (const rec of records) {
-    if (rec.parseError || rec.players.length !== 2) continue;
+    // Teams games count too — a doubles-only player still needs an identity.
+    if (rec.parseError || rec.players.length < 2) continue;
     let counted = false;
     for (const p of rec.players) {
       if (!p.connectCode) continue;
@@ -47,6 +48,33 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
   return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
 }
 
+/**
+ * Resolve 2v2 games. Requires a clean 4-player, two-team game: anything odd
+ * (3v1, free-for-all with team flags, a missing teamId) is skipped rather than
+ * guessed at, since a wrong teammate silently corrupts every team stat.
+ */
+export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): ResolvedTeamGame[] {
+  const out: ResolvedTeamGame[] = [];
+  for (const rec of records) {
+    if (rec.parseError || !rec.isTeams || rec.players.length !== 4) continue;
+    const me = rec.players.find((p) => p.connectCode && myCodes.has(p.connectCode));
+    if (!me || me.teamId === null) continue;
+    const allies = rec.players.filter((p) => p !== me && p.teamId === me.teamId);
+    const opps = rec.players.filter((p) => p.teamId !== null && p.teamId !== me.teamId);
+    if (allies.length !== 1 || opps.length !== 2) continue;
+    const isWin = rec.winnerTeamId === null ? null : rec.winnerTeamId === me.teamId;
+    out.push({
+      rec,
+      me,
+      teammate: allies[0],
+      opps: [opps[0], opps[1]],
+      isWin,
+      date: rec.playedAt ? new Date(rec.playedAt) : null,
+    });
+  }
+  return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+}
+
 const RANGE_DAYS: Record<Exclude<Filters["range"], "all">, number> = { "30d": 30, "90d": 90, "1y": 365 };
 
 export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] {
@@ -58,6 +86,22 @@ export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] 
     if (f.oppCharacter !== null && g.opp.characterId !== f.oppCharacter) return false;
     if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
     if (f.opponentCode !== null && g.opp.connectCode !== f.opponentCode) return false;
+    if (f.gameType !== null && g.rec.gameType !== f.gameType) return false;
+    return true;
+  });
+}
+
+/** Same filters against a 2v2 game; opponent-side predicates match if *either* opponent matches. */
+export function applyTeamFilters(games: ResolvedTeamGame[], f: Filters): ResolvedTeamGame[] {
+  let cutoff: number | null = null;
+  if (f.range !== "all") cutoff = Date.now() - RANGE_DAYS[f.range] * 86_400_000;
+  return games.filter((g) => {
+    if (cutoff !== null && (!g.date || g.date.getTime() < cutoff)) return false;
+    if (f.myCharacter !== null && g.me.characterId !== f.myCharacter) return false;
+    if (f.oppCharacter !== null && !g.opps.some((o) => o.characterId === f.oppCharacter)) return false;
+    if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
+    if (f.opponentCode !== null && !g.opps.some((o) => o.connectCode === f.opponentCode)) return false;
+    if (f.teammateCode !== null && g.teammate.connectCode !== f.teammateCode) return false;
     if (f.gameType !== null && g.rec.gameType !== f.gameType) return false;
     return true;
   });
@@ -75,7 +119,10 @@ export interface WL {
   winRate: number | null;
 }
 
-export function tally(games: ResolvedGame[]): WL {
+/** Shared by singles and teams — both carry a nullable isWin. */
+type Decidable = { isWin: boolean | null };
+
+export function tally(games: Decidable[]): WL {
   let wins = 0;
   let losses = 0;
   for (const g of games) {
@@ -83,6 +130,20 @@ export function tally(games: ResolvedGame[]): WL {
     else if (g.isWin === false) losses++;
   }
   return { games: games.length, wins, losses, decided: wins + losses, winRate: winRate(wins, wins + losses) };
+}
+
+/** Current W/L streak over decided games, most recent last. */
+function streakOf(games: Decidable[]): { kind: "W" | "L"; length: number } | null {
+  let streak: { kind: "W" | "L"; length: number } | null = null;
+  for (let i = games.length - 1; i >= 0; i--) {
+    const w = games[i].isWin;
+    if (w === null) continue;
+    const kind = w ? "W" : "L";
+    if (!streak) streak = { kind, length: 1 };
+    else if (streak.kind === kind) streak.length++;
+    else break;
+  }
+  return streak;
 }
 
 export interface OverviewStats extends WL {
@@ -104,16 +165,7 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
     deaths += g.opp.kills;
     frames += g.rec.durationFrames;
   }
-  // Streak over decided games, most recent last.
-  let streak: OverviewStats["currentStreak"] = null;
-  for (let i = games.length - 1; i >= 0; i--) {
-    const w = games[i].isWin;
-    if (w === null) continue;
-    const kind = w ? "W" : "L";
-    if (!streak) streak = { kind, length: 1 };
-    else if (streak.kind === kind) streak.length++;
-    else break;
-  }
+  const streak = streakOf(games);
   // Prior-window comparison (only meaningful for bounded ranges).
   let prevWinRate: number | null = null;
   if (f.range !== "all") {
@@ -337,6 +389,132 @@ export function byMode(games: ResolvedGame[]): ModeRow[] {
     if (gs.length > 0) rows.push(mk(mode, gs));
   }
   return rows;
+}
+
+// ---------- Teams (2v2) ----------
+
+export interface TeamOverviewStats extends WL {
+  myKillsPerGame: number | null;
+  teamKillsPerGame: number | null;
+  avgGameSeconds: number | null;
+  currentStreak: { kind: "W" | "L"; length: number } | null;
+  distinctTeammates: number;
+}
+
+export function teamOverview(games: ResolvedTeamGame[]): TeamOverviewStats {
+  let myKills = 0;
+  let teamKills = 0;
+  let frames = 0;
+  const mates = new Set<string>();
+  for (const g of games) {
+    myKills += g.me.kills;
+    teamKills += g.me.kills + g.teammate.kills;
+    frames += g.rec.durationFrames;
+    mates.add(g.teammate.connectCode ?? `port:${g.teammate.port}`);
+  }
+  const n = games.length;
+  return {
+    ...tally(games),
+    myKillsPerGame: n ? myKills / n : null,
+    teamKillsPerGame: n ? teamKills / n : null,
+    avgGameSeconds: n ? frames / 60 / n : null,
+    currentStreak: streakOf(games),
+    distinctTeammates: mates.size,
+  };
+}
+
+export interface TeammateRow extends WL {
+  code: string;
+  displayName: string | null;
+  topCharacter: number;
+  myKillShare: number | null; // share of the duo's kills that were mine
+  lastPlayed: Date | null;
+}
+
+/** Win rate with each teammate. Offline games without connect codes are skipped. */
+export function byTeammate(games: ResolvedTeamGame[]): TeammateRow[] {
+  const map = new Map<
+    string,
+    { gs: ResolvedTeamGame[]; chars: Map<number, number>; name: string | null; last: Date | null; mine: number; duo: number }
+  >();
+  for (const g of games) {
+    const code = g.teammate.connectCode;
+    if (!code) continue;
+    let e = map.get(code);
+    if (!e) {
+      e = { gs: [], chars: new Map(), name: null, last: null, mine: 0, duo: 0 };
+      map.set(code, e);
+    }
+    e.gs.push(g);
+    e.chars.set(g.teammate.characterId, (e.chars.get(g.teammate.characterId) ?? 0) + 1);
+    e.name = g.teammate.displayName ?? e.name;
+    if (g.date && (!e.last || g.date > e.last)) e.last = g.date;
+    e.mine += g.me.kills;
+    e.duo += g.me.kills + g.teammate.kills;
+  }
+  return Array.from(map.entries())
+    .map(([code, e]) => ({
+      code,
+      displayName: e.name,
+      topCharacter: Array.from(e.chars.entries()).sort((a, b) => b[1] - a[1])[0][0],
+      myKillShare: e.duo > 0 ? e.mine / e.duo : null,
+      lastPlayed: e.last,
+      ...tally(e.gs),
+    }))
+    .sort((a, b) => b.games - a.games);
+}
+
+export interface TeamCharacterRow extends WL {
+  characterId: number;
+}
+
+export function teamsByMyCharacter(games: ResolvedTeamGame[]): TeamCharacterRow[] {
+  return teamCharRows(games, (g) => [g.me.characterId]);
+}
+
+/**
+ * Games in which the enemy duo included each character. A game is counted once
+ * per *distinct* opposing character, so a double-Fox team counts once for Fox.
+ */
+export function teamsByOppCharacter(games: ResolvedTeamGame[]): TeamCharacterRow[] {
+  return teamCharRows(games, (g) => Array.from(new Set(g.opps.map((o) => o.characterId))));
+}
+
+function teamCharRows(games: ResolvedTeamGame[], keys: (g: ResolvedTeamGame) => number[]): TeamCharacterRow[] {
+  const map = new Map<number, { games: number; wins: number; losses: number }>();
+  for (const g of games) {
+    for (const c of keys(g)) {
+      let row = map.get(c);
+      if (!row) {
+        row = { games: 0, wins: 0, losses: 0 };
+        map.set(c, row);
+      }
+      row.games++;
+      if (g.isWin === true) row.wins++;
+      else if (g.isWin === false) row.losses++;
+    }
+  }
+  return Array.from(map.entries())
+    .map(([characterId, r]) => ({
+      characterId,
+      games: r.games,
+      wins: r.wins,
+      losses: r.losses,
+      decided: r.wins + r.losses,
+      winRate: winRate(r.wins, r.wins + r.losses),
+    }))
+    .sort((a, b) => b.games - a.games);
+}
+
+export function teamsByStage(games: ResolvedTeamGame[]): StageRow[] {
+  const map = new Map<number, ResolvedTeamGame[]>();
+  for (const g of games) {
+    if (!map.has(g.rec.stageId)) map.set(g.rec.stageId, []);
+    map.get(g.rec.stageId)!.push(g);
+  }
+  return Array.from(map.entries())
+    .map(([stageId, gs]) => ({ stageId, ...tally(gs) }))
+    .sort((a, b) => b.games - a.games);
 }
 
 export interface WeekBar {

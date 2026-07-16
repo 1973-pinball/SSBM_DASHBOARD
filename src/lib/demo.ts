@@ -43,6 +43,21 @@ const MY_CHARS = [
   { id: 9, weight: 0.08, edge: -0.1 }, // Marth pocket
 ];
 
+interface Mate {
+  code: string;
+  name: string;
+  char: number;
+  synergy: number; // win-prob bump when teaming with them
+  weight: number;
+}
+
+const MATES: Mate[] = [
+  { code: "BUDD#1", name: "sameroom", char: 9, synergy: 0.14, weight: 20 }, // Marth — the good one
+  { code: "JIGG#404", name: "sleepytime", char: 15, synergy: 0.04, weight: 12 },
+  { code: "SPCE#12", name: "spaceanimal", char: 2, synergy: -0.02, weight: 9 },
+  { code: "RAND#0", name: "pubmate", char: 7, synergy: -0.11, weight: 5 }, // randoms drag it down
+];
+
 function pickWeighted<T extends { weight: number }>(rand: () => number, items: T[]): T {
   const total = items.reduce((s, x) => s + x.weight, 0);
   let r = rand() * total;
@@ -81,6 +96,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       displayName: isMe ? "demo" : rival.name,
       characterId: isMe ? mine.id : oppChar,
       colorId: 0,
+      teamId: null,
       stocksRemaining: kills === 4 ? Math.max(1, 4 - taken) : 0,
       kills,
       totalDamage: kills * (95 + rand() * 40),
@@ -105,6 +121,83 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       isTeams: false,
       players: [me, opp],
       winnerIndex: rare > 0.985 ? null : iWin ? 0 : 1, // ~1.5% indeterminate (quit-outs etc.)
+      winnerTeamId: null,
+    });
+  }
+  records.push(...generateDemoTeamRecords(rand, start, Math.round(count * 0.14)));
+  return records;
+}
+
+/** 2v2 games sharing the demo player's identity, so the Teams view has something to show. */
+function generateDemoTeamRecords(rand: () => number, start: number, count: number): GameRecord[] {
+  const records: GameRecord[] = [];
+  for (let i = 0; i < count; i++) {
+    const t = i / count;
+    const playedAt = new Date(start + t * 364 * 86_400_000 + rand() * 4 * 3_600_000);
+    const mate = pickWeighted(rand, MATES);
+    const mine = pickWeighted(rand, MY_CHARS.map((c) => ({ ...c, weight: c.weight * 100 })));
+    const rivalA = pickWeighted(rand, RIVALS);
+    let rivalB = pickWeighted(rand, RIVALS);
+    if (rivalB.code === rivalA.code) rivalB = RIVALS[(RIVALS.indexOf(rivalA) + 1) % RIVALS.length];
+
+    const pWin = Math.min(0.88, Math.max(0.12, 0.5 + mate.synergy + mine.edge + t * 0.06 + (rand() - 0.5) * 0.12));
+    const weWin = rand() < pWin;
+    const durationFrames = Math.floor((150 + rand() * 300) * 60);
+
+    // 8 team stocks total; the losing team is stocked out.
+    const ourStocks = weWin ? 1 + Math.floor(rand() * 4) : 0;
+    const theirStocks = weWin ? 0 : 1 + Math.floor(rand() * 4);
+    const split = 0.35 + rand() * 0.3; // how the duo's kills divide
+    const ourKills = 8 - theirStocks;
+    const theirKills = 8 - ourStocks;
+
+    const mk = (
+      port: number,
+      teamId: number,
+      code: string,
+      name: string,
+      characterId: number,
+      kills: number,
+      stocks: number,
+    ): PlayerSide => ({
+      port,
+      connectCode: code,
+      displayName: name,
+      characterId,
+      colorId: teamId,
+      teamId,
+      stocksRemaining: stocks,
+      kills,
+      totalDamage: kills * (90 + rand() * 45),
+      openingsPerKill: kills > 0 ? +(2.6 + rand() * 3.2).toFixed(2) : null,
+      damagePerOpening: +(16 + rand() * 16).toFixed(2),
+      inputsPerMinute: Math.floor(280 + rand() * 180),
+      neutralWins: Math.floor(5 + rand() * 16),
+      lCancelSuccess: Math.floor(durationFrames / 3600 * (26 + rand() * 12)),
+      lCancelFail: Math.floor(durationFrames / 3600 * (2 + rand() * 6)),
+    });
+
+    const myKills = Math.round(ourKills * split);
+    const theirA = Math.round(theirKills * (0.4 + rand() * 0.2));
+    const players: PlayerSide[] = [
+      mk(1, 0, DEMO_CODE, "demo", mine.id, myKills, Math.ceil(ourStocks / 2)),
+      mk(2, 0, mate.code, mate.name, mate.char, ourKills - myKills, Math.floor(ourStocks / 2)),
+      mk(3, 1, rivalA.code, rivalA.name, rivalA.chars[0], theirA, Math.ceil(theirStocks / 2)),
+      mk(4, 1, rivalB.code, rivalB.name, rivalB.chars[0], theirKills - theirA, Math.floor(theirStocks / 2)),
+    ];
+
+    const rare = rand();
+    records.push({
+      id: `demo-teams-${i}`,
+      path: `demo/Teams_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
+      playedAt: playedAt.toISOString(),
+      durationFrames,
+      stageId: LEGAL_STAGE_IDS[Math.floor(rand() * LEGAL_STAGE_IDS.length)],
+      gameType: rare < 0.7 ? "direct" : "unranked", // no ranked doubles matchmaking
+      isTeams: true,
+      players,
+      winnerIndex: null,
+      winnerTeamId: rare > 0.98 ? null : weWin ? 0 : 1,
     });
   }
   return records;

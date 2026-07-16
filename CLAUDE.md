@@ -14,14 +14,15 @@ folder pick ─► discovery (*.slp) ─► dedup vs IndexedDB ─► worker poo
 
 - `src/lib/pool.ts` — file discovery (FS Access API + `webkitdirectory` fallback), worker pool sized to `hardwareConcurrency`, batched flushes (25 records) so the UI streams in during parsing.
 - `src/worker/parser.worker.ts` + `src/lib/parse.ts` — one replay → one `GameRecord`. Stats-only: frame data is computed over then discarded. Corrupt files get tombstone records (`parseError` set) so they're never re-parsed.
-- `src/lib/db.ts` — Dexie/IndexedDB. Cache key is `path|size|mtime`. Browser-local persistence only.
+- `src/lib/db.ts` — Dexie/IndexedDB. Cache key is `path|size|mtime`. Browser-local persistence only. Also stores the picked `FileSystemDirectoryHandle` in `kv` so a return visit can re-walk the folder without re-prompting: the app auto-rescans on load when the permission is still granted, and the topbar **Refresh** button re-requests it (needed after a browser restart) — both dedup against the cache, so only new replays parse. **Change folder** is the full reset (`clearAll`).
 - `src/lib/stats.ts` — identity inference + all aggregation selectors. Pure functions over `ResolvedGame[]`.
 - `src/lib/demo.ts` — deterministic synthetic data (seeded PRNG); keep it deterministic.
 - `src/components/` — Overview, Matchups, Stages, Opponents, Execution, GameLog, filters.
 
 ## Key decisions (do not silently reverse)
 
-1. **Players are stored neutrally** in `GameRecord.players[]` with `winnerIndex`, NOT as self/opponent. Identity (the user's connect code(s)) is chosen after parsing and applied at query time (`resolveGames`). This makes alt accounts and identity changes free. Never bake "self" into the stored record.
+1. **Players are stored neutrally** in `GameRecord.players[]` with `winnerIndex` (singles) / `winnerTeamId` (teams), NOT as self/opponent. Identity (the user's connect code(s)) is chosen after parsing and applied at query time (`resolveGames` / `resolveTeamGames`). This makes alt accounts and identity changes free. Never bake "self" into the stored record.
+   - **Singles vs teams is an axis separate from `gameType`** — a 2v2 is still ranked/direct/offline. `Filters.format` switches the dashboard between the singles tab set and the single consolidated `Teams` view; the two never mix in one aggregation. Teams selectors resolve me/teammate/opps and win/loss at the team level. `resolveTeamGames` skips anything that isn't a clean 4-player two-team game rather than guessing a teammate.
 2. **Win/loss ladder**: gameEnd placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are `winnerIndex: null` (indeterminate) and excluded from win-rate denominators but still shown in the game log.
 3. **Frames are discarded.** Custom frame-level metrics (wavedash quality, ledgedashes) are a v2 feature behind an explicit opt-in re-parse — don't retain frames to make a feature easier.
 4. **The "By mode" panel on Overview ignores the mode filter** (applies all other filters) so overall/ranked/unranked/direct rows are always all visible for comparison. Preserve this when refactoring filters.
