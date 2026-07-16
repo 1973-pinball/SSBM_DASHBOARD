@@ -1,4 +1,4 @@
-import type { Filters, GameRecord, ResolvedGame } from "./types";
+import type { Filters, GameRecord, GameType, ResolvedGame } from "./types";
 
 // ---------- Identity ----------
 
@@ -302,6 +302,41 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
     });
   }
   return out;
+}
+
+export interface ModeRow extends WL {
+  mode: GameType | "overall";
+  killsPerGame: number | null;
+  deathsPerGame: number | null;
+  avgGameSeconds: number | null;
+}
+
+/** Overall + one row per game mode present in the data. */
+export function byMode(games: ResolvedGame[]): ModeRow[] {
+  const mk = (mode: ModeRow["mode"], gs: ResolvedGame[]): ModeRow => {
+    let kills = 0;
+    let deaths = 0;
+    let frames = 0;
+    for (const g of gs) {
+      kills += g.me.kills;
+      deaths += g.opp.kills;
+      frames += g.rec.durationFrames;
+    }
+    return {
+      mode,
+      ...tally(gs),
+      killsPerGame: gs.length ? kills / gs.length : null,
+      deathsPerGame: gs.length ? deaths / gs.length : null,
+      avgGameSeconds: gs.length ? frames / 60 / gs.length : null,
+    };
+  };
+  const order: GameType[] = ["ranked", "unranked", "direct", "offline", "unknown"];
+  const rows: ModeRow[] = [mk("overall", games)];
+  for (const mode of order) {
+    const gs = games.filter((g) => g.rec.gameType === mode);
+    if (gs.length > 0) rows.push(mk(mode, gs));
+  }
+  return rows;
 }
 
 export interface WeekBar {

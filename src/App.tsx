@@ -166,6 +166,7 @@ export default function App() {
               allGames={resolved}
               filters={filters}
               onSelectMyCharacter={(id) => setFilters({ ...filters, myCharacter: id })}
+              onSelectMode={(mode) => setFilters({ ...filters, gameType: mode })}
             />
           )}
           {tab === "matchups" && (

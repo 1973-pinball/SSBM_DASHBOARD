@@ -2,9 +2,9 @@ import { useMemo } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine,
 } from "recharts";
-import type { Filters, ResolvedGame } from "../lib/types";
-import { overview, rollingWinRate, byMyCharacter, gamesPerWeek } from "../lib/stats";
-import { pct, num, int, duration } from "../lib/format";
+import type { Filters, GameType, ResolvedGame } from "../lib/types";
+import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, applyFilters } from "../lib/stats";
+import { pct, num, int, duration, winRateColor } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 
@@ -13,6 +13,7 @@ interface Props {
   allGames: ResolvedGame[]; // unfiltered (for prior-window delta)
   filters: Filters;
   onSelectMyCharacter: (id: number) => void;
+  onSelectMode: (mode: GameType | null) => void;
 }
 
 const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
@@ -21,11 +22,16 @@ const tooltipStyle = {
   labelStyle: { color: "#9a93bd" },
 };
 
-export function Overview({ games, allGames, filters, onSelectMyCharacter }: Props) {
+export function Overview({ games, allGames, filters, onSelectMyCharacter, onSelectMode }: Props) {
   const stats = useMemo(() => overview(games, allGames, filters), [games, allGames, filters]);
   const rolling = useMemo(() => rollingWinRate(games), [games]);
   const chars = useMemo(() => byMyCharacter(games), [games]);
   const weeks = useMemo(() => gamesPerWeek(games), [games]);
+  // Mode breakdown ignores the mode filter itself so all sections stay visible.
+  const modes = useMemo(
+    () => byMode(applyFilters(allGames, { ...filters, gameType: null })),
+    [allGames, filters],
+  );
 
   const delta =
     stats.prevWinRate !== null && stats.winRate !== null ? (stats.winRate - stats.prevWinRate) * 100 : null;
@@ -50,6 +56,50 @@ export function Overview({ games, allGames, filters, onSelectMyCharacter }: Prop
           value={stats.currentStreak ? `${stats.currentStreak.kind}${stats.currentStreak.length}` : "—"}
           accent={stats.currentStreak && stats.currentStreak.kind === "W" && stats.currentStreak.length >= 5 ? "gold" : undefined}
         />
+      </div>
+
+      <div className="panel">
+        <h2>By mode</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Mode</th>
+              <th className="data">Games</th>
+              <th className="data">W–L</th>
+              <th className="data">Win rate</th>
+              <th className="data">Kills / game</th>
+              <th className="data">Deaths / game</th>
+              <th className="data">Avg length</th>
+            </tr>
+          </thead>
+          <tbody>
+            {modes.map((row) => {
+              const active =
+                (row.mode === "overall" && filters.gameType === null) || row.mode === filters.gameType;
+              return (
+                <tr
+                  key={row.mode}
+                  className="clickable"
+                  style={active ? { background: "var(--panel-2)" } : undefined}
+                  onClick={() => onSelectMode(row.mode === "overall" ? null : row.mode)}
+                >
+                  <td style={{ fontWeight: row.mode === "overall" ? 600 : 400, textTransform: "capitalize" }}>
+                    {row.mode}
+                  </td>
+                  <td className="data">{row.games.toLocaleString()}</td>
+                  <td className="data">
+                    <span className="up">{row.wins}</span>–<span className="down">{row.losses}</span>
+                  </td>
+                  <td className="data" style={{ color: winRateColor(row.winRate) }}>{pct(row.winRate)}</td>
+                  <td className="data">{num(row.killsPerGame, 2)}</td>
+                  <td className="data">{num(row.deathsPerGame, 2)}</td>
+                  <td className="data">{duration(row.avgGameSeconds)}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <div className="hint">Click a row to scope the whole dashboard to that mode; "overall" clears it.</div>
       </div>
 
       <div className="grid-2">
