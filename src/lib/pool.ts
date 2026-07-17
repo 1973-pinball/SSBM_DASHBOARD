@@ -58,10 +58,16 @@ export async function runParsePipeline(
   if (queue.length === 0) return;
 
   const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8));
-  const workers = Array.from(
-    { length: workerCount },
-    () => new Worker(new URL("../worker/parser.worker.ts", import.meta.url), { type: "module" }),
-  );
+  interface Slot {
+    worker: Worker;
+    job: DiscoveredFile | null;
+    dead: boolean;
+  }
+  const slots: Slot[] = Array.from({ length: workerCount }, () => ({
+    worker: new Worker(new URL("../worker/parser.worker.ts", import.meta.url), { type: "module" }),
+    job: null,
+    dead: false,
+  }));
 
   let next = 0;
   let pendingFlush: GameRecord[] = [];
@@ -74,30 +80,34 @@ export async function runParsePipeline(
     onProgress({ ...progress }, batch);
   };
 
-  await new Promise<void>((resolve) => {
+  await new Promise<void>((resolve, reject) => {
     let inFlight = 0;
 
-    const feed = (worker: Worker) => {
+    const feed = (slot: Slot) => {
+      if (slot.dead) return;
       if (next >= queue.length) {
         if (inFlight === 0) resolve();
         return;
       }
       const job = queue[next++];
+      slot.job = job;
       inFlight++;
       job.file
         .arrayBuffer()
-        .then((buf) => worker.postMessage({ id: job.id, path: job.path, buf }, [buf]))
+        .then((buf) => slot.worker.postMessage({ id: job.id, path: job.path, buf }, [buf]))
         .catch(() => {
           inFlight--;
+          slot.job = null;
           progress.done++;
           progress.errors++;
-          feed(worker);
+          feed(slot);
         });
     };
 
-    for (const worker of workers) {
-      worker.onmessage = (e: MessageEvent) => {
+    for (const slot of slots) {
+      slot.worker.onmessage = (e: MessageEvent) => {
         inFlight--;
+        slot.job = null;
         progress.done++;
         const res = e.data as { ok: boolean; record?: GameRecord; id: string; path: string; error?: string };
         if (res.ok && res.record) {
@@ -120,13 +130,34 @@ export async function runParsePipeline(
           });
         }
         if (pendingFlush.length >= BATCH_FLUSH) void flush();
-        feed(worker);
+        feed(slot);
       };
-      feed(worker);
+      // A worker that dies — most commonly its script 404ing because a new
+      // deploy replaced the hashed chunk while this tab was open — never posts
+      // a message, which used to hang the pipeline at "0 / N" forever. The
+      // file is fine, so requeue it (no tombstone) and drop the worker; when
+      // every worker is gone, fail loudly instead of waiting.
+      slot.worker.onerror = () => {
+        slot.dead = true;
+        slot.worker.terminate();
+        if (slot.job) {
+          inFlight--;
+          queue.push(slot.job);
+          slot.job = null;
+        }
+        const alive = slots.filter((s) => !s.dead);
+        if (alive.length === 0) {
+          reject(new Error("All parse workers failed to start (often a stale tab after a site update)."));
+          return;
+        }
+        // Wake idle survivors so the requeued job isn't stranded.
+        for (const s of alive) if (s.job === null) feed(s);
+      };
+      feed(slot);
     }
   });
 
   await flush();
   onProgress({ ...progress }, []);
-  workers.forEach((w) => w.terminate());
+  slots.forEach((s) => s.worker.terminate());
 }

@@ -36,6 +36,7 @@ export default function App() {
   const [showGuide, setShowGuide] = useState(false);
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
+  const [pipelineError, setPipelineError] = useState<string | null>(null);
   const autoSyncDone = useRef(false);
 
   const supportsFsAccess = typeof window !== "undefined" && "showDirectoryPicker" in window;
@@ -60,6 +61,7 @@ export default function App() {
   const startPipeline = useCallback(
     async (discover: () => Promise<{ id: string; path: string; file: File }[]>) => {
       setPhase("parsing");
+      setPipelineError(null);
       try {
         const files = await discover();
         if (files.length === 0) {
@@ -81,6 +83,10 @@ export default function App() {
         }
       } catch (err) {
         console.error(err);
+        // AbortError is the user cancelling the folder picker — not a failure.
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setPipelineError("Parsing failed to start. Reload the page and try again — this usually happens when the site updated while this tab was open.");
+        }
         setPhase("landing");
       } finally {
         setProgress(null);
@@ -96,6 +102,7 @@ export default function App() {
    */
   const syncFolder = useCallback(async (handle: FileSystemDirectoryHandle) => {
     setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0 });
+    setPipelineError(null);
     try {
       const files = await discoverFromHandle(handle);
       await runParsePipeline(files, (p, newRecords) => {
@@ -104,6 +111,7 @@ export default function App() {
       });
     } catch (err) {
       console.error(err);
+      setPipelineError("Refresh failed mid-scan. Reload the page and try again — this usually happens when the site updated while this tab was open.");
     } finally {
       setSyncing(null);
     }
@@ -210,6 +218,15 @@ export default function App() {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {pipelineError && (
+        <div className="error-note" role="alert">
+          {pipelineError}
+          <button className="ghost" style={{ marginLeft: 10 }} onClick={() => window.location.reload()}>
+            Reload
+          </button>
         </div>
       )}
 
