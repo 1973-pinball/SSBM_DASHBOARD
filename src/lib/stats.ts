@@ -457,6 +457,33 @@ export function lCancelSeries(games: ResolvedGame[], limit = 500): LCancelPoint[
   return out;
 }
 
+export interface GameSeriesPoint {
+  index: number;
+  date: string;
+  [metric: string]: number | string;
+}
+
+/**
+ * One point per game for arbitrary picked metrics — same shape and cap
+ * rationale as lCancelSeries (recent `limit` games keep charts renderable
+ * on 30k-game libraries).
+ */
+export function perGameSeries(
+  games: ResolvedGame[],
+  picks: { key: string; value: (g: ResolvedGame) => number }[],
+  limit = 500,
+): GameSeriesPoint[] {
+  const start = Math.max(0, games.length - limit);
+  const out: GameSeriesPoint[] = [];
+  for (let i = start; i < games.length; i++) {
+    const g = games[i];
+    const point: GameSeriesPoint = { index: i + 1, date: g.date?.toISOString().slice(0, 10) ?? "" };
+    for (const p of picks) point[p.key] = p.value(g);
+    out.push(point);
+  }
+  return out;
+}
+
 export interface ModeRow extends WL {
   mode: GameType | "overall";
   killsPerGame: number | null;

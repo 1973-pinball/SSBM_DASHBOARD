@@ -292,6 +292,38 @@ tr.clickable:hover td { background: var(--panel-2); cursor: pointer; }
   border-bottom: 2px solid var(--accent);
 }
 
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-family: var(--font-data);
+  cursor: pointer;
+}
+
+.chip.on {
+  color: var(--text);
+  background: var(--bg-raised);
+}
+
+.chip .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
 .error-note {
   background: rgba(240, 86, 79, 0.12);
   border: 1px solid rgba(240, 86, 79, 0.45);

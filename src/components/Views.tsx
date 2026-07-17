@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary, perGameSeries } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
@@ -235,6 +235,117 @@ const EXEC_CHARTS = [
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
 ] as const;
 
+interface SeriesDef {
+  key: string;
+  label: string;
+  color: string;
+  value: (g: ResolvedGame) => number;
+}
+
+const NEUTRAL_SERIES: SeriesDef[] = [
+  { key: "neutralWins", label: "Neutral wins", color: "var(--accent)", value: (g) => g.me.neutralWins },
+  { key: "counterHits", label: "Counter hits", color: "#e8b54d", value: (g) => g.me.counterHits },
+  { key: "beneficialTrades", label: "Beneficial trades", color: "#3fcf8e", value: (g) => g.me.beneficialTrades },
+];
+
+const ACTION_COLORS: Record<string, string> = {
+  rolls: "#f0564f",
+  airDodges: "#e8b54d",
+  spotDodges: "#e87fd0",
+  wavedashes: "#8f7ff7",
+  wavelands: "#6db3f2",
+  dashDances: "#3fcf8e",
+  ledgeGrabs: "#9adb4f",
+};
+
+const ACTION_SERIES: SeriesDef[] = ACTION_LABELS.map(({ key, label }) => ({
+  key,
+  label,
+  color: ACTION_COLORS[key],
+  value: (g) => g.me.actions?.[key] ?? 0,
+}));
+
+/** Per-game line chart with chip toggles choosing which metrics are plotted. */
+function PerGameMetricChart({
+  title,
+  games,
+  series,
+  defaults,
+}: {
+  title: string;
+  games: ResolvedGame[];
+  series: SeriesDef[];
+  defaults: string[];
+}) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set(defaults));
+  // All metrics are computed once; the chips only toggle which lines render.
+  const data = useMemo(() => perGameSeries(games, series), [games, series]);
+
+  const toggle = (key: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+
+  return (
+    <div className="panel">
+      <h2>{title}</h2>
+      <div className="chip-row">
+        {series.map((s) => {
+          const on = selected.has(s.key);
+          return (
+            <button
+              key={s.key}
+              className={`chip ${on ? "on" : ""}`}
+              aria-pressed={on}
+              style={on ? { borderColor: s.color } : undefined}
+              onClick={() => toggle(s.key)}
+            >
+              <span className="dot" style={{ background: s.color, opacity: on ? 1 : 0.35 }} />
+              {s.label}
+            </button>
+          );
+        })}
+      </div>
+      {selected.size === 0 ? (
+        <div className="empty-note">Pick at least one metric above.</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={220}>
+          <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+            {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
+            <XAxis
+              dataKey="index"
+              tick={axisStyle}
+              tickLine={false}
+              axisLine={{ stroke: "#34305a" }}
+              minTickGap={48}
+              tickFormatter={(v: number) => (data[v - data[0].index] as { date?: string })?.date ?? ""}
+            />
+            <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
+            <Tooltip
+              {...tooltipStyle}
+              labelFormatter={(v, payload) => {
+                const d = payload?.[0]?.payload?.date;
+                return d ? `Game ${v} — ${d}` : `Game ${v}`;
+              }}
+              formatter={(v, name) => [int(Number(v)), name]}
+            />
+            <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
+            {series
+              .filter((s) => selected.has(s.key))
+              .map((s) => (
+                <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={false} />
+              ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )}
+      <div className="hint">Each point is one game{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()})` : ""}.</div>
+    </div>
+  );
+}
+
 export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
   const lcVolume = useMemo(() => lCancelSeries(games), [games]);
@@ -293,6 +404,20 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
           between the lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
         </div>
       </div>
+
+      <PerGameMetricChart
+        title="Neutral exchanges — per game"
+        games={games}
+        series={NEUTRAL_SERIES}
+        defaults={["beneficialTrades"]}
+      />
+
+      <PerGameMetricChart
+        title="Actions — per game"
+        games={games}
+        series={ACTION_SERIES}
+        defaults={["wavedashes"]}
+      />
 
       <div className="panel">
         <h2>Neutral summary</h2>
