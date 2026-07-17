@@ -244,7 +244,7 @@ export interface ActionAverageRow {
 export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
   if (games.length === 0) return [];
   const totals: Record<keyof ActionCounts, number> = {
-    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0,
+    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
   };
   let frames = 0;
   for (const g of games) {
@@ -403,6 +403,7 @@ export interface ExecutionPoint {
   opk: number | null;
   dpo: number | null;
   ipm: number | null;
+  oppIpm: number | null;
 }
 
 export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoint[] {
@@ -410,13 +411,14 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
   for (let i = 0; i < games.length; i++) {
     if ((i + 1) % Math.max(1, Math.floor(window / 3)) !== 0 && i !== games.length - 1) continue;
     const slice = games.slice(Math.max(0, i - window + 1), i + 1);
-    let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0;
+    let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0, oppIpmSum = 0, oppIpmN = 0;
     for (const g of slice) {
       lcS += g.me.lCancelSuccess;
       lcF += g.me.lCancelFail;
       if (g.me.openingsPerKill !== null) { opkSum += g.me.openingsPerKill; opkN++; }
       if (g.me.damagePerOpening !== null) { dpoSum += g.me.damagePerOpening; dpoN++; }
       if (g.me.inputsPerMinute !== null) { ipmSum += g.me.inputsPerMinute; ipmN++; }
+      if (g.opp.inputsPerMinute !== null) { oppIpmSum += g.opp.inputsPerMinute; oppIpmN++; }
     }
     out.push({
       index: i + 1,
@@ -425,6 +427,7 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
       opk: opkN ? opkSum / opkN : null,
       dpo: dpoN ? dpoSum / dpoN : null,
       ipm: ipmN ? ipmSum / ipmN : null,
+      oppIpm: oppIpmN ? oppIpmSum / oppIpmN : null,
     });
   }
   return out;

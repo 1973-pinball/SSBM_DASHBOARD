@@ -53,6 +53,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       beneficialTrades: overall?.beneficialTradeRatio?.count ?? 0,
       lCancelSuccess: actions?.lCancelCount?.success ?? 0,
       lCancelFail: actions?.lCancelCount?.fail ?? 0,
+      grabSuccess: actions?.grabCount?.success ?? 0,
       actions: {
         rolls: actions?.rollCount ?? 0,
         airDodges: actions?.airDodgeCount ?? 0,
@@ -61,6 +62,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
         wavelands: actions?.wavelandCount ?? 0,
         dashDances: actions?.dashDanceCount ?? 0,
         ledgeGrabs: actions?.ledgegrabCount ?? 0,
+        grabs: (actions?.grabCount?.success ?? 0) + (actions?.grabCount?.fail ?? 0),
       },
     };
   });

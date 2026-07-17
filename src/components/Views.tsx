@@ -228,12 +228,18 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
 
 // ---------------- Execution ----------------
 
-const EXEC_CHARTS = [
+const EXEC_CHARTS: {
+  key: string;
+  label: string;
+  unit: string;
+  color: string;
+  compare?: { key: string; label: string; color: string };
+}[] = [
   { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)" },
   { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d" },
   { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e" },
-  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
-] as const;
+  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: "#f0564f" } },
+];
 
 interface SeriesDef {
   key: string;
@@ -256,6 +262,7 @@ const ACTION_COLORS: Record<string, string> = {
   wavelands: "#6db3f2",
   dashDances: "#3fcf8e",
   ledgeGrabs: "#9adb4f",
+  grabs: "#f2985e",
 };
 
 const ACTION_SERIES: SeriesDef[] = ACTION_LABELS.map(({ key, label }) => ({
@@ -362,8 +369,21 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
               <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
                 <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
                 <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={c.unit} />
-                <Tooltip {...tooltipStyle} formatter={(v) => [`${Number(v).toFixed(1)}${c.unit}`, c.label]} />
-                <Line type="monotone" dataKey={c.key} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
+                <Tooltip {...tooltipStyle} formatter={(v, name) => [`${Number(v).toFixed(1)}${c.unit}`, name]} />
+                {c.compare && <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />}
+                <Line type="monotone" dataKey={c.key} name={c.compare ? "Me" : c.label} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
+                {c.compare && (
+                  <Line
+                    type="monotone"
+                    dataKey={c.compare.key}
+                    name={c.compare.label}
+                    stroke={c.compare.color}
+                    strokeWidth={2}
+                    strokeDasharray="5 4"
+                    dot={false}
+                    connectNulls
+                  />
+                )}
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -500,7 +520,14 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) =
     },
   },
   { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
-  ...ACTION_LABELS.map(({ key, label }) => ({
+  {
+    label: "Grabs (landed)",
+    value: (p) => {
+      const attempts = p.actions?.grabs ?? 0;
+      return attempts === 0 ? "—" : `${p.grabSuccess}/${attempts} (${pct(p.grabSuccess / attempts, 0)})`;
+    },
+  },
+  ...ACTION_LABELS.filter(({ key }) => key !== "grabs").map(({ key, label }) => ({
     label,
     value: (p: PlayerSide) => int(p.actions?.[key] ?? null),
   })),

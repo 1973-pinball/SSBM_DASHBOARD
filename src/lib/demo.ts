@@ -12,6 +12,7 @@ function mkActions(rand: () => number, minutes: number, tech: number): ActionCou
     wavelands: per(2 + tech * 4, 3),
     dashDances: per(12 + tech * 14, 10),
     ledgeGrabs: per(1.5, 2),
+    grabs: per(2.5, 2.5),
   };
 }
 
@@ -104,7 +105,9 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const lcAttempts = Math.floor(minutes * (26 + rand() * 14));
     const lcRate = Math.min(0.98, 0.68 + t * 0.16 + (rand() - 0.5) * 0.1);
 
-    const mkSide = (kills: number, taken: number, isMe: boolean): PlayerSide => ({
+    const mkSide = (kills: number, taken: number, isMe: boolean): PlayerSide => {
+      const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
+      return {
       port: isMe ? 1 : 2,
       connectCode: isMe ? DEMO_CODE : rival.code,
       displayName: isMe ? "demo" : rival.name,
@@ -122,8 +125,10 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       beneficialTrades: Math.floor(rand() * 3),
       lCancelSuccess: isMe ? Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * (0.6 + rand() * 0.3)),
       lCancelFail: isMe ? lcAttempts - Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * 0.3),
-      actions: mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5),
-    });
+      grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
+      actions: acts,
+      };
+    };
 
     const me = mkSide(myKills, oppKills, true);
     const opp = mkSide(oppKills, myKills, false);
@@ -176,26 +181,30 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       characterId: number,
       kills: number,
       stocks: number,
-    ): PlayerSide => ({
-      port,
-      connectCode: code,
-      displayName: name,
-      characterId,
-      colorId: teamId,
-      teamId,
-      stocksRemaining: stocks,
-      kills,
-      totalDamage: kills * (90 + rand() * 45),
-      openingsPerKill: kills > 0 ? +(2.6 + rand() * 3.2).toFixed(2) : null,
-      damagePerOpening: +(16 + rand() * 16).toFixed(2),
-      inputsPerMinute: Math.floor(280 + rand() * 180),
-      neutralWins: Math.floor(5 + rand() * 16),
-      counterHits: Math.floor(2 + rand() * 8),
-      beneficialTrades: Math.floor(rand() * 3),
-      lCancelSuccess: Math.floor(durationFrames / 3600 * (26 + rand() * 12)),
-      lCancelFail: Math.floor(durationFrames / 3600 * (2 + rand() * 6)),
-      actions: mkActions(rand, durationFrames / 3600, 0.3 + rand() * 0.5),
-    });
+    ): PlayerSide => {
+      const acts = mkActions(rand, durationFrames / 3600, 0.3 + rand() * 0.5);
+      return {
+        port,
+        connectCode: code,
+        displayName: name,
+        characterId,
+        colorId: teamId,
+        teamId,
+        stocksRemaining: stocks,
+        kills,
+        totalDamage: kills * (90 + rand() * 45),
+        openingsPerKill: kills > 0 ? +(2.6 + rand() * 3.2).toFixed(2) : null,
+        damagePerOpening: +(16 + rand() * 16).toFixed(2),
+        inputsPerMinute: Math.floor(280 + rand() * 180),
+        neutralWins: Math.floor(5 + rand() * 16),
+        counterHits: Math.floor(2 + rand() * 8),
+        beneficialTrades: Math.floor(rand() * 3),
+        lCancelSuccess: Math.floor(durationFrames / 3600 * (26 + rand() * 12)),
+        lCancelFail: Math.floor(durationFrames / 3600 * (2 + rand() * 6)),
+        grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
+        actions: acts,
+      };
+    };
 
     const myKills = Math.round(ourKills * split);
     const theirA = Math.round(theirKills * (0.4 + rand() * 0.2));

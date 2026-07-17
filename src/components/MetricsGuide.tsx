@@ -68,7 +68,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
       },
       {
         term: "Actions per game",
-        def: "Counts of detected movement and defensive actions — rolls, air dodges, spot dodges, wavedashes, wavelands, dash dances, ledge grabs. High roll counts usually signal panic options; wavedash/dash-dance volume tracks movement-heavy play. The per-minute column is fairer when comparing filters with different game lengths.",
+        def: "Counts of detected movement and defensive actions — rolls, air dodges, spot dodges, wavedashes, wavelands, dash dances, ledge grabs, grabs. High roll counts usually signal panic options; wavedash/dash-dance volume tracks movement-heavy play. The per-minute column is fairer when comparing filters with different game lengths.",
+      },
+      {
+        term: "Grabs",
+        def: "All grab attempts (landed + whiffed) — standing, dash, and out-of-shield together. Replay stats can't isolate shield grabs specifically; that needs frame-level analysis, which is a possible future opt-in feature. The game log drill-down shows landed/attempts with the success rate.",
       },
     ],
   },

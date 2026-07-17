@@ -12,6 +12,7 @@ export interface ActionCounts {
   wavelands: number;
   dashDances: number;
   ledgeGrabs: number;
+  grabs: number; // attempts (landed + whiffed); slippi-js can't isolate shield grabs
 }
 
 export const ACTION_LABELS: { key: keyof ActionCounts; label: string }[] = [
@@ -22,6 +23,7 @@ export const ACTION_LABELS: { key: keyof ActionCounts; label: string }[] = [
   { key: "wavelands", label: "Wavelands" },
   { key: "dashDances", label: "Dash dances" },
   { key: "ledgeGrabs", label: "Ledge grabs" },
+  { key: "grabs", label: "Grabs" },
 ];
 
 export interface PlayerSide {
@@ -42,6 +44,7 @@ export interface PlayerSide {
   beneficialTrades: number;
   lCancelSuccess: number;
   lCancelFail: number;
+  grabSuccess: number; // landed grabs; actions.grabs is total attempts
   actions: ActionCounts;
 }
 

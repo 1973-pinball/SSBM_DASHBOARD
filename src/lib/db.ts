@@ -49,6 +49,15 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("games").clear();
       });
+    // v5 added grab counts; same missing-field reasoning.
+    this.version(5)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("games").clear();
+      });
   }
 }
 
