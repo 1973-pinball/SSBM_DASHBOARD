@@ -29,8 +29,8 @@ export function Teams({ games, onSelectTeammate }: Props) {
         <Kpi label="Team win rate" value={pct(stats.winRate)} />
         <Kpi label="Record" value={`${stats.wins}–${stats.losses}`} />
         <Kpi label="Teammates" value={int(stats.distinctTeammates)} />
-        <Kpi label="My kills / game" value={num(stats.myKillsPerGame, 2)} />
-        <Kpi label="Team kills / game" value={num(stats.teamKillsPerGame, 2)} />
+        <Kpi label="Stocks taken / game" value={num(stats.stocksTakenPerGame, 2)} />
+        <Kpi label="Stocks lost / game" value={num(stats.stocksLostPerGame, 2)} />
         <Kpi label="Avg length" value={duration(stats.avgGameSeconds)} />
         <Kpi
           label="Streak"
@@ -50,7 +50,7 @@ export function Teams({ games, onSelectTeammate }: Props) {
               <th className="data">Games</th>
               <th className="data">W–L</th>
               <th className="data">Win rate</th>
-              <th className="data">My kill share</th>
+              <th className="data">Stocks taken / game</th>
               <th className="data">Last played</th>
             </tr>
           </thead>
@@ -65,7 +65,7 @@ export function Teams({ games, onSelectTeammate }: Props) {
                   <span className="up">{r.wins}</span>–<span className="down">{r.losses}</span>
                 </td>
                 <td className="data" style={{ color: winRateColor(r.winRate) }}>{pct(r.winRate)}</td>
-                <td className="data">{pct(r.myKillShare, 0)}</td>
+                <td className="data">{num(r.stocksTakenPerGame, 2)}</td>
                 <td className="data">{shortDate(r.lastPlayed)}</td>
               </tr>
             ))}
@@ -75,7 +75,8 @@ export function Teams({ games, onSelectTeammate }: Props) {
           <div className="hint">No teammates with connect codes — offline doubles don't record them.</div>
         ) : (
           <div className="hint">
-            Kill share is your portion of the duo's kills; it measures involvement, not carry. Click a row to filter to that teammate.
+            Stocks taken is the duo's combined count — per-player kill attribution isn't available in 2v2 replays (Slippi's
+            stat engine is singles-only). Click a row to filter to that teammate.
           </div>
         )}
       </div>

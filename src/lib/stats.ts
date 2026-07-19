@@ -525,30 +525,39 @@ export function byMode(games: ResolvedGame[]): ModeRow[] {
 // ---------- Teams (2v2) ----------
 
 export interface TeamOverviewStats extends WL {
-  myKillsPerGame: number | null;
-  teamKillsPerGame: number | null;
+  // Stock counts come from end-of-game state, the only per-player data slippi-js
+  // yields for 4-player games (its stats engine — kills, damage, conversions —
+  // is singles-only, so those fields are always 0 in teams records).
+  stocksTakenPerGame: number | null;
+  stocksLostPerGame: number | null;
   avgGameSeconds: number | null;
   currentStreak: { kind: "W" | "L"; length: number } | null;
   distinctTeammates: number;
 }
 
+const START_STOCKS = 4; // standard ruleset; replays don't reliably carry startStocks
+
 export function teamOverview(games: ResolvedTeamGame[]): TeamOverviewStats {
-  let myKills = 0;
-  let teamKills = 0;
+  let taken = 0;
+  let lost = 0;
+  let stockGames = 0;
   let frames = 0;
   const mates = new Set<string>();
   for (const g of games) {
-    myKills += g.me.kills;
-    teamKills += g.me.kills + g.teammate.kills;
     frames += g.rec.durationFrames;
     mates.add(g.teammate.connectCode ?? `port:${g.teammate.port}`);
+    const rem = [g.opps[0], g.opps[1], g.me, g.teammate].map((p) => p.stocksRemaining);
+    if (rem.every((r) => r !== null)) {
+      taken += START_STOCKS - rem[0]! + (START_STOCKS - rem[1]!);
+      lost += START_STOCKS - rem[2]! + (START_STOCKS - rem[3]!);
+      stockGames++;
+    }
   }
-  const n = games.length;
   return {
     ...tally(games),
-    myKillsPerGame: n ? myKills / n : null,
-    teamKillsPerGame: n ? teamKills / n : null,
-    avgGameSeconds: n ? frames / 60 / n : null,
+    stocksTakenPerGame: stockGames ? taken / stockGames : null,
+    stocksLostPerGame: stockGames ? lost / stockGames : null,
+    avgGameSeconds: games.length ? frames / 60 / games.length : null,
     currentStreak: streakOf(games),
     distinctTeammates: mates.size,
   };
@@ -558,7 +567,7 @@ export interface TeammateRow extends WL {
   code: string;
   displayName: string | null;
   topCharacter: number;
-  myKillShare: number | null; // share of the duo's kills that were mine
+  stocksTakenPerGame: number | null; // team stocks taken; per-player kills don't exist for teams
   lastPlayed: Date | null;
 }
 
@@ -566,29 +575,31 @@ export interface TeammateRow extends WL {
 export function byTeammate(games: ResolvedTeamGame[]): TeammateRow[] {
   const map = new Map<
     string,
-    { gs: ResolvedTeamGame[]; chars: Map<number, number>; name: string | null; last: Date | null; mine: number; duo: number }
+    { gs: ResolvedTeamGame[]; chars: Map<number, number>; name: string | null; last: Date | null; taken: number; stockGames: number }
   >();
   for (const g of games) {
     const code = g.teammate.connectCode;
     if (!code) continue;
     let e = map.get(code);
     if (!e) {
-      e = { gs: [], chars: new Map(), name: null, last: null, mine: 0, duo: 0 };
+      e = { gs: [], chars: new Map(), name: null, last: null, taken: 0, stockGames: 0 };
       map.set(code, e);
     }
     e.gs.push(g);
     e.chars.set(g.teammate.characterId, (e.chars.get(g.teammate.characterId) ?? 0) + 1);
     e.name = g.teammate.displayName ?? e.name;
     if (g.date && (!e.last || g.date > e.last)) e.last = g.date;
-    e.mine += g.me.kills;
-    e.duo += g.me.kills + g.teammate.kills;
+    if (g.opps[0].stocksRemaining !== null && g.opps[1].stocksRemaining !== null) {
+      e.taken += START_STOCKS - g.opps[0].stocksRemaining + (START_STOCKS - g.opps[1].stocksRemaining);
+      e.stockGames++;
+    }
   }
   return Array.from(map.entries())
     .map(([code, e]) => ({
       code,
       displayName: e.name,
       topCharacter: Array.from(e.chars.entries()).sort((a, b) => b[1] - a[1])[0][0],
-      myKillShare: e.duo > 0 ? e.mine / e.duo : null,
+      stocksTakenPerGame: e.stockGames ? e.taken / e.stockGames : null,
       lastPlayed: e.last,
       ...tally(e.gs),
     }))

@@ -169,9 +169,6 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
     // 8 team stocks total; the losing team is stocked out.
     const ourStocks = weWin ? 1 + Math.floor(rand() * 4) : 0;
     const theirStocks = weWin ? 0 : 1 + Math.floor(rand() * 4);
-    const split = 0.35 + rand() * 0.3; // how the duo's kills divide
-    const ourKills = 8 - theirStocks;
-    const theirKills = 8 - ourStocks;
 
     const mk = (
       port: number,
@@ -179,40 +176,37 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       code: string,
       name: string,
       characterId: number,
-      kills: number,
       stocks: number,
-    ): PlayerSide => {
-      const acts = mkActions(rand, durationFrames / 3600, 0.3 + rand() * 0.5);
-      return {
-        port,
-        connectCode: code,
-        displayName: name,
-        characterId,
-        colorId: teamId,
-        teamId,
-        stocksRemaining: stocks,
-        kills,
-        totalDamage: kills * (90 + rand() * 45),
-        openingsPerKill: kills > 0 ? +(2.6 + rand() * 3.2).toFixed(2) : null,
-        damagePerOpening: +(16 + rand() * 16).toFixed(2),
-        inputsPerMinute: Math.floor(280 + rand() * 180),
-        neutralWins: Math.floor(5 + rand() * 16),
-        counterHits: Math.floor(2 + rand() * 8),
-        beneficialTrades: Math.floor(rand() * 3),
-        lCancelSuccess: Math.floor(durationFrames / 3600 * (26 + rand() * 12)),
-        lCancelFail: Math.floor(durationFrames / 3600 * (2 + rand() * 6)),
-        grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
-        actions: acts,
-      };
-    };
+    ): PlayerSide => ({
+      port,
+      connectCode: code,
+      displayName: name,
+      characterId,
+      colorId: teamId,
+      teamId,
+      stocksRemaining: stocks,
+      // Mirror real parses: slippi-js's stat engine is singles-only, so teams
+      // records genuinely have zero kills/damage/actions. Faking values here
+      // hid a real bug once (kill share) — don't reintroduce them.
+      kills: 0,
+      totalDamage: 0,
+      openingsPerKill: null,
+      damagePerOpening: null,
+      inputsPerMinute: null,
+      neutralWins: 0,
+      counterHits: 0,
+      beneficialTrades: 0,
+      lCancelSuccess: 0,
+      lCancelFail: 0,
+      grabSuccess: 0,
+      actions: { rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0 },
+    });
 
-    const myKills = Math.round(ourKills * split);
-    const theirA = Math.round(theirKills * (0.4 + rand() * 0.2));
     const players: PlayerSide[] = [
-      mk(1, 0, DEMO_CODE, "demo", mine.id, myKills, Math.ceil(ourStocks / 2)),
-      mk(2, 0, mate.code, mate.name, mate.char, ourKills - myKills, Math.floor(ourStocks / 2)),
-      mk(3, 1, rivalA.code, rivalA.name, rivalA.chars[0], theirA, Math.ceil(theirStocks / 2)),
-      mk(4, 1, rivalB.code, rivalB.name, rivalB.chars[0], theirKills - theirA, Math.floor(theirStocks / 2)),
+      mk(1, 0, DEMO_CODE, "demo", mine.id, Math.ceil(ourStocks / 2)),
+      mk(2, 0, mate.code, mate.name, mate.char, Math.floor(ourStocks / 2)),
+      mk(3, 1, rivalA.code, rivalA.name, rivalA.chars[0], Math.ceil(theirStocks / 2)),
+      mk(4, 1, rivalB.code, rivalB.name, rivalB.chars[0], Math.floor(theirStocks / 2)),
     ];
 
     const rare = rand();

@@ -84,8 +84,8 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
         def: "Win/loss is decided per team, not per player — there is no individual result in doubles. The same 30-second / indeterminate rules apply.",
       },
       {
-        term: "My kill share",
-        def: "Your kills ÷ your duo's combined kills with that teammate. Around 50% means even involvement; it measures participation, not carrying — a support player who takes every edgeguard setup can be “low share, high value.”",
+        term: "Stocks taken / lost",
+        def: "Your duo's combined stocks taken from (or lost to) the enemy team, from end-of-game state. Per-player stats — kills, damage, L-cancels — don't exist in 2v2 replays: Slippi's stat engine only computes them for singles, so team-level stocks are the honest measure. Self-destructs count as stocks taken by the other team.",
       },
       {
         term: "Enemy team includes",
