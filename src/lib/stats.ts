@@ -238,6 +238,8 @@ export interface ActionAverageRow {
   label: string;
   perGame: number;
   perMinute: number;
+  oppPerGame: number;
+  oppPerMinute: number;
 }
 
 /** Average action counts per game (and per minute, for length-independent comparison). */
@@ -246,10 +248,16 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
   const totals: Record<keyof ActionCounts, number> = {
     rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
   };
+  const oppTotals: Record<keyof ActionCounts, number> = {
+    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
+  };
   let frames = 0;
   for (const g of games) {
     frames += g.rec.durationFrames;
-    for (const { key } of ACTION_LABELS) totals[key] += g.me.actions?.[key] ?? 0;
+    for (const { key } of ACTION_LABELS) {
+      totals[key] += g.me.actions?.[key] ?? 0;
+      oppTotals[key] += g.opp.actions?.[key] ?? 0;
+    }
   }
   const minutes = frames / 3600;
   return ACTION_LABELS.map(({ key, label }) => ({
@@ -257,6 +265,8 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
     label,
     perGame: totals[key] / games.length,
     perMinute: minutes > 0 ? totals[key] / minutes : 0,
+    oppPerGame: oppTotals[key] / games.length,
+    oppPerMinute: minutes > 0 ? oppTotals[key] / minutes : 0,
   }));
 }
 
@@ -403,6 +413,9 @@ export interface ExecutionPoint {
   opk: number | null;
   dpo: number | null;
   ipm: number | null;
+  oppLCancel: number | null;
+  oppOpk: number | null;
+  oppDpo: number | null;
   oppIpm: number | null;
 }
 
@@ -411,14 +424,19 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
   for (let i = 0; i < games.length; i++) {
     if ((i + 1) % Math.max(1, Math.floor(window / 3)) !== 0 && i !== games.length - 1) continue;
     const slice = games.slice(Math.max(0, i - window + 1), i + 1);
-    let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0, oppIpmSum = 0, oppIpmN = 0;
+    let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0;
+    let oLcS = 0, oLcF = 0, oOpkSum = 0, oOpkN = 0, oDpoSum = 0, oDpoN = 0, oIpmSum = 0, oIpmN = 0;
     for (const g of slice) {
       lcS += g.me.lCancelSuccess;
       lcF += g.me.lCancelFail;
+      oLcS += g.opp.lCancelSuccess;
+      oLcF += g.opp.lCancelFail;
       if (g.me.openingsPerKill !== null) { opkSum += g.me.openingsPerKill; opkN++; }
       if (g.me.damagePerOpening !== null) { dpoSum += g.me.damagePerOpening; dpoN++; }
       if (g.me.inputsPerMinute !== null) { ipmSum += g.me.inputsPerMinute; ipmN++; }
-      if (g.opp.inputsPerMinute !== null) { oppIpmSum += g.opp.inputsPerMinute; oppIpmN++; }
+      if (g.opp.openingsPerKill !== null) { oOpkSum += g.opp.openingsPerKill; oOpkN++; }
+      if (g.opp.damagePerOpening !== null) { oDpoSum += g.opp.damagePerOpening; oDpoN++; }
+      if (g.opp.inputsPerMinute !== null) { oIpmSum += g.opp.inputsPerMinute; oIpmN++; }
     }
     out.push({
       index: i + 1,
@@ -427,7 +445,10 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
       opk: opkN ? opkSum / opkN : null,
       dpo: dpoN ? dpoSum / dpoN : null,
       ipm: ipmN ? ipmSum / ipmN : null,
-      oppIpm: oppIpmN ? oppIpmSum / oppIpmN : null,
+      oppLCancel: oLcS + oLcF > 0 ? (oLcS / (oLcS + oLcF)) * 100 : null,
+      oppOpk: oOpkN ? oOpkSum / oOpkN : null,
+      oppDpo: oDpoN ? oDpoSum / oDpoN : null,
+      oppIpm: oIpmN ? oIpmSum / oIpmN : null,
     });
   }
   return out;

@@ -235,9 +235,9 @@ const EXEC_CHARTS: {
   color: string;
   compare?: { key: string; label: string; color: string };
 }[] = [
-  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)" },
-  { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d" },
-  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e" },
+  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)", compare: { key: "oppLCancel", label: "Opponents", color: "#f0564f" } },
+  { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d", compare: { key: "oppOpk", label: "Opponents", color: "#f0564f" } },
+  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e", compare: { key: "oppDpo", label: "Opponents", color: "#f0564f" } },
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: "#f0564f" } },
 ];
 
@@ -246,6 +246,8 @@ interface SeriesDef {
   label: string;
   color: string;
   value: (g: ResolvedGame) => number;
+  /** Opponent counterpart; when present the chart offers a "vs opponents" toggle that overlays dashed lines. */
+  oppValue?: (g: ResolvedGame) => number;
 }
 
 const NEUTRAL_SERIES: SeriesDef[] = [
@@ -270,6 +272,7 @@ const ACTION_SERIES: SeriesDef[] = ACTION_LABELS.map(({ key, label }) => ({
   label,
   color: ACTION_COLORS[key],
   value: (g) => g.me.actions?.[key] ?? 0,
+  oppValue: (g) => g.opp.actions?.[key] ?? 0,
 }));
 
 /** Per-game line chart with chip toggles choosing which metrics are plotted. */
@@ -285,8 +288,17 @@ function PerGameMetricChart({
   defaults: string[];
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(defaults));
-  // All metrics are computed once; the chips only toggle which lines render.
-  const data = useMemo(() => perGameSeries(games, series), [games, series]);
+  const [showOpp, setShowOpp] = useState(false);
+  const hasOpp = series.some((s) => s.oppValue);
+  // All metrics (including opponent counterparts) are computed once; the chips only toggle which lines render.
+  const data = useMemo(
+    () =>
+      perGameSeries(games, [
+        ...series,
+        ...series.filter((s) => s.oppValue).map((s) => ({ key: `opp:${s.key}`, value: s.oppValue! })),
+      ]),
+    [games, series],
+  );
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -315,6 +327,17 @@ function PerGameMetricChart({
             </button>
           );
         })}
+        {hasOpp && (
+          <button
+            className={`chip ${showOpp ? "on" : ""}`}
+            aria-pressed={showOpp}
+            style={showOpp ? { borderColor: "#f0564f" } : undefined}
+            onClick={() => setShowOpp((v) => !v)}
+          >
+            <span className="dot" style={{ background: "#f0564f", opacity: showOpp ? 1 : 0.35 }} />
+            vs opponents
+          </button>
+        )}
       </div>
       {selected.size === 0 ? (
         <div className="empty-note">Pick at least one metric above.</div>
@@ -345,6 +368,22 @@ function PerGameMetricChart({
               .map((s) => (
                 <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={false} />
               ))}
+            {showOpp &&
+              series
+                .filter((s) => selected.has(s.key) && s.oppValue)
+                .map((s) => (
+                  <Line
+                    key={`opp:${s.key}`}
+                    type="monotone"
+                    dataKey={`opp:${s.key}`}
+                    name={`${s.label} — opponents`}
+                    stroke={s.color}
+                    strokeWidth={1.5}
+                    strokeDasharray="5 4"
+                    strokeOpacity={0.75}
+                    dot={false}
+                  />
+                ))}
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -477,6 +516,8 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
               <th>Action</th>
               <th className="data">Per game</th>
               <th className="data">Per minute</th>
+              <th className="data">Opp per game</th>
+              <th className="data">Opp per minute</th>
             </tr>
           </thead>
           <tbody>
@@ -485,12 +526,15 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
                 <td>{a.label}</td>
                 <td className="data">{num(a.perGame, 1)}</td>
                 <td className="data">{num(a.perMinute, 1)}</td>
+                <td className="data">{num(a.oppPerGame, 1)}</td>
+                <td className="data">{num(a.oppPerMinute, 1)}</td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="hint">
-          Averages over the filtered games. Per-minute normalizes for game length — better for comparing across filters.
+          Averages over the filtered games — your counts and your opponents'. Per-minute normalizes for game length —
+          better for comparing across filters.
         </div>
       </div>
     </>
