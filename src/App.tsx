@@ -12,9 +12,10 @@ import { Overview } from "./components/Overview";
 import { Teams } from "./components/Teams";
 import { MetricsGuide } from "./components/MetricsGuide";
 import { Matchups, Stages, Opponents, Execution, GameLog } from "./components/Views";
+import { Insights } from "./components/Insights";
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "log";
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "log";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -22,6 +23,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "stages", label: "Stages" },
   { id: "opponents", label: "Opponents" },
   { id: "execution", label: "Execution" },
+  { id: "insights", label: "Insights" },
   { id: "log", label: "Game log" },
 ];
 
@@ -290,6 +292,7 @@ export default function App() {
             />
           )}
           {tab === "execution" && <Execution games={filtered} />}
+          {tab === "insights" && <Insights games={filtered} />}
           {tab === "log" && <GameLog games={filtered} />}
         </>
           )}

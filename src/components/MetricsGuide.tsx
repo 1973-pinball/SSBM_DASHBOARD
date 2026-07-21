@@ -77,6 +77,27 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     ],
   },
   {
+    title: "Insights (win model)",
+    items: [
+      {
+        term: "Odds × per +1 SD",
+        def: "From a logistic regression fit on your filtered games. Each row: a game where that metric is one standard deviation above your average has this many times the odds of being a win, holding the other metrics in the table fixed. Values above 1× pull toward wins, below 1× toward losses. The win-prob column translates the same effect into percentage points near an even game.",
+      },
+      {
+        term: "Evidence",
+        def: "How distinguishable the effect is from noise at your sample size (strong ≈ p<0.01, moderate ≈ p<0.05, weak ≈ p<0.1). Faded rows could easily be chance — more games sharpen these.",
+      },
+      {
+        term: "Win rate by quartile",
+        def: "The model-free cross-check: games sorted by the metric, cut into four equal buckets, win rate per bucket. If the regression and the quartiles disagree, the effect usually belongs to a correlated metric the regression is controlling for.",
+      },
+      {
+        term: "Habits vs outcome-linked",
+        def: "Habits (L-cancel %, movement per minute) are things you can practice. Outcome-linked stats (openings/kill, neutral-win share) partly ARE the win, so they dominate any model without saying what to change — that's why they're off by default. All of it is correlation across your games, not causation, and none of it controls for how strong the opponent was.",
+      },
+    ],
+  },
+  {
     title: "Teams (2v2)",
     items: [
       {
