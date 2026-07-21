@@ -378,10 +378,10 @@ function PerGameMetricChart({
                     type="monotone"
                     dataKey={`opp:${s.key}`}
                     name={`${s.label} — opponents`}
-                    stroke={s.color}
+                    stroke="#f0564f"
                     strokeWidth={1.5}
                     strokeDasharray="5 4"
-                    strokeOpacity={0.75}
+                    strokeOpacity={0.9}
                     dot={false}
                   />
                 ))}
