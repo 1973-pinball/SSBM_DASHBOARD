@@ -7,9 +7,17 @@ import type { ResolvedGame } from "./types";
  * The workhorse is L2-regularized logistic regression fit by IRLS (Newton).
  * Win/loss is binary, so logistic regression is the multivariate linear
  * model for this outcome: each coefficient is the change in log-odds of
- * winning per +1 SD of that metric, holding the other metrics fixed.
- * Cost is O(iterations · n · k²) with k ≤ ~16 features — instant even on
- * 30k-game libraries.
+ * winning per +1 SD of that metric, holding the other terms fixed.
+ *
+ * Two fits are reported side by side:
+ *  - RAW: metrics only — "my wins look like this".
+ *  - ADJUSTED: metrics + fixed effects for opponent, my character, stage,
+ *    and a time trend — "within the same context, did more of this still
+ *    come with more wins?". The gap between the two columns is confounding
+ *    made visible.
+ *
+ * Cost is O(iterations · n · k²); k stays ≤ ~60 even with controls, so this
+ * is fast even on 30k-game libraries.
  */
 
 export type FeatureGroup = "execution" | "outcome";
@@ -63,32 +71,37 @@ export interface CoefRow {
   key: string;
   label: string;
   group: FeatureGroup;
-  /** Log-odds change per +1 SD of the metric, other metrics held fixed. */
+  /** Log-odds change per +1 SD of the metric, other terms held fixed. */
   coef: number;
   se: number;
   z: number;
   p: number;
   /** exp(coef): multiplicative odds change per +1 SD. */
   oddsPerSd: number;
-  mean: number;
-  sd: number;
+}
+
+export interface FitStats {
+  coefs: CoefRow[]; // one per surviving feature, model order
+  mcfaddenR2: number;
+  auc: number;
+  converged: boolean;
 }
 
 export interface WinModel {
   n: number;
   wins: number;
   baseRate: number;
-  intercept: number;
-  coefs: CoefRow[]; // sorted by |z| descending
-  mcfaddenR2: number;
-  auc: number;
-  converged: boolean;
+  raw: FitStats;
+  /** null when no control column had variance (e.g. one opponent, one char, few games). */
+  adjusted: FitStats | null;
+  /** Human-readable list of what the adjusted fit controls for. */
+  controls: string[];
   /** Feature pairs with |r| > 0.7 — coefficients split credit between these. */
   collinear: { a: string; b: string; r: number }[];
   dropped: string[]; // zero-variance features excluded from the fit
 }
 
-/** Gauss-Jordan inverse; returns null if singular. Fine for k ≤ ~20. */
+/** Gauss-Jordan inverse; returns null if singular. Fine for k ≤ ~60. */
 function invert(A: number[][]): number[][] | null {
   const n = A.length;
   const M = A.map((row, i) => [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
@@ -139,25 +152,92 @@ function computeAuc(scores: number[], y: number[]): number {
   return (posRankSum - (nPos * (nPos + 1)) / 2) / (nPos * nNeg);
 }
 
+const clampExp = (xb: number): number => 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, xb))));
+
+interface CoreFit {
+  beta: number[];
+  Hinv: number[][];
+  converged: boolean;
+  ll: number;
+  auc: number;
+}
+
+/** IRLS on a pre-built design matrix (column 0 = intercept). */
+function fitCore(X: number[][], y: number[], lambdas: number[]): CoreFit | null {
+  const n = X.length;
+  const k = X[0].length;
+  let beta = new Array<number>(k).fill(0);
+  let converged = false;
+  let Hinv: number[][] | null = null;
+  for (let iter = 0; iter < 60; iter++) {
+    const p = X.map((row) => clampExp(row.reduce((s, v, j) => s + v * beta[j], 0)));
+    const grad = new Array<number>(k).fill(0);
+    const H: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
+    for (let r = 0; r < n; r++) {
+      const w = Math.max(1e-9, p[r] * (1 - p[r]));
+      const resid = y[r] - p[r];
+      const row = X[r];
+      for (let j = 0; j < k; j++) {
+        grad[j] += row[j] * resid;
+        const rw = row[j] * w;
+        for (let l = j; l < k; l++) H[j][l] += rw * row[l];
+      }
+    }
+    for (let j = 0; j < k; j++) for (let l = 0; l < j; l++) H[j][l] = H[l][j];
+    for (let j = 1; j < k; j++) {
+      grad[j] -= lambdas[j] * beta[j];
+      H[j][j] += lambdas[j];
+    }
+    Hinv = invert(H);
+    if (!Hinv) return null;
+    const step = Hinv.map((row) => row.reduce((s, v, j) => s + v * grad[j], 0));
+    beta = beta.map((b, j) => b + step[j]);
+    if (Math.max(...step.map(Math.abs)) < 1e-8) { converged = true; break; }
+  }
+  if (!Hinv) return null;
+  const scores = X.map((row) => row.reduce((s, v, j) => s + v * beta[j], 0));
+  let ll = 0;
+  for (let r = 0; r < n; r++) {
+    const p = clampExp(scores[r]);
+    ll += y[r] === 1 ? Math.log(Math.max(1e-12, p)) : Math.log(Math.max(1e-12, 1 - p));
+  }
+  return { beta, Hinv, converged, ll, auc: computeAuc(scores, y) };
+}
+
+/** Standardize a column in place; returns false (drop it) when variance is ~0. */
+function standardize(col: number[]): boolean {
+  const n = col.length;
+  const mean = col.reduce((s, v) => s + v, 0) / n;
+  const sd = Math.sqrt(col.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
+  if (sd < 1e-9) return false;
+  for (let i = 0; i < n; i++) col[i] = (col[i] - mean) / sd;
+  return true;
+}
+
+/** Only contexts seen ≥ this many times get their own fixed effect. */
+const MIN_CONTEXT_GAMES = 15;
+const MAX_OPPONENT_DUMMIES = 25;
+
 /**
- * Fit the logistic model on games where the outcome and every requested
- * feature are known (listwise deletion). Returns null when there's too
- * little data to say anything (n < 40 or fewer than 10 of either class).
+ * Fit the raw and context-adjusted win models on games where the outcome and
+ * every requested feature are known (listwise deletion). Returns null when
+ * there's too little data to say anything (n < 40 or < 10 of either class).
  */
 export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinModel | null {
-  const rows: number[][] = [];
+  interface Row { f: number[]; opp: string; char: number; stage: number }
+  const rows: Row[] = [];
   const y: number[] = [];
   for (const g of games) {
     if (g.isWin === null) continue;
-    const row: number[] = [];
+    const f: number[] = [];
     let ok = true;
-    for (const f of features) {
-      const v = f.value(g);
+    for (const def of features) {
+      const v = def.value(g);
       if (v === null || !Number.isFinite(v)) { ok = false; break; }
-      row.push(v);
+      f.push(v);
     }
     if (!ok) continue;
-    rows.push(row);
+    rows.push({ f, opp: g.opp.connectCode ?? `port:${g.opp.port}`, char: g.me.characterId, stage: g.rec.stageId });
     y.push(g.isWin ? 1 : 0);
   }
 
@@ -165,92 +245,110 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
   const wins = y.reduce((s, v) => s + v, 0);
   if (n < 40 || wins < 10 || n - wins < 10) return null;
 
-  // Standardize; drop zero-variance features.
-  const means = features.map((_, j) => rows.reduce((s, r) => s + r[j], 0) / n);
-  const sds = features.map((_, j) => Math.sqrt(rows.reduce((s, r) => s + (r[j] - means[j]) ** 2, 0) / n));
+  // --- Feature columns (standardized; zero-variance dropped) ---
   const kept: number[] = [];
   const dropped: string[] = [];
-  features.forEach((f, j) => (sds[j] > 1e-9 ? kept.push(j) : dropped.push(f.label)));
+  const featCols: number[][] = [];
+  features.forEach((def, j) => {
+    const col = rows.map((r) => r.f[j]);
+    if (standardize(col)) { kept.push(j); featCols.push(col); }
+    else dropped.push(def.label);
+  });
   if (kept.length === 0) return null;
-  const X = rows.map((r) => [1, ...kept.map((j) => (r[j] - means[j]) / sds[j])]);
-  const k = kept.length + 1; // + intercept
 
   // Collinearity report on the standardized features.
   const collinear: { a: string; b: string; r: number }[] = [];
   for (let a = 0; a < kept.length; a++) {
     for (let b = a + 1; b < kept.length; b++) {
       let s = 0;
-      for (const row of X) s += row[a + 1] * row[b + 1];
+      for (let i = 0; i < n; i++) s += featCols[a][i] * featCols[b][i];
       const r = s / n;
       if (Math.abs(r) > 0.7) collinear.push({ a: features[kept[a]].label, b: features[kept[b]].label, r });
     }
   }
 
-  // IRLS with a small ridge on non-intercept terms (stabilizes near-separation).
-  const lambda = 0.01;
-  let beta = new Array<number>(k).fill(0);
-  let converged = false;
-  let Hinv: number[][] | null = null;
-  for (let iter = 0; iter < 60; iter++) {
-    const p = X.map((row) => {
-      const xb = row.reduce((s, v, j) => s + v * beta[j], 0);
-      return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, xb))));
+  // --- Control columns: opponent / my character / stage dummies + time trend ---
+  const countBy = <T>(pick: (r: Row) => T): Map<T, number> => {
+    const m = new Map<T, number>();
+    for (const r of rows) m.set(pick(r), (m.get(pick(r)) ?? 0) + 1);
+    return m;
+  };
+  const dummySet = <T>(counts: Map<T, number>, cap: number): T[] => {
+    const eligible = [...counts.entries()]
+      .filter(([, c]) => c >= MIN_CONTEXT_GAMES)
+      .sort((a, b) => b[1] - a[1]);
+    // The most common level is the reference category — everything is measured against it.
+    return eligible.slice(1, cap + 1).map(([v]) => v);
+  };
+
+  const controlCols: number[][] = [];
+  const controls: string[] = [];
+  const addDummies = <T>(levels: T[], pick: (r: Row) => T, label: string) => {
+    let added = 0;
+    for (const level of levels) {
+      const col = rows.map((r) => (pick(r) === level ? 1 : 0));
+      if (standardize(col)) { controlCols.push(col); added++; }
+    }
+    if (added > 0) controls.push(`${label} (${added})`);
+  };
+  addDummies(dummySet(countBy((r) => r.opp), MAX_OPPONENT_DUMMIES), (r) => r.opp, "opponent");
+  addDummies(dummySet(countBy((r) => r.char), 30), (r) => r.char, "my character");
+  addDummies(dummySet(countBy((r) => r.stage), 30), (r) => r.stage, "stage");
+  {
+    // Games arrive date-sorted, so the row index is the improvement-over-time axis.
+    const col = rows.map((_, i) => i);
+    if (standardize(col)) { controlCols.push(col); controls.push("time trend"); }
+  }
+
+  // --- Fit both models on the identical sample ---
+  const buildStats = (fit: CoreFit): FitStats => {
+    const base = wins / n;
+    const ll0 = wins * Math.log(base) + (n - wins) * Math.log(1 - base);
+    const coefs = kept.map((j, idx) => {
+      const coef = fit.beta[idx + 1];
+      const se = Math.sqrt(Math.max(0, fit.Hinv[idx + 1][idx + 1]));
+      const z = se > 0 ? coef / se : 0;
+      return {
+        key: features[j].key,
+        label: features[j].label,
+        group: features[j].group,
+        coef, se, z,
+        p: twoSidedP(z),
+        oddsPerSd: Math.exp(coef),
+      };
     });
-    const grad = new Array<number>(k).fill(0);
-    const H: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
-    for (let r = 0; r < n; r++) {
-      const w = Math.max(1e-9, p[r] * (1 - p[r]));
-      const resid = y[r] - p[r];
-      for (let j = 0; j < k; j++) {
-        grad[j] += X[r][j] * resid;
-        for (let l = j; l < k; l++) H[j][l] += X[r][j] * X[r][l] * w;
-      }
-    }
-    for (let j = 0; j < k; j++) for (let l = 0; l < j; l++) H[j][l] = H[l][j];
-    for (let j = 1; j < k; j++) {
-      grad[j] -= lambda * beta[j];
-      H[j][j] += lambda;
-    }
-    Hinv = invert(H);
-    if (!Hinv) break;
-    const step = Hinv.map((row) => row.reduce((s, v, j) => s + v * grad[j], 0));
-    beta = beta.map((b, j) => b + step[j]);
-    if (Math.max(...step.map(Math.abs)) < 1e-8) { converged = true; break; }
+    return { coefs, mcfaddenR2: ll0 < 0 ? 1 - fit.ll / ll0 : 0, auc: fit.auc, converged: fit.converged };
+  };
+
+  const Xraw = Array.from({ length: n }, (_, i) => [1, ...featCols.map((c) => c[i])]);
+  const rawFit = fitCore(Xraw, y, [0, ...featCols.map(() => 0.01)]);
+  if (!rawFit) return null;
+  const raw = buildStats(rawFit);
+
+  let adjusted: FitStats | null = null;
+  if (controlCols.length > 0) {
+    const Xadj = Array.from({ length: n }, (_, i) => [
+      1,
+      ...featCols.map((c) => c[i]),
+      ...controlCols.map((c) => c[i]),
+    ]);
+    // Slightly stronger ridge on the dummies: a regular you've never beaten
+    // would otherwise push its fixed effect toward ±infinity.
+    const lambdas = [0, ...featCols.map(() => 0.01), ...controlCols.map(() => 0.1)];
+    const adjFit = fitCore(Xadj, y, lambdas);
+    if (adjFit) adjusted = buildStats(adjFit);
   }
-  if (!Hinv) return null;
 
-  // Fit quality: McFadden pseudo-R² and in-sample AUC.
-  const scores = X.map((row) => row.reduce((s, v, j) => s + v * beta[j], 0));
-  let ll = 0;
-  for (let r = 0; r < n; r++) {
-    const p = 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, scores[r]))));
-    ll += y[r] === 1 ? Math.log(Math.max(1e-12, p)) : Math.log(Math.max(1e-12, 1 - p));
-  }
-  const base = wins / n;
-  const ll0 = wins * Math.log(base) + (n - wins) * Math.log(1 - base);
-  const mcfaddenR2 = ll0 < 0 ? 1 - ll / ll0 : 0;
-  const auc = computeAuc(scores, y);
-
-  const coefs: CoefRow[] = kept.map((j, idx) => {
-    const coef = beta[idx + 1];
-    const se = Math.sqrt(Math.max(0, Hinv![idx + 1][idx + 1]));
-    const z = se > 0 ? coef / se : 0;
-    return {
-      key: features[j].key,
-      label: features[j].label,
-      group: features[j].group,
-      coef,
-      se,
-      z,
-      p: twoSidedP(z),
-      oddsPerSd: Math.exp(coef),
-      mean: means[j],
-      sd: sds[j],
-    };
-  });
-  coefs.sort((a, b) => Math.abs(b.z) - Math.abs(a.z));
-
-  return { n, wins, baseRate: base, intercept: beta[0], coefs, mcfaddenR2, auc, converged, collinear, dropped };
+  return {
+    n,
+    wins,
+    baseRate: wins / n,
+    raw,
+    adjusted,
+    controls,
+    collinear,
+    dropped,
+  };
 }
 
 export interface QuartileRow {

@@ -5,8 +5,9 @@ import type { CoefRow } from "../lib/model";
 import { num, pct, winRateColor } from "../lib/format";
 
 /**
- * "What predicts my wins?" — a logistic regression over per-game metrics plus
- * a model-free quartile cross-check. Interpretation-first: standardized
+ * "What predicts my wins?" — logistic regression in two flavors (raw
+ * association vs adjusted for opponent/character/stage/time) plus a
+ * model-free quartile cross-check. Interpretation-first: standardized
  * coefficients, plain-language effect sizes, and loud caveats.
  */
 
@@ -19,6 +20,8 @@ const evidence = (p: number): { label: string; dim: boolean } => {
 
 /** Divide-by-4 rule: max change in win probability per +1 SD, in points. */
 const probPoints = (coef: number): number => (coef / 4) * 100;
+
+const ppText = (coef: number): string => `${coef >= 0 ? "+" : ""}${num(probPoints(coef), 1)} pp`;
 
 function CoefBar({ coef, max }: { coef: number; max: number }) {
   const frac = Math.min(1, Math.abs(coef) / max);
@@ -46,9 +49,22 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
   const model = useMemo(() => fitWinModel(games, features), [games, features]);
   const quartiles = useMemo(() => quartileWinRates(games, features), [games, features]);
 
+  // The adjusted fit is the headline when available; raw rides along for contrast.
+  const primary = model?.adjusted ?? model?.raw ?? null;
+  const hasAdjusted = Boolean(model?.adjusted);
+  const rawByKey = useMemo(() => {
+    const m = new Map<string, CoefRow>();
+    for (const c of model?.raw.coefs ?? []) m.set(c.key, c);
+    return m;
+  }, [model]);
+
+  const sorted = useMemo(
+    () => (primary ? [...primary.coefs].sort((a, b) => Math.abs(b.z) - Math.abs(a.z)) : []),
+    [primary],
+  );
   const maxCoef = useMemo(
-    () => Math.max(0.1, ...(model?.coefs.map((c) => Math.abs(c.coef)) ?? [])),
-    [model],
+    () => Math.max(0.1, ...sorted.map((c) => Math.abs(c.coef)), ...(model?.raw.coefs.map((c) => Math.abs(c.coef)) ?? [])),
+    [sorted, model],
   );
 
   const toggle = (
@@ -74,7 +90,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
     </div>
   );
 
-  if (!model) {
+  if (!model || !primary) {
     return (
       <div className="panel">
         <h2>What predicts your wins</h2>
@@ -90,21 +106,23 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
   return (
     <>
       <div className="panel">
-        <h2>What predicts your wins — logistic regression</h2>
+        <h2>What would help you win — logistic regression</h2>
         {toggle}
         <table>
           <thead>
             <tr>
               <th>Metric</th>
-              <th style={{ width: "22%" }}>Pull on win odds</th>
+              <th style={{ width: "20%" }}>Pull on win odds{hasAdjusted ? " (adjusted)" : ""}</th>
               <th className="data">Odds × per +1 SD</th>
-              <th className="data">≈ win-prob shift</th>
+              <th className="data">Raw shift</th>
+              {hasAdjusted && <th className="data">Adjusted shift</th>}
               <th className="data">Evidence</th>
             </tr>
           </thead>
           <tbody>
-            {model.coefs.map((c: CoefRow) => {
+            {sorted.map((c) => {
               const ev = evidence(c.p);
+              const raw = rawByKey.get(c.key);
               return (
                 <tr key={c.key} style={ev.dim ? { opacity: 0.55 } : undefined}>
                   <td>
@@ -115,9 +133,12 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
                   </td>
                   <td><CoefBar coef={c.coef} max={maxCoef} /></td>
                   <td className="data">{num(c.oddsPerSd, 2)}×</td>
-                  <td className="data" style={{ color: c.coef >= 0 ? "#3fcf8e" : "#f0564f" }}>
-                    {c.coef >= 0 ? "+" : ""}{num(probPoints(c.coef), 1)} pp
+                  <td className="data" style={{ color: raw && raw.coef >= 0 ? "#3fcf8e" : "#f0564f", opacity: hasAdjusted ? 0.6 : 1 }}>
+                    {raw ? ppText(raw.coef) : "—"}
                   </td>
+                  {hasAdjusted && (
+                    <td className="data" style={{ color: c.coef >= 0 ? "#3fcf8e" : "#f0564f" }}>{ppText(c.coef)}</td>
+                  )}
                   <td className="data">{ev.label}</td>
                 </tr>
               );
@@ -125,13 +146,25 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
           </tbody>
         </table>
         <div className="hint">
-          Fit on {model.n.toLocaleString()} decided games (win rate {pct(model.baseRate, 0)}) · pseudo-R²{" "}
-          {num(model.mcfaddenR2, 2)} · AUC {num(model.auc, 2)}
+          Fit on {model.n.toLocaleString()} decided games (win rate {pct(model.baseRate, 0)})
+          {hasAdjusted && model.controls.length > 0 && <> · adjusted for {model.controls.join(", ")}</>}
+          {" "}· pseudo-R² {num(primary.mcfaddenR2, 2)} · AUC {num(primary.auc, 2)}
           {model.dropped.length > 0 && <> · dropped (no variance): {model.dropped.join(", ")}</>}
           <br />
-          Each row: holding the other metrics fixed, a game where this metric is one standard deviation above your
-          average has that many times the odds of being a win; "win-prob shift" is the same effect in percentage
-          points near a 50% game. Faded rows are indistinguishable from noise at this sample size.
+          {hasAdjusted ? (
+            <>
+              <b>Raw shift</b> is the simple association; <b>adjusted shift</b> re-asks the question within the same
+              opponent, character, stage, and stretch of time — the closest replay data gets to "would doing more of
+              this help?". A raw effect that collapses after adjustment was riding along with context (e.g. you moved
+              better in eras or matchups you were already winning). Effects are in win-probability points per +1 SD of
+              the metric, near an even game. Faded rows are indistinguishable from noise.
+            </>
+          ) : (
+            <>
+              Not enough repeated context (opponents, characters, stages) in this filter to fit the adjusted model —
+              showing raw associations only.
+            </>
+          )}
         </div>
       </div>
 
@@ -166,18 +199,18 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
         </table>
         <div className="hint">
           Games sorted by each metric and cut into four equal buckets; each cell is the win rate in that bucket (hover
-          for the value range). Agreement with the regression table above is a good sign; disagreement usually means
-          the effect belongs to a correlated metric.
+          for the value range). This is the raw association with nothing controlled — compare it against the adjusted
+          column above to see how much of it is context.
         </div>
       </div>
 
       <div className="panel">
         <h2>Reading this honestly</h2>
         <div className="hint" style={{ fontSize: 13, lineHeight: 1.6 }}>
-          <b>Correlation, not causation.</b> These are associations across your games — "my wins look like this", not
-          "doing this causes wins". Nothing here controls for opponent strength: if you wavedash more against weaker
-          opponents, wavedashing gets credit it didn't earn. Filter to a single opponent or rank range above to tighten
-          that.
+          <b>Adjustment helps, but it isn't an experiment.</b> The adjusted model compares your games within the same
+          opponent, character, stage, and period, which removes the biggest confounds — but it still can't see things
+          like how warmed up you were or an opponent having an off day. Treat "adjusted + strong evidence + agrees with
+          the quartile table" as a solid practice lead, not a guarantee.
           {includeOutcome && (
             <>
               <br />
@@ -201,7 +234,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
               table for each one alone.
             </>
           )}
-          {!model.converged && (
+          {!primary.converged && (
             <>
               <br />
               <b>Note:</b> the fit stopped before full convergence — treat coefficients as approximate.

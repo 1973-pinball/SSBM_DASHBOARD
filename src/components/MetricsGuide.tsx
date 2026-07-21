@@ -81,7 +81,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Odds × per +1 SD",
-        def: "From a logistic regression fit on your filtered games. Each row: a game where that metric is one standard deviation above your average has this many times the odds of being a win, holding the other metrics in the table fixed. Values above 1× pull toward wins, below 1× toward losses. The win-prob column translates the same effect into percentage points near an even game.",
+        def: "From a logistic regression fit on your filtered games. Each row: a game where that metric is one standard deviation above your average has this many times the odds of being a win, holding the other metrics in the table fixed. Values above 1× pull toward wins, below 1× toward losses. The shift columns translate the same effect into percentage points near an even game.",
+      },
+      {
+        term: "Raw vs adjusted shift",
+        def: "Raw is the simple association across all filtered games. Adjusted re-fits the model with fixed effects for the opponent (regulars with 15+ games), your character, the stage, and a time trend — so it asks whether more of the metric came with more wins within the same context. When a raw effect collapses after adjustment, the metric was riding along with context (you improved over time, or move more against certain opponents) rather than driving wins. The adjusted column is the one that answers 'what should I practice'.",
       },
       {
         term: "Evidence",
