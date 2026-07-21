@@ -288,7 +288,8 @@ function PerGameMetricChart({
   defaults: string[];
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(defaults));
-  const [showOpp, setShowOpp] = useState(false);
+  // Opponent overlay defaults on — the chip is there to turn it OFF when it clutters.
+  const [showOpp, setShowOpp] = useState(true);
   const hasOpp = series.some((s) => s.oppValue);
   // All metrics (including opponent counterparts) are computed once; the chips only toggle which lines render.
   const data = useMemo(
