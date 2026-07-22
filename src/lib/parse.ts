@@ -67,10 +67,21 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     };
   });
 
+  // Placements are only meaningful when the game actually concluded. On a
+  // NO_CONTEST (LRAS quit-out) or UNRESOLVED end the payload can carry stale
+  // placement data — typically position 0 parked on player index 0 — which
+  // would crown the quitter before the LRAS rule below ever runs.
+  const placementsValid =
+    gameEnd?.gameEndMethod === GameEndMethod.TIME ||
+    gameEnd?.gameEndMethod === GameEndMethod.GAME ||
+    gameEnd?.gameEndMethod === GameEndMethod.RESOLVED;
+
   // --- Win/loss determination (singles only) ---
   let winnerIndex: number | null = null;
   if (!isTeams && players.length === 2) {
-    const placements = gameEnd?.placements?.filter((pl) => pl.position !== null && pl.position !== undefined);
+    const placements = placementsValid
+      ? gameEnd?.placements?.filter((pl) => pl.position !== null && pl.position !== undefined && pl.position >= 0)
+      : undefined;
     if (placements && placements.length >= 2) {
       const first = placements.find((pl) => pl.position === 0);
       if (first?.playerIndex !== null && first?.playerIndex !== undefined) {
@@ -105,8 +116,8 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       return idx >= 0 ? players[idx].teamId : null;
     };
 
-    const first = gameEnd?.placements?.find((pl) => pl.position === 0);
-    if (first?.playerIndex !== null && first?.playerIndex !== undefined) {
+    const first = placementsValid ? gameEnd?.placements?.find((pl) => pl.position === 0) : undefined;
+    if (first && first.playerIndex !== null && first.playerIndex !== undefined) {
       winnerTeamId = teamOfPlayerIndex(first.playerIndex);
     }
     if (winnerTeamId === null) {

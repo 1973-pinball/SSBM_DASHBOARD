@@ -58,6 +58,17 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("games").clear();
       });
+    // v6 fixed quit-out results: LRAS games could credit a win from stale
+    // placement data. Cached rows don't record the end method, so the bad
+    // ones can't be picked out — drop all rows and let the rescan re-parse.
+    this.version(6)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("games").clear();
+      });
   }
 }
 
