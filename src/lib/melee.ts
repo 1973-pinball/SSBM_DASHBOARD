@@ -37,7 +37,5 @@ export const STAGES: Record<number, string> = {
   32: "Final Destination",
 };
 
-export const LEGAL_STAGE_IDS = [2, 3, 8, 28, 31, 32];
-
 export const charName = (id: number): string => CHARACTERS[id] ?? `Char ${id}`;
 export const stageName = (id: number): string => STAGES[id] ?? `Stage ${id}`;

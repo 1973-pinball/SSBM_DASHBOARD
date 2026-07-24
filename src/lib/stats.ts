@@ -1,5 +1,6 @@
 import type { ActionCounts, Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
 import { ACTION_LABELS } from "./types";
+import { INCLUDED_STAGE_ID_SET } from "./config";
 
 /** Local-timezone YYYY-MM-DD, matching the dates the user sees in the UI. */
 export function localDay(d: Date): string {
@@ -45,6 +46,7 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
   const out: ResolvedGame[] = [];
   for (const rec of records) {
     if (rec.parseError || rec.isTeams || rec.players.length !== 2) continue;
+    if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     const meIdx = rec.players.findIndex((p) => p.connectCode && myCodes.has(p.connectCode));
     if (meIdx < 0) continue;
     const me = rec.players[meIdx];
@@ -64,6 +66,7 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
   const out: ResolvedTeamGame[] = [];
   for (const rec of records) {
     if (rec.parseError || !rec.isTeams || rec.players.length !== 4) continue;
+    if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     const me = rec.players.find((p) => p.connectCode && myCodes.has(p.connectCode));
     if (!me || me.teamId === null) continue;
     const allies = rec.players.filter((p) => p !== me && p.teamId === me.teamId);

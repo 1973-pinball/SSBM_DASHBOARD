@@ -1,5 +1,5 @@
 import type { ActionCounts, GameRecord, PlayerSide } from "./types";
-import { LEGAL_STAGE_IDS } from "./melee";
+import { INCLUDED_STAGE_IDS } from "./config";
 
 /** Plausible per-game action counts, scaled by game length; `tech` in [0,1] raises movement actions. */
 function mkActions(rand: () => number, minutes: number, tech: number): ActionCounts {
@@ -138,7 +138,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       path: `demo/Game_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),
       durationFrames,
-      stageId: LEGAL_STAGE_IDS[Math.floor(rand() * LEGAL_STAGE_IDS.length)],
+      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)],
       gameType: rare < 0.55 ? "ranked" : rare < 0.9 ? "unranked" : "direct",
       isTeams: false,
       players: [me, opp],
@@ -215,7 +215,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       path: `demo/Teams_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),
       durationFrames,
-      stageId: LEGAL_STAGE_IDS[Math.floor(rand() * LEGAL_STAGE_IDS.length)],
+      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)],
       gameType: rare < 0.7 ? "direct" : "unranked", // no ranked doubles matchmaking
       isTeams: true,
       players,
