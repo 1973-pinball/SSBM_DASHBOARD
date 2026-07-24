@@ -154,6 +154,29 @@ export default function App() {
     }
   }, []);
 
+  // Warm the lazy view chunks once the dashboard is idle so the first click
+  // on each tab renders instantly instead of showing the Suspense fallback.
+  useEffect(() => {
+    if (phase !== "dashboard") return;
+    const warm = () => {
+      void import("./components/Overview");
+      void import("./components/Views");
+      void import("./components/Teams");
+      void import("./components/Insights");
+      void import("./components/Sessions");
+      void import("./components/Records");
+      void import("./components/MetricsGuide");
+    };
+    // Optional-chained: Safari didn't ship requestIdleCallback until late.
+    const ric = window.requestIdleCallback?.bind(window);
+    if (ric) {
+      const id = ric(warm, { timeout: 4000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(warm, 2000);
+    return () => window.clearTimeout(id);
+  }, [phase]);
+
   // Pick up replays added since the last visit with no click at all — possible
   // only while the folder permission is still live (same browser session).
   useEffect(() => {

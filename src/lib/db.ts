@@ -2,11 +2,27 @@ import Dexie, { type Table } from "dexie";
 import type { GameRecord } from "./types";
 
 /**
+ * Records live packed ~250 to a row: reading tens of thousands of individual
+ * ~1-2 KB rows on startup is dominated by per-row IndexedDB overhead, and
+ * packing makes the full-cache restore several times faster. Dedup stays
+ * per-game via the id-only `seen` table (primary-key reads are cheap).
+ */
+export interface RecordPack {
+  id?: number;
+  records: GameRecord[];
+}
+
+const PACK_SIZE = 250;
+
+/**
  * Browser-local persistence. Nothing leaves the machine; this exists so a
  * repeat visit only parses files not seen before (keyed on path|size|mtime).
  */
 class SsbmDb extends Dexie {
+  /** Legacy per-record table; empty since v8. Kept declared so Dexie retains the store. */
   games!: Table<GameRecord, string>;
+  packs!: Table<RecordPack, number>;
+  seen!: Table<{ id: string }, string>;
   kv!: Table<{ key: string; value: unknown }, string>;
 
   constructor() {
@@ -80,26 +96,63 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("games").clear();
       });
+    // v8 repacks records into ~250-game rows (see RecordPack). Pure storage
+    // reshaping — existing rows are migrated in place, NO re-parse.
+    this.version(8)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        const rows = (await tx.table<GameRecord>("games").toArray()) as GameRecord[];
+        if (rows.length) {
+          await tx.table("seen").bulkPut(rows.map((r) => ({ id: r.id })));
+          const packs: RecordPack[] = [];
+          for (let i = 0; i < rows.length; i += PACK_SIZE) {
+            packs.push({ records: rows.slice(i, i + PACK_SIZE) });
+          }
+          await tx.table("packs").bulkAdd(packs);
+        }
+        await tx.table("games").clear();
+      });
   }
 }
 
 export const db = new SsbmDb();
 
 export async function cachedIds(): Promise<Set<string>> {
-  const keys = await db.games.toCollection().primaryKeys();
+  const keys = await db.seen.toCollection().primaryKeys();
   return new Set(keys);
 }
 
 export async function putRecords(records: GameRecord[]): Promise<void> {
-  if (records.length) await db.games.bulkPut(records);
+  if (!records.length) return;
+  await db.transaction("rw", db.packs, db.seen, async () => {
+    await db.seen.bulkPut(records.map((r) => ({ id: r.id })));
+    const queue = [...records];
+    // Top up the trailing partial pack before opening new ones.
+    const last = await db.packs.orderBy(":id").last();
+    if (last && last.records.length < PACK_SIZE) {
+      last.records.push(...queue.splice(0, PACK_SIZE - last.records.length));
+      await db.packs.put(last);
+    }
+    while (queue.length) {
+      await db.packs.add({ records: queue.splice(0, PACK_SIZE) });
+    }
+  });
 }
 
 export async function allRecords(): Promise<GameRecord[]> {
-  return db.games.toArray();
+  const packs = await db.packs.toArray();
+  return packs.flatMap((p) => p.records);
 }
 
 export async function clearAll(): Promise<void> {
   await db.games.clear();
+  await db.packs.clear();
+  await db.seen.clear();
   await db.kv.clear();
 }
 

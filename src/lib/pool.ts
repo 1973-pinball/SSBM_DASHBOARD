@@ -9,19 +9,47 @@ export interface DiscoveredFile {
 
 const fileId = (path: string, f: File) => `${path}|${f.size}|${f.lastModified}`;
 
+// getFile() is one OS roundtrip per replay; a big library walked sequentially
+// turns every dashboard open into tens of seconds of IPC. Bounded concurrency
+// keeps the scan fast without exhausting file-handle limits.
+const GETFILE_CONCURRENCY = 64;
+
 /** Recursively walk a FileSystemDirectoryHandle collecting .slp files. */
 export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix = ""): Promise<DiscoveredFile[]> {
-  const out: DiscoveredFile[] = [];
-  for await (const [name, handle] of dir.entries()) {
-    const path = prefix ? `${prefix}/${name}` : name;
-    if (handle.kind === "directory") {
-      out.push(...(await discoverFromHandle(handle as FileSystemDirectoryHandle, path)));
-    } else if (name.toLowerCase().endsWith(".slp")) {
-      const file = await (handle as FileSystemFileHandle).getFile();
-      out.push({ id: fileId(path, file), path, file });
+  // Phase 1: walk the tree (subdirectories in parallel), collecting handles.
+  const found: { path: string; handle: FileSystemFileHandle }[] = [];
+  const walk = async (d: FileSystemDirectoryHandle, p: string): Promise<void> => {
+    const subdirs: Promise<void>[] = [];
+    for await (const [name, handle] of d.entries()) {
+      const path = p ? `${p}/${name}` : name;
+      if (handle.kind === "directory") {
+        subdirs.push(walk(handle as FileSystemDirectoryHandle, path));
+      } else if (name.toLowerCase().endsWith(".slp")) {
+        found.push({ path, handle: handle as FileSystemFileHandle });
+      }
     }
-  }
-  return out;
+    await Promise.all(subdirs);
+  };
+  await walk(dir, prefix);
+
+  // Phase 2: materialize File objects with bounded concurrency. A getFile()
+  // failure (typically the replay Slippi is writing right now) skips that
+  // file instead of aborting the whole scan — it'll be picked up next visit.
+  const out: (DiscoveredFile | null)[] = new Array(found.length).fill(null);
+  let next = 0;
+  const lane = async () => {
+    while (next < found.length) {
+      const i = next++;
+      try {
+        const file = await found[i].handle.getFile();
+        out[i] = { id: fileId(found[i].path, file), path: found[i].path, file };
+      } catch {
+        // skip: locked or vanished mid-scan
+      }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(GETFILE_CONCURRENCY, found.length) }, lane));
+  return out.filter((f): f is DiscoveredFile => f !== null);
 }
 
 /** Fallback for <input webkitdirectory> file lists. */
