@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline } from "./lib/pool";
@@ -8,22 +8,34 @@ import { generateDemoRecords, DEMO_CODE } from "./lib/demo";
 import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
-import { Overview } from "./components/Overview";
-import { Teams } from "./components/Teams";
-import { MetricsGuide } from "./components/MetricsGuide";
-import { Matchups, Stages, Opponents, Execution, GameLog } from "./components/Views";
-import { Insights } from "./components/Insights";
+
+// Dashboard views are lazy so the landing/parsing path doesn't pay for
+// recharts — it's the biggest dependency in the app and none of it renders
+// before the dashboard phase.
+const Overview = lazy(() => import("./components/Overview").then((m) => ({ default: m.Overview })));
+const Teams = lazy(() => import("./components/Teams").then((m) => ({ default: m.Teams })));
+const MetricsGuide = lazy(() => import("./components/MetricsGuide").then((m) => ({ default: m.MetricsGuide })));
+const Matchups = lazy(() => import("./components/Views").then((m) => ({ default: m.Matchups })));
+const Stages = lazy(() => import("./components/Views").then((m) => ({ default: m.Stages })));
+const Opponents = lazy(() => import("./components/Views").then((m) => ({ default: m.Opponents })));
+const Execution = lazy(() => import("./components/Views").then((m) => ({ default: m.Execution })));
+const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: m.GameLog })));
+const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
+const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
+const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "log";
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "matchups", label: "Matchups" },
   { id: "stages", label: "Stages" },
   { id: "opponents", label: "Opponents" },
+  { id: "sessions", label: "Sessions" },
   { id: "execution", label: "Execution" },
   { id: "insights", label: "Insights" },
+  { id: "records", label: "Records" },
   { id: "log", label: "Game log" },
 ];
 
@@ -251,6 +263,7 @@ export default function App() {
           />
           {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
               consolidated view rather than the singles tab set. */}
+          <Suspense fallback={<div className="empty-note">Loading…</div>}>
           {showTeams ? (
             <Teams games={filteredTeams} onSelectTeammate={(code) => setFilters({ ...filters, teammateCode: code })} />
           ) : (
@@ -281,7 +294,15 @@ export default function App() {
               }}
             />
           )}
-          {tab === "stages" && <Stages games={filtered} />}
+          {tab === "stages" && (
+            <Stages
+              games={filtered}
+              onSelect={(stageId, charId, side) => {
+                setFilters({ ...filters, stageId, ...(side === "opp" ? { oppCharacter: charId } : { myCharacter: charId }) });
+                setTab("overview");
+              }}
+            />
+          )}
           {tab === "opponents" && (
             <Opponents
               games={filtered}
@@ -291,15 +312,22 @@ export default function App() {
               }}
             />
           )}
+          {tab === "sessions" && <Sessions games={filtered} />}
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "insights" && <Insights games={filtered} />}
+          {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
           {tab === "log" && <GameLog games={filtered} />}
         </>
           )}
+          </Suspense>
         </>
       )}
 
-      {showGuide && <MetricsGuide onClose={() => setShowGuide(false)} />}
+      {showGuide && (
+        <Suspense fallback={null}>
+          <MetricsGuide onClose={() => setShowGuide(false)} />
+        </Suspense>
+      )}
     </div>
   );
 }

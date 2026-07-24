@@ -88,10 +88,20 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
   const records: GameRecord[] = [];
   const start = Date.now() - 365 * 86_400_000;
 
+  // Games arrive in realistic sessions (a burst of games, then hours or days
+  // of nothing) so the Sessions/tilt view has structure to find.
+  let sessionGamesLeft = 0;
+  let clockMs = start;
+
   // Simulate improvement over the year: win prob drifts up ~8 points.
   for (let i = 0; i < count; i++) {
     const t = i / count;
-    const playedAt = new Date(start + t * 364 * 86_400_000 + rand() * 4 * 3_600_000);
+    if (sessionGamesLeft <= 0) {
+      sessionGamesLeft = 6 + Math.floor(rand() * 14);
+      clockMs = start + t * 364 * 86_400_000 + rand() * 6 * 3_600_000;
+    }
+    sessionGamesLeft--;
+    const playedAt = new Date(clockMs);
     const rival = pickWeighted(rand, RIVALS);
     const mine = pickWeighted(rand, MY_CHARS.map((c) => ({ ...c, weight: c.weight * 100 })));
     const oppChar = rival.chars[Math.floor(rand() * rival.chars.length)];
@@ -99,6 +109,8 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const iWin = rand() < pWin;
 
     const durationFrames = Math.floor((90 + rand() * 240) * 60);
+    // Advance the session clock: game length plus queue/rematch downtime.
+    clockMs += (durationFrames / 60) * 1000 + (30 + rand() * 150) * 1000;
     const minutes = durationFrames / 3600;
     const myKills = iWin ? 4 : Math.floor(rand() * 4);
     const oppKills = iWin ? Math.floor(rand() * 4) : 4;

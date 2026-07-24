@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary, perGameSeries } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
@@ -114,11 +114,79 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
 
 // ---------------- Stages ----------------
 
-export function Stages({ games }: { games: ResolvedGame[] }) {
+/** Stage × character win-rate grid shared by the two counterpick panels. */
+function StageCharGrid({
+  games,
+  side,
+  minGames,
+  onSelect,
+}: {
+  games: ResolvedGame[];
+  side: "opp" | "mine";
+  minGames: number;
+  onSelect: (stageId: number, charId: number, side: "opp" | "mine") => void;
+}) {
+  const { stages, chars, cells } = useMemo(() => stageCharMatrix(games, side), [games, side]);
+  if (stages.length === 0) return <div className="empty-note">No games match the current filters.</div>;
+  return (
+    <div className="matrix-wrap">
+      <table className="matrix">
+        <thead>
+          <tr>
+            <th />
+            {chars.map((c) => (
+              <th key={c}>{charName(c)}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {stages.map((s) => (
+            <tr key={s}>
+              <th>{stageName(s)}</th>
+              {chars.map((c) => {
+                const cell = cells.get(`${s}:${c}`);
+                if (!cell || cell.decided === 0) {
+                  return (
+                    <td key={c} className="cell empty">
+                      ·
+                    </td>
+                  );
+                }
+                const alpha = cell.games >= minGames ? 1 : 0.35;
+                return (
+                  <td
+                    key={c}
+                    className="cell"
+                    style={{ background: winRateColor(cell.winRate, alpha) }}
+                    onClick={() => onSelect(s, c, side)}
+                    title={`${stageName(s)} ${side === "opp" ? "vs" : "as"} ${charName(c)}: ${cell.wins}–${cell.losses}`}
+                  >
+                    {pct(cell.winRate, 0)}
+                    <span className="n">n={cell.games}</span>
+                  </td>
+                );
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export function Stages({
+  games,
+  onSelect,
+}: {
+  games: ResolvedGame[];
+  onSelect: (stageId: number, charId: number, side: "opp" | "mine") => void;
+}) {
+  const [minGames, setMinGames] = useState(10);
   const rows = useMemo(() => byStage(games), [games]);
   if (rows.length === 0) return <div className="empty-note">No games match the current filters.</div>;
   const max = Math.max(...rows.map((r) => r.games));
   return (
+    <>
     <div className="panel">
       <h2>By stage</h2>
       <table>
@@ -157,6 +225,35 @@ export function Stages({ games }: { games: ResolvedGame[] }) {
         </tbody>
       </table>
     </div>
+
+    <div className="panel">
+      <h2>Counterpick helper — stage × opponent character</h2>
+      <div style={{ marginBottom: 10 }}>
+        <label style={{ fontSize: 12, color: "var(--muted)" }}>
+          Fade cells under{" "}
+          <select value={minGames} onChange={(e) => setMinGames(Number(e.target.value))}>
+            {[1, 5, 10, 20, 50].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>{" "}
+          games
+        </label>
+      </div>
+      <StageCharGrid games={games} side="opp" minGames={minGames} onSelect={onSelect} />
+      <div className="hint">
+        Where you actually win each matchup — green columns are safe picks against that character, red ones are bans.
+        Click a cell to scope the dashboard to that stage + opponent character.
+      </div>
+    </div>
+
+    <div className="panel">
+      <h2>My character × stage</h2>
+      <StageCharGrid games={games} side="mine" minGames={minGames} onSelect={onSelect} />
+      <div className="hint">Same grid keyed on your own character — where each of your characters over- or under-performs.</div>
+    </div>
+    </>
   );
 }
 

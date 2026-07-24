@@ -363,6 +363,293 @@ export function matchupMatrix(games: ResolvedGame[]): { myChars: number[]; oppCh
   return { myChars: sortDesc(myCount), oppChars: sortDesc(oppCount), cells };
 }
 
+export interface StageCharCell extends WL {
+  stageId: number;
+  charId: number;
+}
+
+/**
+ * Counterpick helper: win rate by stage × character. side="opp" keys on the
+ * opponent's character (where do I beat Fox?); side="mine" keys on my own
+ * (where does my Falco perform?). Stages sort by legal-list order via games
+ * played; characters by games played.
+ */
+export function stageCharMatrix(
+  games: ResolvedGame[],
+  side: "opp" | "mine",
+): { stages: number[]; chars: number[]; cells: Map<string, StageCharCell> } {
+  const cells = new Map<string, StageCharCell>();
+  const stageCount = new Map<number, number>();
+  const charCount = new Map<number, number>();
+  for (const g of games) {
+    const charId = side === "opp" ? g.opp.characterId : g.me.characterId;
+    const key = `${g.rec.stageId}:${charId}`;
+    let cell = cells.get(key);
+    if (!cell) {
+      cell = { stageId: g.rec.stageId, charId, games: 0, wins: 0, losses: 0, decided: 0, winRate: null };
+      cells.set(key, cell);
+    }
+    cell.games++;
+    if (g.isWin === true) cell.wins++;
+    else if (g.isWin === false) cell.losses++;
+    stageCount.set(g.rec.stageId, (stageCount.get(g.rec.stageId) ?? 0) + 1);
+    charCount.set(charId, (charCount.get(charId) ?? 0) + 1);
+  }
+  for (const cell of cells.values()) {
+    cell.decided = cell.wins + cell.losses;
+    cell.winRate = winRate(cell.wins, cell.decided);
+  }
+  const sortDesc = (m: Map<number, number>) => Array.from(m.entries()).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+  return { stages: sortDesc(stageCount), chars: sortDesc(charCount), cells };
+}
+
+// ---------- Sessions & tilt ----------
+
+export interface Session {
+  start: Date;
+  end: Date;
+  games: ResolvedGame[];
+  wins: number;
+  losses: number;
+  decided: number;
+  winRate: number | null;
+  minutes: number;
+}
+
+/** Group games into play sessions: a new session starts after `gapMinutes` of no games. */
+export function computeSessions(games: ResolvedGame[], gapMinutes = 30): Session[] {
+  const sessions: Session[] = [];
+  let cur: Session | null = null;
+  let lastEndMs = 0;
+  for (const g of games) {
+    if (!g.date) continue;
+    const startMs = g.date.getTime();
+    const endMs = startMs + (g.rec.durationFrames / 60) * 1000;
+    if (!cur || startMs - lastEndMs > gapMinutes * 60_000) {
+      cur = { start: g.date, end: new Date(endMs), games: [], wins: 0, losses: 0, decided: 0, winRate: null, minutes: 0 };
+      sessions.push(cur);
+    }
+    cur.games.push(g);
+    if (g.isWin === true) cur.wins++;
+    else if (g.isWin === false) cur.losses++;
+    cur.end = new Date(Math.max(cur.end.getTime(), endMs));
+    lastEndMs = endMs;
+  }
+  for (const s of sessions) {
+    s.decided = s.wins + s.losses;
+    s.winRate = winRate(s.wins, s.decided);
+    s.minutes = (s.end.getTime() - s.start.getTime()) / 60_000;
+  }
+  return sessions;
+}
+
+export interface SessionBucketRow extends WL {
+  label: string;
+}
+
+/** Win rate by position within a session: does your play degrade as the session drags? */
+export function winRateBySessionPosition(sessions: Session[]): SessionBucketRow[] {
+  const defs: { label: string; lo: number; hi: number }[] = [
+    { label: "Games 1–5", lo: 1, hi: 5 },
+    { label: "Games 6–10", lo: 6, hi: 10 },
+    { label: "Games 11–15", lo: 11, hi: 15 },
+    { label: "Games 16–20", lo: 16, hi: 20 },
+    { label: "Games 21+", lo: 21, hi: Infinity },
+  ];
+  const agg = defs.map(() => ({ games: 0, wins: 0, losses: 0 }));
+  for (const s of sessions) {
+    s.games.forEach((g, i) => {
+      const pos = i + 1;
+      const bi = defs.findIndex((d) => pos >= d.lo && pos <= d.hi);
+      if (bi < 0) return;
+      agg[bi].games++;
+      if (g.isWin === true) agg[bi].wins++;
+      else if (g.isWin === false) agg[bi].losses++;
+    });
+  }
+  return defs.map((d, i) => ({
+    label: d.label,
+    games: agg[i].games,
+    wins: agg[i].wins,
+    losses: agg[i].losses,
+    decided: agg[i].wins + agg[i].losses,
+    winRate: winRate(agg[i].wins, agg[i].wins + agg[i].losses),
+  }));
+}
+
+/**
+ * Win rate conditioned on the streak you were on entering the game (within the
+ * same session). "After 3+ losses" trending below baseline is what tilt looks
+ * like in the data. Indeterminate games neither extend nor break a streak.
+ */
+export function tiltStats(sessions: Session[]): SessionBucketRow[] {
+  const defs = ["Session opener", "After a win", "After 2+ wins", "After a loss", "After 2 losses", "After 3+ losses"] as const;
+  const agg = new Map(defs.map((d) => [d as string, { games: 0, wins: 0, losses: 0 }]));
+  const add = (label: string, isWin: boolean) => {
+    const a = agg.get(label)!;
+    a.games++;
+    if (isWin) a.wins++;
+    else a.losses++;
+  };
+  for (const s of sessions) {
+    let kind: "W" | "L" | null = null;
+    let run = 0;
+    for (const g of s.games) {
+      if (g.isWin === null) continue;
+      if (kind === null) add("Session opener", g.isWin);
+      else if (kind === "W") add(run >= 2 ? "After 2+ wins" : "After a win", g.isWin);
+      else add(run >= 3 ? "After 3+ losses" : run === 2 ? "After 2 losses" : "After a loss", g.isWin);
+      const k = g.isWin ? "W" : "L";
+      run = k === kind ? run + 1 : 1;
+      kind = k;
+    }
+  }
+  return defs.map((label) => {
+    const a = agg.get(label)!;
+    return { label, games: a.games, wins: a.wins, losses: a.losses, decided: a.wins + a.losses, winRate: winRate(a.wins, a.wins + a.losses) };
+  });
+}
+
+// ---------- Records ----------
+
+export interface GameRef {
+  oppCode: string | null;
+  oppChar: number;
+  date: Date | null;
+}
+
+export interface SinglesRecords {
+  bestWinStreak: { length: number; end: Date | null } | null;
+  worstLossStreak: { length: number; end: Date | null } | null;
+  highestDamage: (GameRef & { value: number }) | null;
+  fastestWin: (GameRef & { seconds: number }) | null;
+  longestGame: (GameRef & { seconds: number }) | null;
+  perfectWins: number; // wins with all 4 stocks intact
+  bestLCancelDay: { day: string; rate: number; attempts: number } | null;
+  busiestDay: { day: string; games: number } | null;
+  longestSession: { games: number; start: Date } | null;
+  nemesis: { code: string; wins: number; losses: number } | null; // most losses to
+  victim: { code: string; wins: number; losses: number } | null; // most wins against
+}
+
+const LC_DAY_MIN_ATTEMPTS = 100;
+
+export function singlesRecords(games: ResolvedGame[]): SinglesRecords {
+  let bestW: SinglesRecords["bestWinStreak"] = null;
+  let bestL: SinglesRecords["worstLossStreak"] = null;
+  let kind: "W" | "L" | null = null;
+  let run = 0;
+  let highestDamage: SinglesRecords["highestDamage"] = null;
+  let fastestWin: SinglesRecords["fastestWin"] = null;
+  let longestGame: SinglesRecords["longestGame"] = null;
+  let perfectWins = 0;
+  const lcByDay = new Map<string, { s: number; f: number }>();
+  const gamesByDay = new Map<string, number>();
+  const byOpp = new Map<string, { wins: number; losses: number }>();
+
+  const ref = (g: ResolvedGame): GameRef => ({ oppCode: g.opp.connectCode, oppChar: g.opp.characterId, date: g.date });
+
+  for (const g of games) {
+    const seconds = g.rec.durationFrames / 60;
+    if (g.isWin !== null) {
+      const k = g.isWin ? "W" : "L";
+      run = k === kind ? run + 1 : 1;
+      kind = k;
+      if (k === "W" && (!bestW || run > bestW.length)) bestW = { length: run, end: g.date };
+      if (k === "L" && (!bestL || run > bestL.length)) bestL = { length: run, end: g.date };
+    }
+    if (!highestDamage || g.me.totalDamage > highestDamage.value) highestDamage = { ...ref(g), value: g.me.totalDamage };
+    if (g.isWin === true && (!fastestWin || seconds < fastestWin.seconds)) fastestWin = { ...ref(g), seconds };
+    if (!longestGame || seconds > longestGame.seconds) longestGame = { ...ref(g), seconds };
+    if (g.isWin === true && g.me.stocksRemaining === 4) perfectWins++;
+    if (g.date) {
+      const day = localDay(g.date);
+      gamesByDay.set(day, (gamesByDay.get(day) ?? 0) + 1);
+      const lc = lcByDay.get(day) ?? { s: 0, f: 0 };
+      lc.s += g.me.lCancelSuccess;
+      lc.f += g.me.lCancelFail;
+      lcByDay.set(day, lc);
+    }
+    if (g.opp.connectCode && g.isWin !== null) {
+      const o = byOpp.get(g.opp.connectCode) ?? { wins: 0, losses: 0 };
+      if (g.isWin) o.wins++;
+      else o.losses++;
+      byOpp.set(g.opp.connectCode, o);
+    }
+  }
+
+  let bestLCancelDay: SinglesRecords["bestLCancelDay"] = null;
+  for (const [day, { s, f }] of lcByDay) {
+    if (s + f < LC_DAY_MIN_ATTEMPTS) continue;
+    const rate = s / (s + f);
+    if (!bestLCancelDay || rate > bestLCancelDay.rate) bestLCancelDay = { day, rate, attempts: s + f };
+  }
+  let busiestDay: SinglesRecords["busiestDay"] = null;
+  for (const [day, n] of gamesByDay) {
+    if (!busiestDay || n > busiestDay.games) busiestDay = { day, games: n };
+  }
+  const sessions = computeSessions(games);
+  let longestSession: SinglesRecords["longestSession"] = null;
+  for (const s of sessions) {
+    if (!longestSession || s.games.length > longestSession.games) longestSession = { games: s.games.length, start: s.start };
+  }
+  let nemesis: SinglesRecords["nemesis"] = null;
+  let victim: SinglesRecords["victim"] = null;
+  for (const [code, o] of byOpp) {
+    if (!nemesis || o.losses > nemesis.losses) nemesis = { code, ...o };
+    if (!victim || o.wins > victim.wins) victim = { code, ...o };
+  }
+
+  return { bestWinStreak: bestW, worstLossStreak: bestL, highestDamage, fastestWin, longestGame, perfectWins, bestLCancelDay, busiestDay, longestSession, nemesis, victim };
+}
+
+export interface TeamsRecords {
+  bestWinStreak: { length: number; end: Date | null } | null;
+  /** Teammate who friendly-fires me the most (per game, min 5 games). */
+  grudge: { code: string; ffPerGame: number; games: number } | null;
+  /** Teammate I friendly-fire the most (per game, min 5 games). */
+  myTarget: { code: string; ffPerGame: number; games: number } | null;
+}
+
+const FF_RECORD_MIN_GAMES = 5;
+
+export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
+  let best: TeamsRecords["bestWinStreak"] = null;
+  let kind: "W" | "L" | null = null;
+  let run = 0;
+  const ff = new Map<string, { toMe: number; fromMe: number; games: number }>();
+  for (const g of games) {
+    if (g.isWin !== null) {
+      const k = g.isWin ? "W" : "L";
+      run = k === kind ? run + 1 : 1;
+      kind = k;
+      if (k === "W" && (!best || run > best.length)) best = { length: run, end: g.date };
+    }
+    const dm = g.rec.dmgMatrix;
+    const code = g.teammate.connectCode;
+    if (!dm || !code) continue;
+    const ps = g.rec.players;
+    const me = ps.indexOf(g.me);
+    const mate = ps.indexOf(g.teammate);
+    if (me < 0 || mate < 0) continue;
+    const e = ff.get(code) ?? { toMe: 0, fromMe: 0, games: 0 };
+    e.toMe += dm[mate][me];
+    e.fromMe += dm[me][mate];
+    e.games++;
+    ff.set(code, e);
+  }
+  let grudge: TeamsRecords["grudge"] = null;
+  let myTarget: TeamsRecords["myTarget"] = null;
+  for (const [code, e] of ff) {
+    if (e.games < FF_RECORD_MIN_GAMES) continue;
+    const toMe = e.toMe / e.games;
+    const fromMe = e.fromMe / e.games;
+    if (!grudge || toMe > grudge.ffPerGame) grudge = { code, ffPerGame: toMe, games: e.games };
+    if (!myTarget || fromMe > myTarget.ffPerGame) myTarget = { code, ffPerGame: fromMe, games: e.games };
+  }
+  return { bestWinStreak: best, grudge, myTarget };
+}
+
 export interface StageRow extends WL {
   stageId: number;
 }
