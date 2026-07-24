@@ -69,6 +69,17 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("games").clear();
       });
+    // v7 added damage/kill matrices and real per-player doubles stats
+    // (slippi-js computes nothing for 4-player games, so old teams rows are
+    // all zeros). Same missing-field reasoning — full re-parse.
+    this.version(7)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("games").clear();
+      });
   }
 }
 

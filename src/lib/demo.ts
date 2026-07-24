@@ -169,44 +169,69 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
     // 8 team stocks total; the losing team is stocked out.
     const ourStocks = weWin ? 1 + Math.floor(rand() * 4) : 0;
     const theirStocks = weWin ? 0 : 1 + Math.floor(rand() * 4);
+    const stocks = [Math.ceil(ourStocks / 2), Math.floor(ourStocks / 2), Math.ceil(theirStocks / 2), Math.floor(theirStocks / 2)];
+    const minutes = durationFrames / 3600;
 
-    const mk = (
-      port: number,
-      teamId: number,
-      code: string,
-      name: string,
-      characterId: number,
-      stocks: number,
-    ): PlayerSide => ({
-      port,
-      connectCode: code,
-      displayName: name,
-      characterId,
-      colorId: teamId,
-      teamId,
-      stocksRemaining: stocks,
-      // Mirror real parses: slippi-js's stat engine is singles-only, so teams
-      // records genuinely have zero kills/damage/actions. Faking values here
-      // hid a real bug once (kill share) — don't reintroduce them.
-      kills: 0,
-      totalDamage: 0,
-      openingsPerKill: null,
-      damagePerOpening: null,
-      inputsPerMinute: null,
-      neutralWins: 0,
-      counterHits: 0,
-      beneficialTrades: 0,
-      lCancelSuccess: 0,
-      lCancelFail: 0,
-      grabSuccess: 0,
-      actions: { rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0 },
-    });
+    // Matrices mirror the v7 parser: [attacker][victim], FF on same-team cells.
+    // Kill credit must reconcile with stocks lost so kill share sums sanely.
+    const dmgMatrix = [0, 1, 2, 3].map(() => [0, 0, 0, 0]);
+    const killMatrix = [0, 1, 2, 3].map(() => [0, 0, 0, 0]);
+    const mateOf = [1, 0, 3, 2];
+    for (let vi = 0; vi < 4; vi++) {
+      const deaths = 4 - stocks[vi];
+      const enemies = vi < 2 ? [2, 3] : [0, 1];
+      // The demo player carries slightly; enemy credit is otherwise even.
+      const pFirst = enemies[0] === 0 ? 0.55 : 0.5;
+      for (let d = 0; d < deaths; d++) {
+        const ff = rand() < 0.04; // the occasional up-smash nobody talks about
+        const ai = ff ? mateOf[vi] : enemies[rand() < pFirst ? 0 : 1];
+        killMatrix[ai][vi]++;
+      }
+      const taken = deaths * (95 + rand() * 35) + rand() * 80;
+      const firstShare = 0.35 + rand() * 0.3;
+      dmgMatrix[enemies[0]][vi] += taken * firstShare;
+      dmgMatrix[enemies[1]][vi] += taken * (1 - firstShare);
+    }
+    // FF damage: my teammate's sloppiness scales inversely with synergy.
+    dmgMatrix[0][1] += 5 + rand() * 12;
+    dmgMatrix[1][0] += 8 + Math.max(0, 0.15 - mate.synergy) * 90 + rand() * 10;
+    dmgMatrix[2][3] += 4 + rand() * 8;
+    dmgMatrix[3][2] += 4 + rand() * 8;
+
+    const mk = (idx: number, teamId: number, code: string, name: string, characterId: number, isMe: boolean): PlayerSide => {
+      const enemies = idx < 2 ? [2, 3] : [0, 1];
+      const lcAttempts = Math.floor(minutes * (24 + rand() * 12));
+      const lcRate = isMe ? Math.min(0.98, 0.68 + t * 0.16 + (rand() - 0.5) * 0.1) : 0.6 + rand() * 0.3;
+      const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
+      return {
+        port: idx + 1,
+        connectCode: code,
+        displayName: name,
+        characterId,
+        colorId: teamId,
+        teamId,
+        stocksRemaining: stocks[idx],
+        kills: enemies.reduce((s, e) => s + killMatrix[idx][e], 0),
+        totalDamage: enemies.reduce((s, e) => s + dmgMatrix[idx][e], 0),
+        // Conversion-based stats stay null/zero in doubles, matching the parser.
+        openingsPerKill: null,
+        damagePerOpening: null,
+        inputsPerMinute: Math.floor(isMe ? 330 + t * 90 + rand() * 60 : 250 + rand() * 190),
+        neutralWins: 0,
+        counterHits: 0,
+        beneficialTrades: 0,
+        lCancelSuccess: Math.floor(lcAttempts * lcRate),
+        lCancelFail: lcAttempts - Math.floor(lcAttempts * lcRate),
+        grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
+        actions: acts,
+      };
+    };
 
     const players: PlayerSide[] = [
-      mk(1, 0, DEMO_CODE, "demo", mine.id, Math.ceil(ourStocks / 2)),
-      mk(2, 0, mate.code, mate.name, mate.char, Math.floor(ourStocks / 2)),
-      mk(3, 1, rivalA.code, rivalA.name, rivalA.chars[0], Math.ceil(theirStocks / 2)),
-      mk(4, 1, rivalB.code, rivalB.name, rivalB.chars[0], Math.floor(theirStocks / 2)),
+      mk(0, 0, DEMO_CODE, "demo", mine.id, true),
+      mk(1, 0, mate.code, mate.name, mate.char, false),
+      mk(2, 1, rivalA.code, rivalA.name, rivalA.chars[0], false),
+      mk(3, 1, rivalB.code, rivalB.name, rivalB.chars[0], false),
     ];
 
     const rare = rand();
@@ -221,6 +246,8 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       players,
       winnerIndex: null,
       winnerTeamId: rare > 0.98 ? null : weWin ? 0 : 1,
+      dmgMatrix,
+      killMatrix,
     });
   }
   return records;

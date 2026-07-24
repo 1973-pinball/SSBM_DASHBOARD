@@ -683,6 +683,205 @@ export function teamsByStage(games: ResolvedTeamGame[]): StageRow[] {
     .sort((a, b) => b.games - a.games);
 }
 
+// ---------- Teams damage & friendly fire ----------
+// All of these read the per-game dmgMatrix/killMatrix (attacker→victim in
+// rec.players order); games parsed before schema v7 don't have them and the
+// v7 upgrade wipes the cache, so a null matrix only means a malformed 2v2.
+
+/** Positions of me/teammate/opps within rec.players, for matrix lookups. */
+function teamIdx(g: ResolvedTeamGame): { me: number; mate: number; opps: [number, number] } | null {
+  const ps = g.rec.players;
+  const me = ps.indexOf(g.me);
+  const mate = ps.indexOf(g.teammate);
+  const o0 = ps.indexOf(g.opps[0]);
+  const o1 = ps.indexOf(g.opps[1]);
+  if (me < 0 || mate < 0 || o0 < 0 || o1 < 0) return null;
+  return { me, mate, opps: [o0, o1] };
+}
+
+interface DmgTotals {
+  games: number;
+  myDmg: number;
+  mateDmg: number;
+  myFF: number;
+  mateFF: number;
+  myKills: number;
+  mateKills: number;
+  myFFKills: number;
+  mateFFKills: number;
+  myTaken: number;
+  mateTaken: number;
+}
+
+function emptyTotals(): DmgTotals {
+  return { games: 0, myDmg: 0, mateDmg: 0, myFF: 0, mateFF: 0, myKills: 0, mateKills: 0, myFFKills: 0, mateFFKills: 0, myTaken: 0, mateTaken: 0 };
+}
+
+function accumulate(t: DmgTotals, g: ResolvedTeamGame): void {
+  const dm = g.rec.dmgMatrix;
+  const km = g.rec.killMatrix;
+  if (!dm || !km) return;
+  const ix = teamIdx(g);
+  if (!ix) return;
+  const [a, b] = ix.opps;
+  t.games++;
+  t.myDmg += dm[ix.me][a] + dm[ix.me][b];
+  t.mateDmg += dm[ix.mate][a] + dm[ix.mate][b];
+  t.myFF += dm[ix.me][ix.mate];
+  t.mateFF += dm[ix.mate][ix.me];
+  t.myKills += km[ix.me][a] + km[ix.me][b];
+  t.mateKills += km[ix.mate][a] + km[ix.mate][b];
+  t.myFFKills += km[ix.me][ix.mate];
+  t.mateFFKills += km[ix.mate][ix.me];
+  t.myTaken += dm[a][ix.me] + dm[b][ix.me];
+  t.mateTaken += dm[a][ix.mate] + dm[b][ix.mate];
+}
+
+export interface TeamsDamageOverview {
+  games: number; // games carrying matrices (clean 2v2s parsed on schema v7+)
+  myDmgPerGame: number | null;
+  mateDmgPerGame: number | null;
+  dmgShare: number | null; // my share of the team's damage to enemies
+  myFFPerGame: number | null; // damage I dealt to my teammate
+  mateFFPerGame: number | null; // damage my teammate dealt to me
+  myFFKills: number;
+  mateFFKills: number;
+  myKillsPerGame: number | null;
+  mateKillsPerGame: number | null;
+  killShare: number | null;
+  focusShare: number | null; // share of enemy damage that was aimed at me
+}
+
+function toOverview(t: DmgTotals): TeamsDamageOverview {
+  const per = (v: number) => (t.games ? v / t.games : null);
+  const share = (mine: number, theirs: number) => (mine + theirs > 0 ? mine / (mine + theirs) : null);
+  return {
+    games: t.games,
+    myDmgPerGame: per(t.myDmg),
+    mateDmgPerGame: per(t.mateDmg),
+    dmgShare: share(t.myDmg, t.mateDmg),
+    myFFPerGame: per(t.myFF),
+    mateFFPerGame: per(t.mateFF),
+    myFFKills: t.myFFKills,
+    mateFFKills: t.mateFFKills,
+    myKillsPerGame: per(t.myKills),
+    mateKillsPerGame: per(t.mateKills),
+    killShare: share(t.myKills, t.mateKills),
+    focusShare: share(t.myTaken, t.mateTaken),
+  };
+}
+
+export function teamsDamageOverview(games: ResolvedTeamGame[]): TeamsDamageOverview {
+  const t = emptyTotals();
+  for (const g of games) accumulate(t, g);
+  return toOverview(t);
+}
+
+export interface TeammateDamageRow extends TeamsDamageOverview {
+  code: string;
+  displayName: string | null;
+}
+
+/** Damage/FF splits per teammate. Offline games without connect codes are skipped. */
+export function byTeammateDamage(games: ResolvedTeamGame[]): TeammateDamageRow[] {
+  const map = new Map<string, { t: DmgTotals; name: string | null }>();
+  for (const g of games) {
+    const code = g.teammate.connectCode;
+    if (!code) continue;
+    let e = map.get(code);
+    if (!e) {
+      e = { t: emptyTotals(), name: null };
+      map.set(code, e);
+    }
+    accumulate(e.t, g);
+    e.name = g.teammate.displayName ?? e.name;
+  }
+  return Array.from(map.entries())
+    .map(([code, e]) => ({ code, displayName: e.name, ...toOverview(e.t) }))
+    .filter((r) => r.games > 0)
+    .sort((a, b) => b.games - a.games);
+}
+
+export interface TeamsDamageWeek {
+  week: string;
+  games: number;
+  myDmg: number; // per-game averages within the week
+  mateDmg: number;
+  myFF: number;
+  mateFF: number;
+}
+
+/** Weekly per-game averages of damage and friendly fire, for the time series. */
+export function teamsDamageByWeek(games: ResolvedTeamGame[]): TeamsDamageWeek[] {
+  const map = new Map<string, DmgTotals>();
+  for (const g of games) {
+    if (!g.date) continue;
+    const d = new Date(g.date);
+    d.setUTCDate(d.getUTCDate() - d.getUTCDay()); // week start (Sunday)
+    const key = d.toISOString().slice(0, 10);
+    let t = map.get(key);
+    if (!t) {
+      t = emptyTotals();
+      map.set(key, t);
+    }
+    accumulate(t, g);
+  }
+  return Array.from(map.entries())
+    .filter(([, t]) => t.games > 0)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([week, t]) => ({
+      week,
+      games: t.games,
+      myDmg: t.myDmg / t.games,
+      mateDmg: t.mateDmg / t.games,
+      myFF: t.myFF / t.games,
+      mateFF: t.mateFF / t.games,
+    }));
+}
+
+export interface TeamsExecutionRow {
+  who: "Me" | "Teammate";
+  lCancelPct: number | null;
+  ipm: number | null;
+  wavedashesPerGame: number | null;
+  dashDancesPerGame: number | null;
+  grabSuccessPct: number | null;
+}
+
+/** Execution comparison (me vs teammate) over teams games. */
+export function teamsExecution(games: ResolvedTeamGame[]): TeamsExecutionRow[] {
+  const mk = () => ({ lcS: 0, lcF: 0, ipmSum: 0, ipmGames: 0, wd: 0, dd: 0, grabS: 0, grabs: 0, games: 0 });
+  const me = mk();
+  const mate = mk();
+  for (const g of games) {
+    for (const [agg, p] of [
+      [me, g.me],
+      [mate, g.teammate],
+    ] as const) {
+      agg.games++;
+      agg.lcS += p.lCancelSuccess;
+      agg.lcF += p.lCancelFail;
+      if (p.inputsPerMinute !== null) {
+        agg.ipmSum += p.inputsPerMinute;
+        agg.ipmGames++;
+      }
+      agg.wd += p.actions.wavedashes;
+      agg.dd += p.actions.dashDances;
+      agg.grabS += p.grabSuccess;
+      agg.grabs += p.actions.grabs;
+    }
+  }
+  const row = (who: TeamsExecutionRow["who"], a: ReturnType<typeof mk>): TeamsExecutionRow => ({
+    who,
+    lCancelPct: a.lcS + a.lcF > 0 ? a.lcS / (a.lcS + a.lcF) : null,
+    ipm: a.ipmGames ? a.ipmSum / a.ipmGames : null,
+    wavedashesPerGame: a.games ? a.wd / a.games : null,
+    dashDancesPerGame: a.games ? a.dd / a.games : null,
+    grabSuccessPct: a.grabs > 0 ? a.grabS / a.grabs : null,
+  });
+  return [row("Me", me), row("Teammate", mate)];
+}
+
 export interface WeekBar {
   week: string;
   games: number;

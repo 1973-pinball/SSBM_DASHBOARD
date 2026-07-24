@@ -1,4 +1,5 @@
-import { SlippiGame, GameEndMethod } from "@slippi/slippi-js";
+import { SlippiGame, GameEndMethod, ActionsComputer, InputComputer, calcDamageTaken, didLoseStock } from "@slippi/slippi-js";
+import type { GameStartType } from "@slippi/slippi-js";
 import type { GameRecord, GameType, PlayerSide } from "./types";
 
 const MIN_GAME_SECONDS = 30;
@@ -9,6 +10,90 @@ function detectGameType(matchId: string | null | undefined): GameType {
   if (matchId.includes("mode.unranked")) return "unranked";
   if (matchId.includes("mode.direct")) return "direct";
   return "unknown";
+}
+
+interface TeamsStats {
+  dmgMatrix: number[][]; // [attacker][victim] in settings.players order; diagonal = self/unattributed
+  killMatrix: number[][]; // same shape; diagonal = self-destructs
+  actionsByPlayerIndex: Map<number, ReturnType<ActionsComputer["fetch"]>[number]>;
+  inputCountByPlayerIndex: Map<number, number>;
+}
+
+/**
+ * slippi-js's stat computers are singles-only (they no-op on 4-player games),
+ * so for clean 2v2s we make our own frame pass. Damage and kills are
+ * attributed through each victim's `lastHitBy`, split into a full
+ * attacker→victim matrix — that one structure yields enemy damage, friendly
+ * fire (both directions), damage taken by source, and real stock captures.
+ * Action/input counts reuse the library's own per-player state machines by
+ * running them pairwise across teams (they only read the opponent's position,
+ * for tech direction, which we don't surface).
+ */
+function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStats | null {
+  const players = settings.players;
+  if (players.length !== 4) return null;
+  const byTeam = new Map<number, number>();
+  for (const p of players) {
+    if (p.teamId === null || p.teamId === undefined) return null;
+    byTeam.set(p.teamId, (byTeam.get(p.teamId) ?? 0) + 1);
+  }
+  if (byTeam.size !== 2 || Array.from(byTeam.values()).some((n) => n !== 2)) return null;
+
+  const teamIds = Array.from(byTeam.keys());
+  const teamA = players.filter((p) => p.teamId === teamIds[0]);
+  const teamB = players.filter((p) => p.teamId === teamIds[1]);
+  // One computer per cross-team pair; each handles both of its players.
+  const computers = [
+    [teamA[0], teamB[0]],
+    [teamA[1], teamB[1]],
+  ].map((pair) => {
+    const fake = { ...settings, players: pair } as GameStartType;
+    const actions = new ActionsComputer();
+    actions.setup(fake);
+    const inputs = new InputComputer();
+    inputs.setup(fake);
+    return { actions, inputs };
+  });
+
+  const posOf = new Map(players.map((p, i) => [p.playerIndex, i]));
+  const dmgMatrix = players.map(() => players.map(() => 0));
+  const killMatrix = players.map(() => players.map(() => 0));
+
+  const frames = game.getFrames();
+  const frameNums = Object.keys(frames)
+    .map(Number)
+    .sort((a, b) => a - b);
+  let prev: (typeof frames)[number] | null = null;
+  for (const fn of frameNums) {
+    const frame = frames[fn];
+    if (!frame?.players || players.some((p) => !frame.players[p.playerIndex]?.post)) continue;
+    for (const { actions, inputs } of computers) {
+      actions.processFrame(frame);
+      inputs.processFrame(frame, frames);
+    }
+    if (prev?.players) {
+      for (const p of players) {
+        const post = frame.players[p.playerIndex]!.post;
+        const prevPost = prev.players[p.playerIndex]?.post;
+        if (!prevPost) continue;
+        const vi = posOf.get(p.playerIndex)!;
+        const lhb = post.lastHitBy;
+        const ai = lhb !== null && lhb !== undefined && lhb !== p.playerIndex && posOf.has(lhb) ? posOf.get(lhb)! : vi;
+        const dmg = calcDamageTaken(post, prevPost);
+        if (dmg > 0) dmgMatrix[ai][vi] += dmg;
+        if (didLoseStock(post, prevPost)) killMatrix[ai][vi] += 1;
+      }
+    }
+    prev = frame;
+  }
+
+  const actionsByPlayerIndex = new Map<number, ReturnType<ActionsComputer["fetch"]>[number]>();
+  const inputCountByPlayerIndex = new Map<number, number>();
+  for (const { actions, inputs } of computers) {
+    for (const a of actions.fetch()) actionsByPlayerIndex.set(a.playerIndex, a);
+    for (const i of inputs.fetch()) inputCountByPlayerIndex.set(i.playerIndex, i.inputCount);
+  }
+  return { dmgMatrix, killMatrix, actionsByPlayerIndex, inputCountByPlayerIndex };
 }
 
 /**
@@ -66,6 +151,44 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       },
     };
   });
+
+  // Doubles: slippi-js left every stat field zeroed, so fill them from our
+  // own frame pass. kills/totalDamage keep singles semantics (enemies only);
+  // friendly fire lives in the matrices.
+  const teamsStats = isTeams ? computeTeamsStats(game, settings) : null;
+  if (teamsStats) {
+    const minutes = durationFrames / 3600;
+    settings.players.forEach((p, i) => {
+      const side = players[i];
+      let enemyDmg = 0;
+      let enemyKills = 0;
+      settings.players.forEach((v, j) => {
+        if (i === j || v.teamId === p.teamId) return;
+        enemyDmg += teamsStats.dmgMatrix[i][j];
+        enemyKills += teamsStats.killMatrix[i][j];
+      });
+      side.totalDamage = enemyDmg;
+      side.kills = enemyKills;
+      const ac = teamsStats.actionsByPlayerIndex.get(p.playerIndex);
+      if (ac) {
+        side.lCancelSuccess = ac.lCancelCount?.success ?? 0;
+        side.lCancelFail = ac.lCancelCount?.fail ?? 0;
+        side.grabSuccess = ac.grabCount?.success ?? 0;
+        side.actions = {
+          rolls: ac.rollCount ?? 0,
+          airDodges: ac.airDodgeCount ?? 0,
+          spotDodges: ac.spotDodgeCount ?? 0,
+          wavedashes: ac.wavedashCount ?? 0,
+          wavelands: ac.wavelandCount ?? 0,
+          dashDances: ac.dashDanceCount ?? 0,
+          ledgeGrabs: ac.ledgegrabCount ?? 0,
+          grabs: (ac.grabCount?.success ?? 0) + (ac.grabCount?.fail ?? 0),
+        };
+      }
+      const inputCount = teamsStats.inputCountByPlayerIndex.get(p.playerIndex);
+      side.inputsPerMinute = inputCount !== undefined && minutes > 0 ? inputCount / minutes : null;
+    });
+  }
 
   // Placements are only meaningful when the game actually concluded. On a
   // NO_CONTEST (LRAS quit-out) or UNRESOLVED end the payload can carry stale
@@ -163,5 +286,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     players,
     winnerIndex,
     winnerTeamId,
+    dmgMatrix: teamsStats?.dmgMatrix ?? null,
+    killMatrix: teamsStats?.killMatrix ?? null,
   };
 }

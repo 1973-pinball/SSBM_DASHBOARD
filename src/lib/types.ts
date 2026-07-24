@@ -34,8 +34,8 @@ export interface PlayerSide {
   colorId: number;
   teamId: number | null; // null in singles
   stocksRemaining: number | null;
-  kills: number;
-  totalDamage: number;
+  kills: number; // enemy stocks taken; in teams, FF kills live in killMatrix
+  totalDamage: number; // damage to enemies; in teams, FF lives in dmgMatrix
   openingsPerKill: number | null;
   damagePerOpening: number | null;
   inputsPerMinute: number | null;
@@ -63,6 +63,14 @@ export interface GameRecord {
   players: PlayerSide[]; // 2 for singles, 4 for 2v2
   winnerIndex: number | null; // singles: index into players; null = indeterminate
   winnerTeamId: number | null; // teams: winning teamId; null = indeterminate
+  /**
+   * Teams only: [attacker][victim] damage / stock captures in players[] order,
+   * attributed via each victim's lastHitBy. The diagonal holds self-damage and
+   * self-destructs. Null for singles and malformed 2v2s. Cross-team cells are
+   * real damage/kills; same-team cells are friendly fire.
+   */
+  dmgMatrix?: number[][] | null;
+  killMatrix?: number[][] | null;
   parseError?: string;
 }
 
