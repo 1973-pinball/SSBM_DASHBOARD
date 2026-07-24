@@ -76,7 +76,7 @@ export interface GameRecord {
 
 export interface Filters {
   format: Format;
-  range: "all" | "30d" | "90d" | "1y";
+  range: "all" | "7d" | "14d" | "30d" | "90d" | "1y";
   day: string | null; // local YYYY-MM-DD; overrides range when set
   myCharacter: number | null;
   oppCharacter: number | null;

@@ -85,7 +85,7 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
   return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
 }
 
-const RANGE_DAYS: Record<Exclude<Filters["range"], "all">, number> = { "30d": 30, "90d": 90, "1y": 365 };
+const RANGE_DAYS: Record<Exclude<Filters["range"], "all">, number> = { "7d": 7, "14d": 14, "30d": 30, "90d": 90, "1y": 365 };
 
 export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] {
   // A picked day overrides the relative range — combining them could only
