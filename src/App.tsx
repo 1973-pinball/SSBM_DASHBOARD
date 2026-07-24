@@ -1,4 +1,4 @@
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline } from "./lib/pool";
@@ -23,6 +23,29 @@ const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: 
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
 const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
 const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
+
+/**
+ * Last line of defense for lazy-chunk failures: main.tsx auto-reloads once on
+ * vite:preloadError, but if the chunk is still missing (guard window, server
+ * trouble) the thrown error would otherwise white-screen the whole app.
+ */
+class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="error-note" role="alert">
+        This view failed to load — the site probably updated while this tab was open.
+        <button className="ghost" style={{ marginLeft: 10 }} onClick={() => window.location.reload()}>
+          Reload
+        </button>
+      </div>
+    );
+  }
+}
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
 type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log";
@@ -263,6 +286,7 @@ export default function App() {
           />
           {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
               consolidated view rather than the singles tab set. */}
+          <ViewErrorBoundary>
           <Suspense fallback={<div className="empty-note">Loading…</div>}>
           {showTeams ? (
             <Teams games={filteredTeams} onSelectTeammate={(code) => setFilters({ ...filters, teammateCode: code })} />
@@ -320,6 +344,7 @@ export default function App() {
         </>
           )}
           </Suspense>
+          </ViewErrorBoundary>
         </>
       )}
 
