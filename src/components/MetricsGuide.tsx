@@ -110,11 +110,99 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
       },
       {
         term: "Stocks taken / lost",
-        def: "Your duo's combined stocks taken from (or lost to) the enemy team, from end-of-game state. Per-player stats — kills, damage, L-cancels — don't exist in 2v2 replays: Slippi's stat engine only computes them for singles, so team-level stocks are the honest measure. Self-destructs count as stocks taken by the other team.",
+        def: "Your duo's combined stocks taken from (or lost to) the enemy team, from end-of-game state. The Damage & FF tab splits captures per player. Self-destructs count as stocks taken by the other team.",
       },
       {
         term: "Enemy team includes",
         def: "A game counts once for each distinct character on the enemy team, so a double-Fox team counts Fox once and the rows sum above the game total.",
+      },
+    ],
+  },
+  {
+    title: "Teams — Damage & FF",
+    items: [
+      {
+        term: "Damage attribution",
+        def: "Slippi's own stat engine computes nothing for 4-player games, so this dashboard does its own frame pass: every point of damage (and every stock loss) is credited to the victim's last-hit-by player — the same convention other Slippi tools use. Self-destructs credit no one. Attribution can very occasionally be wrong when someone dies without being touched recently.",
+      },
+      {
+        term: "My / teammate damage per game",
+        def: "Damage dealt to the enemy team only — friendly fire is tracked separately, never mixed in. Kills per game are enemy stocks captured, same rule.",
+      },
+      {
+        term: "Damage share / kill share",
+        def: "Your slice of the duo's total enemy damage (or captures). 50% is an even carry; consistently above means you're the engine, below means you're the passenger — though roles (support Puff vs closer Fox) legitimately skew this.",
+      },
+      {
+        term: "Friendly fire (FF)",
+        def: "Damage dealt to your own teammate, shown per game in both directions — what you did to them and what they did to you. FF kills are the times a teammate's hit took the partner's stock. These come from same-team cells of the damage matrix.",
+      },
+      {
+        term: "Enemy focus on me",
+        def: "Of all the damage the enemy team dealt to your duo, the share aimed at you. Above 50% means they target you; useful for judging whether your teammate is getting camped or napping.",
+      },
+      {
+        term: "Execution — me vs teammate",
+        def: "L-cancel %, inputs/min and movement counts computed per player in doubles by running the singles stat machinery pairwise across teams. 'Teammate' aggregates whoever you queued with under the current filters.",
+      },
+    ],
+  },
+  {
+    title: "Counterpicks (Stages tab)",
+    items: [
+      {
+        term: "Stage × opponent character",
+        def: "Your win rate on each stage against each opponent character. Read it as a counterpick sheet: within a character's column, green stages are picks and red ones are bans. Faded cells are below the sample threshold — treat them as anecdotes, not data.",
+      },
+      {
+        term: "My character × stage",
+        def: "The same grid keyed on your own character — where each of your characters over- or under-performs. Clicking any cell in either grid scopes the whole dashboard to that stage + character.",
+      },
+    ],
+  },
+  {
+    title: "Sessions & tilt",
+    items: [
+      {
+        term: "Session",
+        def: "A run of consecutive games where each game starts within 30 minutes of the previous game ending. A gap longer than 30 minutes starts a new session. So a night of ranked with drink breaks is one session; morning and evening play on the same day are two.",
+      },
+      {
+        term: "Win rate by position in session",
+        def: "All sessions stacked up: your record in games 1–5 of a session, 6–10, and so on, compared against your baseline win rate. A red tail means your marathon sessions are donating rating.",
+      },
+      {
+        term: "Tilt check",
+        def: "Win rate conditioned on the streak you were on entering the game, within the same session — after a win, after 2+ wins, after a loss, after 2 losses, after 3+ losses. 'After 3+ losses' sitting far below baseline is the statistical signature of tilt. Streaks reset between sessions, and indeterminate games neither extend nor break a streak.",
+      },
+      {
+        term: "Baseline",
+        def: "Your overall win rate across all decided games in the current filter — the reference point the 'vs baseline' columns compare against.",
+      },
+    ],
+  },
+  {
+    title: "Records",
+    items: [
+      {
+        term: "Streaks & bests",
+        def: "All records respect the current filters, so you can ask for your best streak with one character or in one time range. Dates shown are when the record was set (streaks: when the run ended).",
+      },
+      {
+        term: "Perfect win",
+        def: "A win with all 4 of your stocks intact — the opponent never took one.",
+      },
+      {
+        term: "Best L-cancel day",
+        def: "Highest single-day L-cancel rate among days with at least 100 attempts, so one clean three-aerial game can't take the crown.",
+      },
+      {
+        term: "Nemesis / favorite victim",
+        def: "The opponent (by connect code) you've lost to the most, and the one you've beaten the most. Raw counts, not rates — your nemesis is usually just whoever you play the most.",
+      },
+      {
+        term: "FF grudge",
+        def: "The teammate who friendly-fires you the hardest per game, and the one you damage most, each needing at least 5 games together so a single Falco-dair accident doesn't define a friendship.",
       },
     ],
   },
