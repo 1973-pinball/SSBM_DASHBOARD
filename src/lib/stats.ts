@@ -744,6 +744,85 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
   return out;
 }
 
+export type ExecMetricKey = "lCancel" | "opk" | "dpo" | "ipm";
+
+/**
+ * Each execution metric expressed as a numerator/denominator pair so windowed
+ * averages compose by summing: L-cancel is a ratio of counts (success over
+ * attempts), the others are means over games where the value is known.
+ */
+const EXEC_METRICS: Record<ExecMetricKey, { num: (g: ResolvedGame) => number; den: (g: ResolvedGame) => number; scale: number }> = {
+  lCancel: { num: (g) => g.me.lCancelSuccess, den: (g) => g.me.lCancelSuccess + g.me.lCancelFail, scale: 100 },
+  opk: { num: (g) => g.me.openingsPerKill ?? 0, den: (g) => (g.me.openingsPerKill !== null ? 1 : 0), scale: 1 },
+  dpo: { num: (g) => g.me.damagePerOpening ?? 0, den: (g) => (g.me.damagePerOpening !== null ? 1 : 0), scale: 1 },
+  ipm: { num: (g) => g.me.inputsPerMinute ?? 0, den: (g) => (g.me.inputsPerMinute !== null ? 1 : 0), scale: 1 },
+};
+
+export interface ExecutionSummary {
+  games: number;
+  lCancel: number | null;
+  opk: number | null;
+  dpo: number | null;
+  ipm: number | null;
+}
+
+/** Averages over the most recent `window` games (KPI strip on Execution). */
+export function executionSummary(games: ResolvedGame[], window = 50): ExecutionSummary {
+  const slice = games.slice(Math.max(0, games.length - window));
+  const value = (key: ExecMetricKey): number | null => {
+    const { num, den, scale } = EXEC_METRICS[key];
+    let n = 0, d = 0;
+    for (const g of slice) { n += num(g); d += den(g); }
+    return d > 0 ? (n / d) * scale : null;
+  };
+  return {
+    games: slice.length,
+    lCancel: value("lCancel"),
+    opk: value("opk"),
+    dpo: value("dpo"),
+    ipm: value("ipm"),
+  };
+}
+
+export interface RollingExecutionPoint {
+  index: number;
+  date: string;
+  value: number | null;
+}
+
+/**
+ * Rolling `window`-game average of one execution metric, one point per game.
+ * Single-pass sliding sums (no per-point slicing); output is capped to the
+ * latest `limit` points to keep the chart renderable, but each window still
+ * looks back over games before the cap.
+ */
+export function rollingExecutionSeries(
+  games: ResolvedGame[],
+  metric: ExecMetricKey,
+  window = 50,
+  limit = 500,
+): RollingExecutionPoint[] {
+  const { num, den, scale } = EXEC_METRICS[metric];
+  const emitStart = Math.max(0, games.length - limit);
+  const out: RollingExecutionPoint[] = [];
+  let numSum = 0, denSum = 0;
+  for (let i = 0; i < games.length; i++) {
+    numSum += num(games[i]);
+    denSum += den(games[i]);
+    if (i >= window) {
+      numSum -= num(games[i - window]);
+      denSum -= den(games[i - window]);
+    }
+    if (i < emitStart) continue;
+    out.push({
+      index: i + 1,
+      date: games[i].date?.toISOString().slice(0, 10) ?? "",
+      value: denSum > 0 ? (numSum / denSum) * scale : null,
+    });
+  }
+  return out;
+}
+
 export interface LCancelPoint {
   index: number;
   date: string;

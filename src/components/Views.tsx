@@ -2,9 +2,11 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
+import { Kpi } from "./Kpi";
 
 const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
 const tooltipStyle = {
@@ -338,6 +340,68 @@ const EXEC_CHARTS: {
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: "#f0564f" } },
 ];
 
+const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color: string }[] = [
+  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)" },
+  { key: "opk", label: "Openings per kill", unit: "", color: "#e8b54d" },
+  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e" },
+  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
+];
+
+/** Rolling 50-game average of a single execution metric, chosen via chips. */
+function RollingExecChart({ games }: { games: ResolvedGame[] }) {
+  const [metric, setMetric] = useState<ExecMetricKey>("lCancel");
+  const def = ROLLING_METRICS.find((m) => m.key === metric)!;
+  const data = useMemo(() => rollingExecutionSeries(games, metric), [games, metric]);
+  return (
+    <div className="panel">
+      <h2>Rolling 50-game average</h2>
+      <div className="chip-row">
+        {ROLLING_METRICS.map((m) => {
+          const on = m.key === metric;
+          return (
+            <button
+              key={m.key}
+              className={`chip ${on ? "on" : ""}`}
+              aria-pressed={on}
+              style={on ? { borderColor: m.color } : undefined}
+              onClick={() => setMetric(m.key)}
+            >
+              <span className="dot" style={{ background: m.color, opacity: on ? 1 : 0.35 }} />
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+      <ResponsiveContainer width="100%" height={220}>
+        <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+          {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
+          <XAxis
+            dataKey="index"
+            tick={axisStyle}
+            tickLine={false}
+            axisLine={{ stroke: "#34305a" }}
+            minTickGap={48}
+            tickFormatter={(v: number) => data[v - data[0].index]?.date ?? ""}
+          />
+          <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={def.unit} />
+          <Tooltip
+            {...tooltipStyle}
+            labelFormatter={(v, payload) => {
+              const d = payload?.[0]?.payload?.date;
+              return d ? `Game ${v} — ${d}` : `Game ${v}`;
+            }}
+            formatter={(v) => [`${Number(v).toFixed(1)}${def.unit}`, def.label]}
+          />
+          <Line type="monotone" dataKey="value" name={def.label} stroke={def.color} strokeWidth={2} dot={false} connectNulls />
+        </LineChart>
+      </ResponsiveContainer>
+      <div className="hint">
+        Each point averages the previous 50 games{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
+      </div>
+    </div>
+  );
+}
+
 interface SeriesDef {
   key: string;
   label: string;
@@ -492,12 +556,20 @@ function PerGameMetricChart({
 
 export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
+  const summary = useMemo(() => executionSummary(games), [games]);
   const lcVolume = useMemo(() => lCancelSeries(games), [games]);
   const actions = useMemo(() => actionAverages(games), [games]);
   const neutral = useMemo(() => neutralSummary(games), [games]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
+      <div className="kpi-strip">
+        <Kpi label={`L-cancel — last ${summary.games}`} value={summary.lCancel !== null ? `${num(summary.lCancel, 1)}%` : "—"} />
+        <Kpi label={`Openings / kill — last ${summary.games}`} value={num(summary.opk, 2)} />
+        <Kpi label={`Damage / opening — last ${summary.games}`} value={num(summary.dpo, 1)} />
+        <Kpi label={`Inputs / min — last ${summary.games}`} value={int(summary.ipm)} />
+      </div>
+
       <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {EXEC_CHARTS.map((c) => (
           <div className="panel" key={c.key}>
@@ -526,6 +598,8 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
           </div>
         ))}
       </div>
+
+      <RollingExecChart games={games} />
 
       <div className="panel">
         <h2>L-cancel volume — per game</h2>
