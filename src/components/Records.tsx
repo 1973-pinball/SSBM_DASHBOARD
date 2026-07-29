@@ -31,12 +31,12 @@ export function Records({ games, teamGames }: { games: ResolvedGame[]; teamGames
   if (r.bestWinStreak) cards.push({ label: "Best win streak", value: `${r.bestWinStreak.length}`, detail: r.bestWinStreak.end ? `ended ${shortDate(r.bestWinStreak.end)}` : undefined });
   if (r.worstLossStreak) cards.push({ label: "Worst loss streak", value: `${r.worstLossStreak.length}`, detail: r.worstLossStreak.end ? `ended ${shortDate(r.worstLossStreak.end)}` : undefined });
   if (r.highestDamage) cards.push({ label: "Most damage in a game", value: `${int(r.highestDamage.value)}%`, detail: refText(r.highestDamage) });
-  if (r.fastestWin) cards.push({ label: "Fastest win", value: duration(r.fastestWin.seconds) ?? "—", detail: refText(r.fastestWin) });
-  cards.push({ label: "Perfect wins (4 stocks left)", value: int(r.perfectWins) ?? "0" });
-  if (r.longestGame) cards.push({ label: "Longest game", value: duration(r.longestGame.seconds) ?? "—", detail: refText(r.longestGame) });
+  if (r.fastestWin) cards.push({ label: "Fastest win", value: duration(r.fastestWin.seconds), detail: refText(r.fastestWin) });
+  cards.push({ label: "Perfect wins (4 stocks left)", value: int(r.perfectWins) });
+  if (r.longestGame) cards.push({ label: "Longest game", value: duration(r.longestGame.seconds), detail: refText(r.longestGame) });
   if (r.bestLCancelDay) cards.push({ label: "Best L-cancel day", value: pct(r.bestLCancelDay.rate), detail: `${r.bestLCancelDay.day} · ${r.bestLCancelDay.attempts.toLocaleString()} attempts` });
   if (r.busiestDay) cards.push({ label: "Most games in a day", value: `${r.busiestDay.games}`, detail: r.busiestDay.day });
-  if (r.longestSession) cards.push({ label: "Longest session", value: `${r.longestSession.games} games`, detail: shortDate(r.longestSession.start) ?? undefined });
+  if (r.longestSession) cards.push({ label: "Longest session", value: `${r.longestSession.games} games`, detail: shortDate(r.longestSession.start) });
   if (r.nemesis) cards.push({ label: "Nemesis", value: r.nemesis.code, detail: `${r.nemesis.wins}–${r.nemesis.losses} against them` });
   if (r.victim) cards.push({ label: "Favorite victim", value: r.victim.code, detail: `${r.victim.wins}–${r.victim.losses} against them` });
 

@@ -2,27 +2,24 @@ import { useMemo } from "react";
 import {
   LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine,
 } from "recharts";
-import type { Filters, GameType, ResolvedGame } from "../lib/types";
+import type { Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, applyFilters } from "../lib/stats";
 import { pct, num, int, duration, winRateColor } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
+import { ShareCard } from "./ShareCard";
+import { axisStyle, tooltipStyle } from "./chartStyle";
 
 interface Props {
   games: ResolvedGame[]; // filtered
   allGames: ResolvedGame[]; // unfiltered (for prior-window delta)
+  teamGames: ResolvedTeamGame[]; // filtered 2v2s — hours played spans both formats
   filters: Filters;
   onSelectMyCharacter: (id: number) => void;
   onSelectMode: (mode: GameType | null) => void;
 }
 
-const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
-const tooltipStyle = {
-  contentStyle: { background: "#272245", border: "1px solid #34305a", borderRadius: 8, fontFamily: "var(--font-data)", fontSize: 12 },
-  labelStyle: { color: "#9a93bd" },
-};
-
-export function Overview({ games, allGames, filters, onSelectMyCharacter, onSelectMode }: Props) {
+export function Overview({ games, allGames, teamGames, filters, onSelectMyCharacter, onSelectMode }: Props) {
   const stats = useMemo(() => overview(games, allGames, filters), [games, allGames, filters]);
   const rolling = useMemo(() => rollingWinRate(games), [games]);
   const chars = useMemo(() => byMyCharacter(games), [games]);
@@ -35,6 +32,14 @@ export function Overview({ games, allGames, filters, onSelectMyCharacter, onSele
 
   const delta =
     stats.prevWinRate !== null && stats.winRate !== null ? (stats.winRate - stats.prevWinRate) * 100 : null;
+
+  // Hours span both formats — the only KPI here that counts 2v2 time.
+  const hours = useMemo(() => {
+    let frames = 0;
+    for (const g of games) frames += g.rec.durationFrames;
+    for (const g of teamGames) frames += g.rec.durationFrames;
+    return frames / 60 / 3600;
+  }, [games, teamGames]);
 
   return (
     <>
@@ -57,7 +62,10 @@ export function Overview({ games, allGames, filters, onSelectMyCharacter, onSele
           value={stats.currentStreak ? `${stats.currentStreak.kind}${stats.currentStreak.length}` : "—"}
           accent={stats.currentStreak && stats.currentStreak.kind === "W" && stats.currentStreak.length >= 5 ? "gold" : undefined}
         />
+        <Kpi label="Hours played" value={hours >= 10 ? int(hours) : num(hours, 1)} />
       </div>
+
+      <ShareCard games={games} />
 
       <div className="panel">
         <h2>By mode</h2>

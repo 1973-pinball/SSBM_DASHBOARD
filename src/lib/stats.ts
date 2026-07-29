@@ -650,6 +650,212 @@ export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
   return { bestWinStreak: best, grudge, myTarget };
 }
 
+// ---------- Sets ----------
+
+export interface GameSet {
+  oppCode: string;
+  oppName: string | null;
+  games: ResolvedGame[];
+  wins: number;
+  losses: number;
+  /** Majority of decided games; "T" for even splits. */
+  result: "W" | "L" | "T";
+  start: Date | null;
+  end: Date | null;
+}
+
+/**
+ * Group consecutive games against the same opponent (within `gapMinutes`) into
+ * a set. Formats vary too much to assume Bo3/Bo5 — ranked sets, friendly
+ * runbacks, and money matches all show up as blocks — so a set's result is the
+ * majority of its decided games. Blocks need 2+ decided games; a lone game
+ * isn't a set.
+ */
+export function computeSets(games: ResolvedGame[], gapMinutes = 20): GameSet[] {
+  const sets: GameSet[] = [];
+  let cur: GameSet | null = null;
+  let lastEndMs = 0;
+  const flush = () => {
+    if (cur && cur.wins + cur.losses >= 2) {
+      cur.result = cur.wins > cur.losses ? "W" : cur.wins < cur.losses ? "L" : "T";
+      sets.push(cur);
+    }
+    cur = null;
+  };
+  for (const g of games) {
+    if (!g.opp.connectCode || !g.date) continue;
+    const startMs = g.date.getTime();
+    if (!cur || cur.oppCode !== g.opp.connectCode || startMs - lastEndMs > gapMinutes * 60_000) {
+      flush();
+      cur = { oppCode: g.opp.connectCode, oppName: null, games: [], wins: 0, losses: 0, result: "T", start: g.date, end: g.date };
+    }
+    cur.games.push(g);
+    cur.oppName = g.opp.displayName ?? cur.oppName;
+    if (g.isWin === true) cur.wins++;
+    else if (g.isWin === false) cur.losses++;
+    cur.end = g.date;
+    lastEndMs = startMs + (g.rec.durationFrames / 60) * 1000;
+  }
+  flush();
+  return sets;
+}
+
+export interface SetsSummary {
+  sets: number;
+  wins: number;
+  losses: number;
+  ties: number;
+  setWinRate: number | null; // ties excluded
+  avgGames: number | null;
+  /** Sets where you dropped game 1 — how often you still took the set. */
+  afterG1Loss: { wins: number; total: number };
+  /** Sets decided by a single game (2–1, 3–2, …) — your record when it's close. */
+  deciders: { wins: number; total: number };
+}
+
+export function setsSummary(sets: GameSet[]): SetsSummary {
+  let wins = 0, losses = 0, ties = 0, totalGames = 0;
+  const afterG1Loss = { wins: 0, total: 0 };
+  const deciders = { wins: 0, total: 0 };
+  for (const s of sets) {
+    totalGames += s.games.length;
+    if (s.result === "W") wins++;
+    else if (s.result === "L") losses++;
+    else ties++;
+    const firstDecided = s.games.find((g) => g.isWin !== null);
+    if (firstDecided?.isWin === false && s.result !== "T") {
+      afterG1Loss.total++;
+      if (s.result === "W") afterG1Loss.wins++;
+    }
+    if (Math.abs(s.wins - s.losses) === 1) {
+      deciders.total++;
+      if (s.result === "W") deciders.wins++;
+    }
+  }
+  return {
+    sets: sets.length,
+    wins,
+    losses,
+    ties,
+    setWinRate: winRate(wins, wins + losses),
+    avgGames: sets.length ? totalGames / sets.length : null,
+    afterG1Loss,
+    deciders,
+  };
+}
+
+// ---------- Share card ----------
+
+export interface StatCardData {
+  code: string | null;
+  name: string | null;
+  games: number;
+  wins: number;
+  losses: number;
+  winRate: number | null;
+  hours: number;
+  firstDate: Date | null;
+  lastDate: Date | null;
+  mainChar: { id: number; games: number } | null;
+  topOppChar: { id: number; games: number } | null;
+  favStage: { id: number; games: number; winRate: number | null } | null;
+  /** Most-played opponent by connect code. */
+  rival: { code: string; name: string | null; games: number; wins: number; losses: number } | null;
+  distinctOpponents: number;
+  lCancel: number | null;
+  ipm: number | null;
+  bestWinStreak: number | null;
+  busiestDay: { day: string; games: number } | null;
+}
+
+/** Everything the shareable profile card needs, in one pass over the games. */
+export function statCardData(games: ResolvedGame[]): StatCardData {
+  const base = tally(games);
+  let frames = 0;
+  let lcS = 0, lcF = 0, ipmSum = 0, ipmN = 0;
+  let first: Date | null = null, last: Date | null = null;
+  let code: string | null = null, name: string | null = null;
+  const myChars = new Map<number, number>();
+  const oppChars = new Map<number, number>();
+  const stages = new Map<number, { games: number; wins: number; losses: number }>();
+  const opps = new Map<string, { name: string | null; games: number; wins: number; losses: number }>();
+  const days = new Map<string, number>();
+  let bestStreak = 0, run = 0;
+
+  for (const g of games) {
+    frames += g.rec.durationFrames;
+    lcS += g.me.lCancelSuccess;
+    lcF += g.me.lCancelFail;
+    if (g.me.inputsPerMinute !== null) { ipmSum += g.me.inputsPerMinute; ipmN++; }
+    if (g.date) {
+      if (!first || g.date < first) first = g.date;
+      if (!last || g.date > last) last = g.date;
+      const day = localDay(g.date);
+      days.set(day, (days.get(day) ?? 0) + 1);
+    }
+    // Latest game wins the identity fields — tags change over time.
+    if (g.me.connectCode) code = g.me.connectCode;
+    if (g.me.displayName) name = g.me.displayName;
+    myChars.set(g.me.characterId, (myChars.get(g.me.characterId) ?? 0) + 1);
+    oppChars.set(g.opp.characterId, (oppChars.get(g.opp.characterId) ?? 0) + 1);
+    const st = stages.get(g.rec.stageId) ?? { games: 0, wins: 0, losses: 0 };
+    st.games++;
+    if (g.isWin === true) st.wins++;
+    else if (g.isWin === false) st.losses++;
+    stages.set(g.rec.stageId, st);
+    if (g.opp.connectCode) {
+      const o = opps.get(g.opp.connectCode) ?? { name: null, games: 0, wins: 0, losses: 0 };
+      o.games++;
+      o.name = g.opp.displayName ?? o.name;
+      if (g.isWin === true) o.wins++;
+      else if (g.isWin === false) o.losses++;
+      opps.set(g.opp.connectCode, o);
+    }
+    if (g.isWin === true) { run++; if (run > bestStreak) bestStreak = run; }
+    else if (g.isWin === false) run = 0;
+  }
+
+  const top = <K,>(m: Map<K, number>): [K, number] | null =>
+    m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0] : null;
+  const mainChar = top(myChars);
+  const topOppChar = top(oppChars);
+  let favStage: StatCardData["favStage"] = null;
+  for (const [id, s] of stages) {
+    if (!favStage || s.games > favStage.games) {
+      favStage = { id, games: s.games, winRate: winRate(s.wins, s.wins + s.losses) };
+    }
+  }
+  let rival: StatCardData["rival"] = null;
+  for (const [c, o] of opps) {
+    if (!rival || o.games > rival.games) rival = { code: c, ...o };
+  }
+  let busiestDay: StatCardData["busiestDay"] = null;
+  for (const [day, n] of days) {
+    if (!busiestDay || n > busiestDay.games) busiestDay = { day, games: n };
+  }
+
+  return {
+    code,
+    name,
+    games: base.games,
+    wins: base.wins,
+    losses: base.losses,
+    winRate: base.winRate,
+    hours: frames / 60 / 3600,
+    firstDate: first,
+    lastDate: last,
+    mainChar: mainChar ? { id: mainChar[0], games: mainChar[1] } : null,
+    topOppChar: topOppChar ? { id: topOppChar[0], games: topOppChar[1] } : null,
+    favStage,
+    rival,
+    distinctOpponents: opps.size,
+    lCancel: lcS + lcF > 0 ? (lcS / (lcS + lcF)) * 100 : null,
+    ipm: ipmN ? ipmSum / ipmN : null,
+    bestWinStreak: bestStreak || null,
+    busiestDay,
+  };
+}
+
 export interface StageRow extends WL {
   stageId: number;
 }

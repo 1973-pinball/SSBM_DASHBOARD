@@ -42,6 +42,11 @@ export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess
         {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => e.target.files && onPickFiles(e.target.files)}
       />
+      <div className="hint" style={{ marginTop: 10 }}>
+        Slippi saves replays to <span style={{ fontFamily: "var(--font-data)" }}>Documents\Slippi</span> by default
+        (<span style={{ fontFamily: "var(--font-data)" }}>~/Slippi</span> on Mac/Linux) — the picker opens in Documents
+        to get you close.
+      </div>
       <div className="privacy">Your replays never leave your machine. No uploads, no accounts, no tracking.</div>
     </div>
   );

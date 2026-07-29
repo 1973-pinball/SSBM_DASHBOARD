@@ -9,6 +9,12 @@ interface FileSystemDirectoryHandle {
   requestPermission(descriptor?: FileSystemHandlePermissionDescriptor): Promise<PermissionState>;
 }
 
+type WellKnownDirectory = "desktop" | "documents" | "downloads" | "music" | "pictures" | "videos";
+
 interface Window {
-  showDirectoryPicker(options?: { id?: string; mode?: "read" | "readwrite" }): Promise<FileSystemDirectoryHandle>;
+  showDirectoryPicker(options?: {
+    id?: string;
+    mode?: "read" | "readwrite";
+    startIn?: WellKnownDirectory;
+  }): Promise<FileSystemDirectoryHandle>;
 }

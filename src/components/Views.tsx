@@ -1,18 +1,13 @@
 import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import type { Filters, PlayerSide, ResolvedGame } from "../lib/types";
+import type { PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
-
-const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
-const tooltipStyle = {
-  contentStyle: { background: "#272245", border: "1px solid #34305a", borderRadius: 8, fontFamily: "var(--font-data)", fontSize: 12 },
-  labelStyle: { color: "#9a93bd" },
-};
+import { axisStyle, tooltipStyle } from "./chartStyle";
 
 // ---------------- Matchups ----------------
 
@@ -261,6 +256,75 @@ export function Stages({
 
 // ---------------- Opponents ----------------
 
+/** Set-level framing: players think in sets, not games — "I went 3–1 in the runback". */
+function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
+  const sets = useMemo(() => computeSets(games), [games]);
+  const s = useMemo(() => setsSummary(sets), [sets]);
+  if (s.sets === 0) return null;
+  const recent = [...sets].reverse().slice(0, 15);
+  return (
+    <>
+      <div className="kpi-strip">
+        <Kpi label="Sets" value={int(s.sets)} />
+        <Kpi label="Set record" value={`${s.wins}–${s.losses}${s.ties ? ` (${s.ties}T)` : ""}`} />
+        <Kpi label="Set win rate" value={pct(s.setWinRate)} />
+        <Kpi label="Games / set" value={num(s.avgGames, 1)} />
+        <Kpi
+          label="After dropping game 1"
+          value={s.afterG1Loss.total ? pct(s.afterG1Loss.wins / s.afterG1Loss.total, 0) : "—"}
+          delta={s.afterG1Loss.total ? `${s.afterG1Loss.wins} of ${s.afterG1Loss.total} sets won` : undefined}
+        />
+        <Kpi
+          label="Close sets (1-game margin)"
+          value={s.deciders.total ? pct(s.deciders.wins / s.deciders.total, 0) : "—"}
+          delta={s.deciders.total ? `${s.deciders.wins} of ${s.deciders.total} won` : undefined}
+        />
+      </div>
+      <div className="panel">
+        <h2>Recent sets</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>Opponent</th>
+              <th className="data">Score</th>
+              <th className="data">Result</th>
+              <th className="data">Games</th>
+            </tr>
+          </thead>
+          <tbody>
+            {recent.map((set, i) => (
+              <tr key={`${set.oppCode}-${set.start?.getTime() ?? i}`} className="clickable" onClick={() => onSelect(set.oppCode)}>
+                <td className="data">{shortDate(set.start)}</td>
+                <td style={{ fontFamily: "var(--font-data)" }}>
+                  {set.oppCode}
+                  {set.oppName && <span style={{ color: "var(--faint)" }}> · {set.oppName}</span>}
+                </td>
+                <td className="data">
+                  <span className="up">{set.wins}</span>–<span className="down">{set.losses}</span>
+                </td>
+                <td className="data">
+                  {set.result === "T" ? (
+                    <span className="badge">tie</span>
+                  ) : (
+                    <span className={`wl-pill ${set.result === "W" ? "up" : "down"}`}>{set.result}</span>
+                  )}
+                </td>
+                <td className="data">{set.games.length}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="hint">
+          A set is a run of consecutive games against the same opponent (20-minute gap starts a new one); the result is
+          the majority of decided games, since ranked sets and long friendly runbacks both live here. Click a row to
+          filter to that opponent.
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
   const [query, setQuery] = useState("");
   const rows = useMemo(() => byOpponent(games), [games]);
@@ -272,6 +336,8 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
   );
   if (rows.length === 0) return <div className="empty-note">No opponents with connect codes in the current filter.</div>;
   return (
+    <>
+    <SetsPanel games={games} onSelect={onSelect} />
     <div className="panel">
       <h2>Opponents</h2>
       <div style={{ marginBottom: 10 }}>
@@ -322,6 +388,7 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
       {filtered.length > 100 && <div className="hint">Showing top 100 of {filtered.length.toLocaleString()} — refine with search.</div>}
       <div className="hint">Click a row to filter the dashboard to that opponent.</div>
     </div>
+    </>
   );
 }
 
@@ -786,6 +853,15 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
   const recent = useMemo(() => [...games].reverse().slice(0, 300), [games]);
   const [openId, setOpenId] = useState<string | null>(null);
 
+  // Connect codes and dates come from the .slp file, i.e. from strangers online:
+  // quote every field and defuse leading =+-@ so a crafted tag can't inject a
+  // spreadsheet formula or break rows.
+  const csvField = (v: string | number): string => {
+    const s = String(v);
+    const safe = /^[=+\-@]/.test(s) ? `'${s}` : s;
+    return `"${safe.replace(/"/g, '""')}"`;
+  };
+
   const exportCsv = () => {
     const header = "date,my_character,opp_character,opponent_code,stage,mode,result,my_kills,opp_kills,duration_s\n";
     const body = [...games]
@@ -802,7 +878,9 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
           g.me.kills,
           g.opp.kills,
           Math.round(g.rec.durationFrames / 60),
-        ].join(","),
+        ]
+          .map(csvField)
+          .join(","),
       )
       .join("\n");
     const blob = new Blob([header + body], { type: "text/csv" });
@@ -875,6 +953,3 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
     </div>
   );
 }
-
-// Re-export types used by App for convenience.
-export type { Filters };

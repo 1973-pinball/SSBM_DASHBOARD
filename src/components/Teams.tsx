@@ -8,17 +8,12 @@ import {
 import { pct, num, int, duration, shortDate, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
+import { axisStyle, tooltipStyle } from "./chartStyle";
 
 interface Props {
   games: ResolvedTeamGame[]; // filtered
   onSelectTeammate: (code: string) => void;
 }
-
-const axisStyle = { fill: "var(--faint)", fontSize: 11, fontFamily: "var(--font-data)" };
-const tooltipStyle = {
-  contentStyle: { background: "#272245", border: "1px solid #34305a", borderRadius: 8, fontFamily: "var(--font-data)", fontSize: 12 },
-  labelStyle: { color: "#9a93bd" },
-};
 
 /** Win rate is the team's, not yours — in 2v2 there is no individual result. */
 export function Teams({ games, onSelectTeammate }: Props) {

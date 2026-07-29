@@ -2,7 +2,37 @@ import { useMemo, useState } from "react";
 import type { ResolvedGame } from "../lib/types";
 import { WIN_MODEL_FEATURES, fitWinModel, quartileWinRates } from "../lib/model";
 import type { CoefRow } from "../lib/model";
+import { COACH_MIN_DECIDED, recommendations } from "../lib/coach";
 import { num, pct, winRateColor } from "../lib/format";
+
+/** Ranked plain-English "do this" list — the tab's front door for non-stats readers. */
+function CoachPanel({ games }: { games: ResolvedGame[] }) {
+  const recs = useMemo(() => recommendations(games), [games]);
+  return (
+    <div className="panel">
+      <h2>The short version — what to change</h2>
+      {recs.length === 0 ? (
+        <div className="empty-note">
+          Nothing stands out yet — either there aren't ~{COACH_MIN_DECIDED}+ decided games in this filter, or your
+          losses spread evenly across matchups, stages, and session length. That second one is a compliment.
+        </div>
+      ) : (
+        <ol className="coach-list">
+          {recs.map((r) => (
+            <li key={r.kind + r.headline}>
+              <div className="coach-headline">{r.headline}</div>
+              <div className="coach-detail">{r.detail}</div>
+            </li>
+          ))}
+        </ol>
+      )}
+      <div className="hint">
+        Ranked by effect size × evidence, each against your own overall win rate; anything that doesn't clear a
+        significance bar is left out. The models below show the full picture behind these.
+      </div>
+    </div>
+  );
+}
 
 /**
  * "What predicts my wins?" — logistic regression in two flavors (raw
@@ -92,19 +122,23 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
 
   if (!model || !primary) {
     return (
-      <div className="panel">
-        <h2>What predicts your wins</h2>
-        {toggle}
-        <div className="empty-note">
-          Not enough decided games in the current filter to fit a model — need at least 40 games with every metric
-          measurable and 10+ wins and losses.
+      <>
+        <CoachPanel games={games} />
+        <div className="panel">
+          <h2>What predicts your wins</h2>
+          {toggle}
+          <div className="empty-note">
+            Not enough decided games in the current filter to fit a model — need at least 40 games with every metric
+            measurable and 10+ wins and losses.
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
   return (
     <>
+      <CoachPanel games={games} />
       <div className="panel">
         <h2>What would help you win — logistic regression</h2>
         {toggle}

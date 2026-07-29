@@ -393,6 +393,65 @@ tr.detail-row td {
 .detail-grid table { max-width: 560px; }
 .detail-grid th:first-child { width: 180px; }
 
+/* ---- Landing folder hint ---- */
+.landing .hint { font-size: 12px; color: var(--faint); }
+
+/* ---- Coach panel ---- */
+.coach-list { margin: 0; padding-left: 26px; display: flex; flex-direction: column; gap: 12px; }
+.coach-list li::marker { color: var(--accent); font-family: var(--font-data); font-weight: 600; }
+.coach-headline { font-family: var(--font-display); font-size: 15px; font-weight: 600; }
+.coach-detail { color: var(--muted); font-size: 13px; margin-top: 2px; max-width: 720px; }
+
+/* ---- Share card ---- */
+.sc-wrap { display: flex; justify-content: center; }
+.share-card {
+  width: 640px;
+  max-width: 100%;
+  background: linear-gradient(160deg, #1a1730 0%, #121022 55%, #191136 100%);
+  border: 1px solid var(--accent-dim);
+  border-radius: 14px;
+  padding: 20px 22px 14px;
+}
+.sc-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+.sc-tag { font-family: var(--font-display); font-size: 26px; font-weight: 700; line-height: 1.15; }
+.sc-code { font-family: var(--font-data); font-size: 13px; color: var(--accent); }
+.sc-head-right { text-align: right; }
+.sc-title { font-family: var(--font-display); font-size: 12px; letter-spacing: 0.22em; color: var(--gold); }
+.sc-range { font-family: var(--font-data); font-size: 11px; color: var(--faint); margin-top: 2px; }
+.sc-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+.sc-cell { background: rgba(32, 28, 56, 0.92); padding: 12px 14px; }
+.sc-label {
+  font-family: var(--font-display);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin-bottom: 3px;
+}
+.sc-value { font-family: var(--font-data); font-size: 17px; font-weight: 600; color: var(--text); }
+.sc-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sc-foot {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--faint);
+  margin-top: 12px;
+}
+.sc-url { color: var(--accent); }
+.sc-actions { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .sc-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
 }

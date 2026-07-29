@@ -201,7 +201,8 @@ export default function App() {
 
   const onPickDirectory = useCallback(() => {
     void startPipeline(async () => {
-      const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read" });
+      // startIn only applies the first time; afterwards the id remembers the last-picked folder.
+      const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
       setDirHandleState(dir);
       await setDirHandle(dir);
       return discoverFromHandle(dir);
@@ -327,6 +328,7 @@ export default function App() {
             <Overview
               games={filtered}
               allGames={resolved}
+              teamGames={filteredTeams}
               filters={filters}
               onSelectMyCharacter={(id) => setFilters({ ...filters, myCharacter: id })}
               onSelectMode={(mode) => setFilters({ ...filters, gameType: mode })}
