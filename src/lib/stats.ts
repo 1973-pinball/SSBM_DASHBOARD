@@ -762,8 +762,6 @@ export interface StatCardData {
   /** Most-played opponent by connect code. */
   rival: { code: string; name: string | null; games: number; wins: number; losses: number } | null;
   distinctOpponents: number;
-  lCancel: number | null;
-  ipm: number | null;
   bestWinStreak: number | null;
   busiestDay: { day: string; games: number } | null;
 }
@@ -772,7 +770,6 @@ export interface StatCardData {
 export function statCardData(games: ResolvedGame[]): StatCardData {
   const base = tally(games);
   let frames = 0;
-  let lcS = 0, lcF = 0, ipmSum = 0, ipmN = 0;
   let first: Date | null = null, last: Date | null = null;
   let code: string | null = null, name: string | null = null;
   const myChars = new Map<number, number>();
@@ -784,9 +781,6 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
 
   for (const g of games) {
     frames += g.rec.durationFrames;
-    lcS += g.me.lCancelSuccess;
-    lcF += g.me.lCancelFail;
-    if (g.me.inputsPerMinute !== null) { ipmSum += g.me.inputsPerMinute; ipmN++; }
     if (g.date) {
       if (!first || g.date < first) first = g.date;
       if (!last || g.date > last) last = g.date;
@@ -819,12 +813,17 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
     m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0] : null;
   const mainChar = top(myChars);
   const topOppChar = top(oppChars);
+  // Home turf = best win rate among stages with a real sample (10+ decided
+  // games), so a 2-0 stage can't claim it; most-played is the fallback.
   let favStage: StatCardData["favStage"] = null;
+  let mostPlayed: StatCardData["favStage"] = null;
   for (const [id, s] of stages) {
-    if (!favStage || s.games > favStage.games) {
-      favStage = { id, games: s.games, winRate: winRate(s.wins, s.wins + s.losses) };
-    }
+    const wr = winRate(s.wins, s.wins + s.losses);
+    const entry = { id, games: s.games, winRate: wr };
+    if (!mostPlayed || s.games > mostPlayed.games) mostPlayed = entry;
+    if (s.wins + s.losses >= 10 && wr !== null && (!favStage || wr > (favStage.winRate ?? -1))) favStage = entry;
   }
+  favStage = favStage ?? mostPlayed;
   let rival: StatCardData["rival"] = null;
   for (const [c, o] of opps) {
     if (!rival || o.games > rival.games) rival = { code: c, ...o };
@@ -849,8 +848,6 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
     favStage,
     rival,
     distinctOpponents: opps.size,
-    lCancel: lcS + lcF > 0 ? (lcS / (lcS + lcF)) * 100 : null,
-    ipm: ipmN ? ipmSum / ipmN : null,
     bestWinStreak: bestStreak || null,
     busiestDay,
   };

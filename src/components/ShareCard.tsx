@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from "react";
 import { toBlob, toPng } from "html-to-image";
 import type { ResolvedGame } from "../lib/types";
-import { statCardData } from "../lib/stats";
+import { executionSummary, statCardData } from "../lib/stats";
 import { int, num, pct, shortDate } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
@@ -14,6 +14,7 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   const d = useMemo(() => statCardData(games), [games]);
+  const hands = useMemo(() => executionSummary(games, 100), [games]);
 
   if (d.games === 0) return null;
 
@@ -95,12 +96,14 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
             {cell(
               "Home turf",
               d.favStage ? stageName(d.favStage.id) : "—",
-              d.favStage?.winRate !== null && d.favStage ? `wins ${pct(d.favStage.winRate, 0)} there` : undefined,
+              d.favStage && d.favStage.winRate !== null
+                ? `wins ${pct(d.favStage.winRate, 0)} of ${int(d.favStage.games)} there`
+                : undefined,
             )}
             {cell(
-              "The hands",
-              d.lCancel !== null ? `${num(d.lCancel, 1)}% L-cancel` : "—",
-              d.ipm !== null ? `${int(d.ipm)} inputs/min` : undefined,
+              "The hands (past 100 games)",
+              hands.lCancel !== null ? `${num(hands.lCancel, 1)}% L-cancel` : "—",
+              hands.ipm !== null ? `${int(hands.ipm)} inputs/min` : undefined,
             )}
             {cell(
               "Longest heater",
