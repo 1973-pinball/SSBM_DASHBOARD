@@ -42,10 +42,14 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
     setTimeout(() => setCopied("idle"), 2000);
   };
 
-  const cell = (label: string, value: string, sub?: string) => (
+  // charIcon is a Melee external character ID → bundled stock-counter sprite.
+  const cell = (label: string, value: string, sub?: string, charIcon?: number) => (
     <div className="sc-cell">
       <div className="sc-label">{label}</div>
-      <div className="sc-value">{value}</div>
+      <div className="sc-value">
+        {charIcon !== undefined && <img className="sc-stock" src={`/stock/${charIcon}.png`} alt="" />}
+        {value}
+      </div>
       {sub && <div className="sc-sub">{sub}</div>}
     </div>
   );
@@ -72,6 +76,7 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
               "Main",
               d.mainChar ? charName(d.mainChar.id) : "—",
               d.mainChar ? `${int(d.mainChar.games)} games logged` : undefined,
+              d.mainChar?.id,
             )}
             {cell(
               "Record",
@@ -92,6 +97,7 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
               "Most common foe",
               d.topOppChar ? charName(d.topOppChar.id) : "—",
               d.topOppChar ? `${int(d.topOppChar.games)} encounters survived` : undefined,
+              d.topOppChar?.id,
             )}
             {cell(
               "Home turf",
