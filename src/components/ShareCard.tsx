@@ -103,7 +103,7 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
               "Home turf",
               d.favStage ? stageName(d.favStage.id) : "—",
               d.favStage && d.favStage.winRate !== null
-                ? `${pct(d.favStage.winRate, 0)} win rate over ${int(d.favStage.games)} games`
+                ? `won ${pct(d.favStage.winRate, 0)} of ${int(d.favStage.games)} there`
                 : undefined,
             )}
             {cell(
