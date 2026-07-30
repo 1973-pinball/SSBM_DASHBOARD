@@ -31,6 +31,8 @@ No replays handy? The landing page has a demo-data mode (deterministic synthetic
 
 Vite + React + TypeScript, [`@slippi/slippi-js`](https://github.com/project-slippi/slippi-js) for parsing, Dexie (IndexedDB), Recharts.
 
+Character stock icons in `public/stock/` are from Super Smash Bros. Melee (© Nintendo / HAL Laboratory), sourced via [slippi-launcher](https://github.com/project-slippi/slippi-launcher); they are fan-project assets and not covered by this repository's MIT license.
+
 ## Roadmap
 
 - Sessions view with per-session W/L and tilt indicators

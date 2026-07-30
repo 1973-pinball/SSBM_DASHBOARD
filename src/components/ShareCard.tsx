@@ -96,14 +96,14 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
             {cell(
               "Most common foe",
               d.topOppChar ? charName(d.topOppChar.id) : "—",
-              d.topOppChar ? `${int(d.topOppChar.games)} encounters survived` : undefined,
+              d.topOppChar ? `${int(d.topOppChar.games)} encounters` : undefined,
               d.topOppChar?.id,
             )}
             {cell(
               "Home turf",
               d.favStage ? stageName(d.favStage.id) : "—",
               d.favStage && d.favStage.winRate !== null
-                ? `wins ${pct(d.favStage.winRate, 0)} of ${int(d.favStage.games)} there`
+                ? `${pct(d.favStage.winRate, 0)} win rate over ${int(d.favStage.games)} games`
                 : undefined,
             )}
             {cell(
