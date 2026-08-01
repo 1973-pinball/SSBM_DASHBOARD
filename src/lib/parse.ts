@@ -1,6 +1,6 @@
 import { SlippiGame, GameEndMethod, ActionsComputer, InputComputer, calcDamageTaken, didLoseStock } from "@slippi/slippi-js";
 import type { GameStartType } from "@slippi/slippi-js";
-import type { GameRecord, GameType, PlayerSide } from "./types";
+import type { GameRecord, GameType, MoveAgg, PlayerSide } from "./types";
 
 const MIN_GAME_SECONDS = 30;
 
@@ -151,6 +151,35 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       },
     };
   });
+
+  // Per-move aggregates from conversions (singles only — the conversion
+  // computer no-ops on 4-player games). Every landed hit in a conversion
+  // carries its move ID; the first move is the opening, and when the
+  // conversion kills, the last move gets the kill at the victim's end %.
+  if (!isTeams && stats?.conversions?.length) {
+    const idxOf = new Map(settings.players.map((p, i) => [p.playerIndex, i]));
+    for (const c of stats.conversions) {
+      if (c.moves.length === 0) continue;
+      const convDmg = Math.max(0, (c.endPercent ?? c.currentPercent) - c.startPercent);
+      c.moves.forEach((m, mi) => {
+        const pi = idxOf.get(m.playerIndex);
+        if (pi === undefined) return;
+        const side = players[pi];
+        const byMove = (side.moveStats ??= {});
+        const a: MoveAgg = (byMove[m.moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 });
+        a.landed++;
+        a.damage += m.damage;
+        if (mi === 0) {
+          a.openings++;
+          a.openingDmg += convDmg;
+        }
+        if (c.didKill && mi === c.moves.length - 1) {
+          a.kills++;
+          a.killPctSum += c.endPercent ?? c.currentPercent;
+        }
+      });
+    }
+  }
 
   // Doubles: slippi-js left every stat field zeroed, so fill them from our
   // own frame pass. kills/totalDamage keep singles semantics (enemies only);

@@ -1,5 +1,61 @@
-import type { ActionCounts, GameRecord, PlayerSide } from "./types";
+import type { ActionCounts, GameRecord, MoveAgg, PlayerSide } from "./types";
 import { INCLUDED_STAGE_IDS } from "./config";
+
+/**
+ * Plausible per-move landed/damage/kill aggregates (keyed by Melee attack ID,
+ * matching the parser). The demo player has a deliberate tell for the move-
+ * impact analysis: side-B spam swells in losses, dair/bair carry wins.
+ */
+function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDamage: number, isMe: boolean, iWin: boolean): Record<number, MoveAgg> {
+  // [moveId, weight, avgDmgPerHit]
+  const mix: [number, number, number][] = [
+    [2, 1.6, 3], // jab
+    [6, 0.8, 8], // dash attack
+    [7, 0.6, 9], // ftilt
+    [8, 0.9, 8], // utilt
+    [9, 1.0, 9], // dtilt
+    [10, 0.7, 15], // fsmash
+    [11, 0.6, 14], // usmash
+    [12, 0.7, 13], // dsmash
+    [13, 3.0, 11], // nair
+    [14, 1.2, 8], // fair
+    [15, 2.2, 12], // bair
+    [16, 1.1, 10], // uair
+    [17, isMe ? (iWin ? 3.4 : 2.4) : 2.0, 12], // dair — carries wins
+    [18, isMe ? 5.5 : 2.5, 3], // neutral-b (laser: lots of hits, tiny damage)
+    [19, isMe ? (iWin ? 0.7 : 2.6) : 1.0, 9], // side-b — the loss habit
+    [53, 0.5, 5], // fthrow
+    [55, 0.7, 5], // uthrow
+    [56, 0.9, 6], // dthrow
+  ];
+  const out: Record<number, MoveAgg> = {};
+  let rawDmg = 0;
+  for (const [id, w, dmgPer] of mix) {
+    const landed = Math.round(minutes * w * (0.7 + rand() * 0.6));
+    if (landed <= 0) continue;
+    const damage = landed * dmgPer * (0.8 + rand() * 0.4);
+    out[id] = { landed, damage, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 };
+    rawDmg += damage;
+  }
+  // Scale damages so the per-move sum matches the game's totalDamage.
+  const scale = rawDmg > 0 ? totalDamage / rawDmg : 0;
+  for (const a of Object.values(out)) a.damage = +(a.damage * scale).toFixed(1);
+  // Kills go to the plausible closers; openings mostly to neutral tools.
+  const killers = [15, 17, 10, 11, 16].filter((id) => out[id]);
+  for (let k = 0; k < kills && killers.length; k++) {
+    const a = out[killers[Math.floor(rand() * killers.length)]];
+    a.kills++;
+    a.killPctSum += 75 + rand() * 65;
+  }
+  const openers = [13, 17, 18, 9, 56].filter((id) => out[id]);
+  const openings = Math.floor(6 + rand() * 10);
+  for (let o = 0; o < openings && openers.length; o++) {
+    const a = out[openers[Math.floor(rand() * openers.length)]];
+    a.openings++;
+    a.openingDmg += 12 + rand() * 28;
+  }
+  return out;
+}
 
 /** Plausible per-game action counts, scaled by game length; `tech` in [0,1] raises movement actions. */
 function mkActions(rand: () => number, minutes: number, tech: number): ActionCounts {
@@ -119,7 +175,9 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
 
     const mkSide = (kills: number, taken: number, isMe: boolean): PlayerSide => {
       const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
+      const totalDamage = kills * (95 + rand() * 40);
       return {
+      moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin),
       port: isMe ? 1 : 2,
       connectCode: isMe ? DEMO_CODE : rival.code,
       displayName: isMe ? "demo" : rival.name,
@@ -128,7 +186,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       teamId: null,
       stocksRemaining: kills === 4 ? Math.max(1, 4 - taken) : 0,
       kills,
-      totalDamage: kills * (95 + rand() * 40),
+      totalDamage,
       openingsPerKill: kills > 0 ? +(2.2 + rand() * 3.5 - (isMe ? t * 0.7 : 0)).toFixed(2) : null,
       damagePerOpening: +(18 + rand() * 18 + (isMe ? t * 4 : 0)).toFixed(2),
       inputsPerMinute: Math.floor(isMe ? 340 + t * 90 + rand() * 60 : 260 + rand() * 200),

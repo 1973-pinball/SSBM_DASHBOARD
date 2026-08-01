@@ -39,3 +39,51 @@ export const STAGES: Record<number, string> = {
 
 export const charName = (id: number): string => CHARACTERS[id] ?? `Char ${id}`;
 export const stageName = (id: number): string => STAGES[id] ?? `Stage ${id}`;
+
+/**
+ * Melee attack IDs (PostFrame `lastAttackLanded`, as used by slippi-js
+ * conversion moves) grouped into the buckets players think in. Jab 1/2/3 and
+ * rapid jabs collapse to "Jab"; specials are per-direction (the character
+ * context says which move it actually is). Kept local so the main bundle
+ * doesn't pull in slippi-js just for names.
+ */
+const MOVE_GROUPS: [number[], string, string][] = [
+  [[2, 3, 4, 5], "jab", "Jab"],
+  [[6], "dash", "Dash attack"],
+  [[7], "ftilt", "Forward tilt"],
+  [[8], "utilt", "Up tilt"],
+  [[9], "dtilt", "Down tilt"],
+  [[10], "fsmash", "Forward smash"],
+  [[11], "usmash", "Up smash"],
+  [[12], "dsmash", "Down smash"],
+  [[13], "nair", "Neutral air"],
+  [[14], "fair", "Forward air"],
+  [[15], "bair", "Back air"],
+  [[16], "uair", "Up air"],
+  [[17], "dair", "Down air"],
+  [[18], "neutral-b", "Neutral B"],
+  [[19], "side-b", "Side B"],
+  [[20], "up-b", "Up B"],
+  [[21], "down-b", "Down B"],
+  [[50, 51], "getup", "Getup attack"],
+  [[52], "pummel", "Pummel"],
+  [[53], "fthrow", "Forward throw"],
+  [[54], "bthrow", "Back throw"],
+  [[55], "uthrow", "Up throw"],
+  [[56], "dthrow", "Down throw"],
+  [[61, 62], "edge", "Edge attack"],
+];
+
+export interface MoveGroup {
+  key: string;
+  label: string;
+}
+
+const MOVE_GROUP_BY_ID = new Map<number, MoveGroup>();
+for (const [ids, key, label] of MOVE_GROUPS) {
+  for (const id of ids) MOVE_GROUP_BY_ID.set(id, { key, label });
+}
+
+const OTHER_MOVE: MoveGroup = { key: "other", label: "Other" };
+
+export const moveGroup = (moveId: number): MoveGroup => MOVE_GROUP_BY_ID.get(moveId) ?? OTHER_MOVE;

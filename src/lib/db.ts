@@ -117,6 +117,21 @@ class SsbmDb extends Dexie {
         }
         await tx.table("games").clear();
       });
+    // v9 added per-move aggregates (PlayerSide.moveStats) computed from
+    // conversions at parse time; same missing-field reasoning as v3–v7 —
+    // clear and let the rescan re-parse. Records live in packs since v8,
+    // so clear packs + seen rather than the legacy games table.
+    this.version(9)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("packs").clear();
+        await tx.table("seen").clear();
+      });
   }
 }
 

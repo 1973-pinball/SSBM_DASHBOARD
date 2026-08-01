@@ -1,6 +1,6 @@
 import type { ResolvedGame } from "./types";
 import {
-  byOppCharacter, byStage, computeSessions, executionSummary, tally, tiltStats, winRateBySessionPosition,
+  byOppCharacter, byStage, computeSessions, executionSummary, moveImpact, tally, tiltStats, winRateBySessionPosition,
 } from "./stats";
 import { charName, stageName } from "./melee";
 
@@ -13,7 +13,7 @@ import { charName, stageName } from "./melee";
  */
 
 export interface Recommendation {
-  kind: "matchup" | "stage-ban" | "stage-pick" | "tilt" | "fatigue" | "execution";
+  kind: "matchup" | "stage-ban" | "stage-pick" | "tilt" | "fatigue" | "execution" | "move";
   headline: string;
   detail: string;
   /** Effect size × evidence; used only for ordering. */
@@ -139,6 +139,30 @@ export function recommendations(games: ResolvedGame[], max = 5): Recommendation[
         lateDecided,
       );
     }
+  }
+
+  // Move habit: a move that's a real part of the kit whose heavy-usage games
+  // are losses. Two-proportion z between the heavy and light halves.
+  let worstMove: { label: string; delta: number; high: number; low: number; n: number; share: number; z: number } | null = null;
+  for (const row of moveImpact(games)) {
+    if (row.avgShare < 0.05 || row.delta === null || row.winRateHigh === null || row.winRateLow === null) continue;
+    if (row.highN + row.lowN < 60) continue;
+    const pooled = (row.highWins + row.lowWins) / (row.highN + row.lowN);
+    if (pooled <= 0 || pooled >= 1) continue;
+    const se = Math.sqrt(pooled * (1 - pooled) * (1 / row.highN + 1 / row.lowN));
+    const z = (row.winRateHigh - row.winRateLow) / se;
+    if (z <= -Z_GATE && row.delta <= -0.08 && (!worstMove || z < worstMove.z)) {
+      worstMove = { label: row.label, delta: row.delta, high: row.winRateHigh, low: row.winRateLow, n: row.highN + row.lowN, share: row.avgShare, z };
+    }
+  }
+  if (worstMove) {
+    push(
+      "move",
+      `Rethink the ${worstMove.label.toLowerCase()} habit`,
+      `${worstMove.label} averages ${pctText(worstMove.share)} of your landed hits, but in games where you lean on it hardest you win ${pctText(worstMove.high)}, versus ${pctText(worstMove.low)} when you barely use it (${worstMove.n} games). Volume on it isn't paying off — check what you're reaching for it instead of.`,
+      worstMove.delta / 2, // half-weight: correlational, and share-split effects run hot
+      worstMove.n,
+    );
   }
 
   // Execution drift: recent L-cancel vs career.

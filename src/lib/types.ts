@@ -26,6 +26,16 @@ export const ACTION_LABELS: { key: keyof ActionCounts; label: string }[] = [
   { key: "grabs", label: "Grabs" },
 ];
 
+/** Per-move landed-hit aggregates for one player in one game (from conversions). */
+export interface MoveAgg {
+  landed: number; // landed instances (a multi-hit move counts once per landing)
+  damage: number;
+  kills: number; // conversions this move ended with a kill
+  killPctSum: number; // victim % at those kills (avg = /kills)
+  openings: number; // conversions this move started
+  openingDmg: number; // total damage of the conversions it started
+}
+
 export interface PlayerSide {
   port: number;
   connectCode: string | null;
@@ -46,6 +56,8 @@ export interface PlayerSide {
   lCancelFail: number;
   grabSuccess: number; // landed grabs; actions.grabs is total attempts
   actions: ActionCounts;
+  /** Keyed by Melee move ID. Singles only (conversions no-op in teams). */
+  moveStats?: Record<number, MoveAgg>;
 }
 
 /**

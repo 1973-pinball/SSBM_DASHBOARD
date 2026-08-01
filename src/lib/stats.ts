@@ -1,6 +1,7 @@
 import type { ActionCounts, Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
 import { ACTION_LABELS } from "./types";
 import { INCLUDED_STAGE_ID_SET } from "./config";
+import { moveGroup } from "./melee";
 
 /** Local-timezone YYYY-MM-DD, matching the dates the user sees in the UI. */
 export function localDay(d: Date): string {
@@ -648,6 +649,161 @@ export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
     if (!myTarget || fromMe > myTarget.ffPerGame) myTarget = { code, ffPerGame: fromMe, games: e.games };
   }
   return { bestWinStreak: best, grudge, myTarget };
+}
+
+// ---------- Moves ----------
+
+export interface MoveRow {
+  key: string;
+  label: string;
+  landed: number;
+  landedPerGame: number;
+  damage: number;
+  dmgPerGame: number;
+  dmgShare: number | null;
+  avgDmgPerHit: number | null;
+  kills: number;
+  killShare: number | null;
+  avgKillPct: number | null;
+  openings: number;
+  openingShare: number | null;
+  dmgPerOpening: number | null;
+}
+
+/**
+ * Aggregate the per-game move stats into one row per move group. `covered` is
+ * how many games actually carry move data (rows parsed before the moveStats
+ * schema, and all teams games, have none).
+ */
+export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: number } {
+  const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number }>();
+  let covered = 0;
+  let totalDamage = 0, totalKills = 0, totalOpenings = 0;
+  for (const g of games) {
+    const ms = g.me.moveStats;
+    if (!ms) continue;
+    covered++;
+    for (const [idStr, m] of Object.entries(ms)) {
+      const grp = moveGroup(Number(idStr));
+      let a = agg.get(grp.key);
+      if (!a) {
+        a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 };
+        agg.set(grp.key, a);
+      }
+      a.landed += m.landed;
+      a.damage += m.damage;
+      a.kills += m.kills;
+      a.killPctSum += m.killPctSum;
+      a.openings += m.openings;
+      a.openingDmg += m.openingDmg;
+      totalDamage += m.damage;
+      totalKills += m.kills;
+      totalOpenings += m.openings;
+    }
+  }
+  const rows: MoveRow[] = Array.from(agg.entries())
+    .filter(([, a]) => a.landed > 0)
+    .map(([key, a]) => ({
+      key,
+      label: a.label,
+      landed: a.landed,
+      landedPerGame: covered ? a.landed / covered : 0,
+      damage: a.damage,
+      dmgPerGame: covered ? a.damage / covered : 0,
+      dmgShare: totalDamage > 0 ? a.damage / totalDamage : null,
+      avgDmgPerHit: a.landed ? a.damage / a.landed : null,
+      kills: a.kills,
+      killShare: totalKills > 0 ? a.kills / totalKills : null,
+      avgKillPct: a.kills ? a.killPctSum / a.kills : null,
+      openings: a.openings,
+      openingShare: totalOpenings > 0 ? a.openings / totalOpenings : null,
+      dmgPerOpening: a.openings ? a.openingDmg / a.openings : null,
+    }))
+    .sort((a, b) => b.damage - a.damage);
+  return { rows, covered };
+}
+
+export interface MoveImpactRow {
+  key: string;
+  label: string;
+  avgShare: number; // mean share of your landed moves across games
+  n: number; // decided games with move data
+  highWins: number;
+  highN: number;
+  lowWins: number;
+  lowN: number;
+  winRateHigh: number | null;
+  winRateLow: number | null;
+  delta: number | null; // high-usage win rate minus low-usage win rate
+}
+
+/**
+ * Does leaning on a move correlate with winning? Usage is measured as the
+ * move's share of your landed hits that game (compositional, so "winners just
+ * land more of everything" doesn't pollute it), then games are median-split
+ * into heavy vs light usage and the win rates compared. Correlational — a
+ * negative delta is a lead, not a verdict.
+ */
+export function moveImpact(games: ResolvedGame[], minGames = 40): MoveImpactRow[] {
+  const perMove = new Map<string, { label: string; samples: { share: number; isWin: boolean }[]; shareSum: number }>();
+  const eligible: { totals: number; ms: NonNullable<ResolvedGame["me"]["moveStats"]>; isWin: boolean }[] = [];
+  for (const g of games) {
+    if (g.isWin === null || !g.me.moveStats) continue;
+    let total = 0;
+    for (const m of Object.values(g.me.moveStats)) total += m.landed;
+    if (total === 0) continue;
+    eligible.push({ totals: total, ms: g.me.moveStats, isWin: g.isWin });
+  }
+  if (eligible.length < minGames) return [];
+  // Every eligible game contributes a share to every move (0 when unused) —
+  // "didn't use it at all" is the most informative low-usage sample there is.
+  const keys = new Map<string, string>();
+  for (const e of eligible) {
+    for (const idStr of Object.keys(e.ms)) {
+      const grp = moveGroup(Number(idStr));
+      keys.set(grp.key, grp.label);
+    }
+  }
+  for (const [key, label] of keys) {
+    perMove.set(key, { label, samples: [], shareSum: 0 });
+  }
+  for (const e of eligible) {
+    const byKey = new Map<string, number>();
+    for (const [idStr, m] of Object.entries(e.ms)) {
+      const grp = moveGroup(Number(idStr));
+      byKey.set(grp.key, (byKey.get(grp.key) ?? 0) + m.landed);
+    }
+    for (const [key, entry] of perMove) {
+      const share = (byKey.get(key) ?? 0) / e.totals;
+      entry.samples.push({ share, isWin: e.isWin });
+      entry.shareSum += share;
+    }
+  }
+  const rows: MoveImpactRow[] = [];
+  for (const [key, entry] of perMove) {
+    const sorted = [...entry.samples].sort((a, b) => a.share - b.share);
+    const half = Math.floor(sorted.length / 2);
+    const low = sorted.slice(0, half);
+    const high = sorted.slice(sorted.length - half);
+    const lowWins = low.filter((s) => s.isWin).length;
+    const highWins = high.filter((s) => s.isWin).length;
+    const winRateLow = low.length ? lowWins / low.length : null;
+    const winRateHigh = high.length ? highWins / high.length : null;
+    rows.push({
+      key,
+      label: entry.label,
+      avgShare: entry.shareSum / entry.samples.length,
+      n: entry.samples.length,
+      highWins,
+      highN: high.length,
+      lowWins,
+      lowN: low.length,
+      winRateHigh,
+      winRateLow,
+      delta: winRateHigh !== null && winRateLow !== null ? winRateHigh - winRateLow : null,
+    });
+  }
+  return rows.sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0));
 }
 
 // ---------- Sets ----------

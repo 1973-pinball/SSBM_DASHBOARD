@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -776,6 +776,134 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
           better for comparing across filters.
         </div>
       </div>
+
+      <MovesSection games={games} />
+    </>
+  );
+}
+
+/** Per-move damage, kills, openings, and the volume-vs-wins impact analysis. */
+function MovesSection({ games }: { games: ResolvedGame[] }) {
+  const { rows, covered } = useMemo(() => moveTable(games), [games]);
+  const impact = useMemo(() => moveImpact(games), [games]);
+  if (rows.length === 0) {
+    return (
+      <div className="panel">
+        <h2>Moves</h2>
+        <div className="empty-note">
+          No per-move data in these games yet — it's computed at parse time, so hit <b>Refresh</b> (or re-pick your
+          folder) to re-parse the library once.
+        </div>
+      </div>
+    );
+  }
+  const deltaColor = (d: number | null) => (d === null ? undefined : { color: d >= 0 ? "#3fcf8e" : "#f0564f" });
+  return (
+    <>
+      <div className="panel">
+        <h2>Move effectiveness — where your damage and kills come from</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Move</th>
+              <th className="data">Landed / game</th>
+              <th className="data">Dmg / game</th>
+              <th className="data">Dmg share</th>
+              <th className="data">Avg dmg / hit</th>
+              <th className="data">Kills</th>
+              <th className="data">Kill share</th>
+              <th className="data">Avg kill %</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.key}>
+                <td>{r.label}</td>
+                <td className="data">{num(r.landedPerGame, 1)}</td>
+                <td className="data">{num(r.dmgPerGame, 1)}</td>
+                <td className="data">{pct(r.dmgShare, 0)}</td>
+                <td className="data">{num(r.avgDmgPerHit, 1)}</td>
+                <td className="data">{r.kills.toLocaleString()}</td>
+                <td className="data">{pct(r.killShare, 0)}</td>
+                <td className="data">{r.avgKillPct !== null ? `${num(r.avgKillPct, 0)}%` : "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <div className="hint">
+          Landed hits only (whiffs aren't in the replay hit data). Avg kill % is the opponent's percent when the move
+          closed a stock — a high number on a kill move means you're fishing with it stale. Over{" "}
+          {covered.toLocaleString()} games{covered < games.length ? ` (${(games.length - covered).toLocaleString()} lack move data)` : ""}.
+        </div>
+      </div>
+
+      <div className="panel">
+        <h2>Openings — which move starts your offense</h2>
+        <table>
+          <thead>
+            <tr>
+              <th>Move</th>
+              <th className="data">Openings / game</th>
+              <th className="data">Share of openings</th>
+              <th className="data">Damage per opening</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows
+              .filter((r) => r.openings > 0)
+              .sort((a, b) => b.openings - a.openings)
+              .map((r) => (
+                <tr key={r.key}>
+                  <td>{r.label}</td>
+                  <td className="data">{num(covered ? r.openings / covered : 0, 1)}</td>
+                  <td className="data">{pct(r.openingShare, 0)}</td>
+                  <td className="data">{num(r.dmgPerOpening, 1)}</td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+        <div className="hint">
+          The first move of each conversion. High damage-per-opening moves are the neutral wins worth hunting; pair
+          with openings/kill above to see whether you're converting them.
+        </div>
+      </div>
+
+      {impact.length > 0 && (
+        <div className="panel">
+          <h2>Move impact — volume vs wins</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Move</th>
+                <th className="data">Share of offense</th>
+                <th className="data">WR when heavy</th>
+                <th className="data">WR when light</th>
+                <th className="data">Heavy − light</th>
+              </tr>
+            </thead>
+            <tbody>
+              {impact
+                .filter((r) => r.avgShare >= 0.02)
+                .map((r) => (
+                  <tr key={r.key}>
+                    <td>{r.label}</td>
+                    <td className="data">{pct(r.avgShare, 1)}</td>
+                    <td className="data">{pct(r.winRateHigh)}</td>
+                    <td className="data">{pct(r.winRateLow)}</td>
+                    <td className="data" style={deltaColor(r.delta)}>
+                      {r.delta !== null ? `${r.delta >= 0 ? "+" : ""}${num(r.delta * 100, 1)} pp` : "—"}
+                    </td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <div className="hint">
+            Usage is the move's share of your landed hits that game (so "winners land more of everything" doesn't skew
+            it); games are median-split into heavy vs light usage and the win rates compared. Red rows near the top are
+            moves you lean on in games you lose — a practice lead, not proof. Moves under 2% of your offense are hidden.
+          </div>
+        </div>
+      )}
     </>
   );
 }
