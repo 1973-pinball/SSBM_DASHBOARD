@@ -214,6 +214,37 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     }
   }
 
+  // Per-move attempt counts (singles): slippi-js's action counter already
+  // tallies initiations per normal/aerial from animation states — whiffs
+  // included. Specials, throws, getup and edge attacks aren't tracked there,
+  // so those stay undefined (rendered as "—", not 0). Combined jabs land on
+  // move ID 2; the move table groups jab IDs anyway.
+  if (!isTeams) {
+    settings.players.forEach((p, i) => {
+      const ac = stats?.actionCounts?.find((a) => a.playerIndex === p.playerIndex)?.attackCount;
+      if (!ac) return;
+      const byMove = (players[i].moveStats ??= {});
+      const put = (moveId: number, attempts: number) => {
+        if (attempts <= 0 && !byMove[moveId]) return;
+        const a: MoveAgg = (byMove[moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
+        a.attempts = attempts;
+      };
+      put(2, ac.jab1 + ac.jab2 + ac.jab3 + ac.jabm);
+      put(6, ac.dash);
+      put(7, ac.ftilt);
+      put(8, ac.utilt);
+      put(9, ac.dtilt);
+      put(10, ac.fsmash);
+      put(11, ac.usmash);
+      put(12, ac.dsmash);
+      put(13, ac.nair);
+      put(14, ac.fair);
+      put(15, ac.bair);
+      put(16, ac.uair);
+      put(17, ac.dair);
+    });
+  }
+
   // Doubles: slippi-js left every stat field zeroed, so fill them from our
   // own frame pass. kills/totalDamage keep singles semantics (enemies only);
   // friendly fire lives in the matrices.

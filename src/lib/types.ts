@@ -37,6 +37,9 @@ export interface MoveAgg {
   /** L-cancels on this aerial's landing lag, whiffs included. Aerials only; 0 elsewhere. */
   lcSuccess: number;
   lcFail: number;
+  /** Times the move was initiated (from animation states), whiffs included.
+   *  Tracked for grounded normals and aerials only; undefined = not tracked. */
+  attempts?: number;
 }
 
 export interface PlayerSide {

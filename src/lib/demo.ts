@@ -44,6 +44,8 @@ function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDa
       lcFail = attempts - lcSuccess;
     }
     out[id] = { landed, damage, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess, lcFail };
+    // Attempts are tracked for normals + aerials only, mirroring the parser.
+    if ((id >= 2 && id <= 17) || id === 6) out[id].attempts = Math.round(landed * (1.2 + rand() * 0.6));
     rawDmg += damage;
   }
   // Scale damages so the per-move sum matches the game's totalDamage.

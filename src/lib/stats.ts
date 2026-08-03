@@ -656,6 +656,8 @@ export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
 export interface MoveRow {
   key: string;
   label: string;
+  attempts: number | null; // null = not tracked for this move (specials, throws)
+  attemptsPerGame: number | null;
   landed: number;
   landedPerGame: number;
   damage: number;
@@ -678,7 +680,7 @@ export interface MoveRow {
  * schema, and all teams games, have none).
  */
 export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: number } {
-  const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number; lcS: number; lcF: number }>();
+  const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number; lcS: number; lcF: number; attempts: number | null }>();
   let covered = 0;
   let totalDamage = 0, totalKills = 0, totalOpenings = 0;
   for (const g of games) {
@@ -689,9 +691,10 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
       const grp = moveGroup(Number(idStr));
       let a = agg.get(grp.key);
       if (!a) {
-        a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcS: 0, lcF: 0 };
+        a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcS: 0, lcF: 0, attempts: null as number | null };
         agg.set(grp.key, a);
       }
+      if (m.attempts !== undefined) a.attempts = (a.attempts ?? 0) + m.attempts;
       a.landed += m.landed;
       a.damage += m.damage;
       a.kills += m.kills;
@@ -710,6 +713,8 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
     .map(([key, a]) => ({
       key,
       label: a.label,
+      attempts: a.attempts,
+      attemptsPerGame: a.attempts !== null && covered ? a.attempts / covered : null,
       landed: a.landed,
       landedPerGame: covered ? a.landed / covered : 0,
       damage: a.damage,
@@ -732,7 +737,9 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
 export interface MoveImpactRow {
   key: string;
   label: string;
-  avgShare: number; // mean share of your landed moves across games
+  /** Mean usage: share of landed hits (moves) or count per minute (actions). */
+  avgShare: number;
+  usageKind?: "share" | "perMinute"; // undefined = share
   n: number; // decided games with move data
   highWins: number;
   highN: number;
@@ -741,6 +748,28 @@ export interface MoveImpactRow {
   winRateHigh: number | null;
   winRateLow: number | null;
   delta: number | null; // high-usage win rate minus low-usage win rate
+}
+
+/** Median-split usage samples into heavy/light halves and compare win rates. */
+function splitImpact(samples: { share: number; isWin: boolean }[]): Omit<MoveImpactRow, "key" | "label" | "avgShare" | "usageKind"> {
+  const sorted = [...samples].sort((a, b) => a.share - b.share);
+  const half = Math.floor(sorted.length / 2);
+  const low = sorted.slice(0, half);
+  const high = sorted.slice(sorted.length - half);
+  const lowWins = low.filter((s) => s.isWin).length;
+  const highWins = high.filter((s) => s.isWin).length;
+  const winRateLow = low.length ? lowWins / low.length : null;
+  const winRateHigh = high.length ? highWins / high.length : null;
+  return {
+    n: samples.length,
+    highWins,
+    highN: high.length,
+    lowWins,
+    lowN: low.length,
+    winRateHigh,
+    winRateLow,
+    delta: winRateHigh !== null && winRateLow !== null ? winRateHigh - winRateLow : null,
+  };
 }
 
 /**
@@ -787,29 +816,43 @@ export function moveImpact(games: ResolvedGame[], minGames = 40): MoveImpactRow[
   }
   const rows: MoveImpactRow[] = [];
   for (const [key, entry] of perMove) {
-    const sorted = [...entry.samples].sort((a, b) => a.share - b.share);
-    const half = Math.floor(sorted.length / 2);
-    const low = sorted.slice(0, half);
-    const high = sorted.slice(sorted.length - half);
-    const lowWins = low.filter((s) => s.isWin).length;
-    const highWins = high.filter((s) => s.isWin).length;
-    const winRateLow = low.length ? lowWins / low.length : null;
-    const winRateHigh = high.length ? highWins / high.length : null;
     rows.push({
       key,
       label: entry.label,
       avgShare: entry.shareSum / entry.samples.length,
-      n: entry.samples.length,
-      highWins,
-      highN: high.length,
-      lowWins,
-      lowN: low.length,
-      winRateHigh,
-      winRateLow,
-      delta: winRateHigh !== null && winRateLow !== null ? winRateHigh - winRateLow : null,
+      ...splitImpact(entry.samples),
     });
   }
   return rows.sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0));
+}
+
+/**
+ * Same heavy-vs-light analysis for defensive/movement actions, normalized per
+ * minute of game time (length is the confound there, not total volume).
+ */
+export function actionImpact(games: ResolvedGame[], minGames = 40): MoveImpactRow[] {
+  const samples = new Map<keyof ActionCounts, { share: number; isWin: boolean }[]>();
+  for (const { key } of ACTION_LABELS) samples.set(key, []);
+  let n = 0;
+  for (const g of games) {
+    if (g.isWin === null || g.rec.durationFrames <= 0) continue;
+    const minutes = g.rec.durationFrames / 3600;
+    n++;
+    for (const { key } of ACTION_LABELS) {
+      samples.get(key)!.push({ share: (g.me.actions?.[key] ?? 0) / minutes, isWin: g.isWin });
+    }
+  }
+  if (n < minGames) return [];
+  return ACTION_LABELS.map(({ key, label }) => {
+    const s = samples.get(key)!;
+    return {
+      key: `act:${key}`,
+      label,
+      avgShare: s.reduce((sum, x) => sum + x.share, 0) / s.length,
+      usageKind: "perMinute" as const,
+      ...splitImpact(s),
+    };
+  }).sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0));
 }
 
 // ---------- Sets ----------

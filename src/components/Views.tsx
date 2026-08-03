@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import type { PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -788,7 +788,11 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
   // impact analysis keep the full filter, which they need for sample size.
   const recent = useMemo(() => moveTable(games.slice(-100)), [games]);
   const { rows, covered } = useMemo(() => moveTable(games), [games]);
-  const impact = useMemo(() => moveImpact(games), [games]);
+  // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
+  const impact = useMemo(
+    () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
+    [games],
+  );
   if (rows.length === 0) {
     return (
       <div className="panel">
@@ -809,6 +813,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
           <thead>
             <tr>
               <th>Move</th>
+              <th className="data">Attempted / game</th>
               <th className="data">Landed / game</th>
               <th className="data">Dmg / game</th>
               <th className="data">Dmg share</th>
@@ -823,6 +828,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
             {recent.rows.map((r) => (
               <tr key={r.key}>
                 <td>{r.label}</td>
+                <td className="data">{r.attemptsPerGame !== null ? num(r.attemptsPerGame, 1) : "—"}</td>
                 <td className="data">{num(r.landedPerGame, 1)}</td>
                 <td className="data">{num(r.dmgPerGame, 1)}</td>
                 <td className="data">{pct(r.dmgShare, 0)}</td>
@@ -839,10 +845,11 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
         </table>
         <div className="hint">
           Your most recent {Math.min(100, recent.covered).toLocaleString()} games in this filter — current habits, not
-          career averages. Landed hits only (whiffs aren't in the replay hit data) — except L-cancel, which counts
-          every landing of that aerial, whiffs included (hover for attempts; it can differ a hair from the headline
-          rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a stock — a
-          high number on a kill move means you're fishing with it stale.
+          career averages. Attempted counts every initiation (whiffs included) and is tracked for normals and aerials
+          only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
+          L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
+          headline rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a
+          stock — a high number on a kill move means you're fishing with it stale.
         </div>
       </div>
 
@@ -883,33 +890,36 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
           <table>
             <thead>
               <tr>
-                <th>Move</th>
-                <th className="data">Share of offense</th>
+                <th>Move / action</th>
+                <th className="data">Usage</th>
                 <th className="data">WR when heavy</th>
                 <th className="data">WR when light</th>
                 <th className="data">Heavy − light</th>
               </tr>
             </thead>
             <tbody>
-              {impact
-                .filter((r) => r.avgShare >= 0.02)
-                .map((r) => (
-                  <tr key={r.key}>
-                    <td>{r.label}</td>
-                    <td className="data">{pct(r.avgShare, 1)}</td>
-                    <td className="data">{pct(r.winRateHigh)}</td>
-                    <td className="data">{pct(r.winRateLow)}</td>
-                    <td className="data" style={deltaColor(r.delta)}>
-                      {r.delta !== null ? `${r.delta >= 0 ? "+" : ""}${num(r.delta * 100, 1)} pp` : "—"}
-                    </td>
-                  </tr>
-                ))}
+              {impact.map((r) => (
+                <tr key={r.key} style={r.avgShare < 0.02 && r.usageKind !== "perMinute" ? { opacity: 0.55 } : undefined}>
+                  <td>
+                    {r.label}
+                    {r.usageKind === "perMinute" && <span className="tag" style={{ marginLeft: 6 }}>action</span>}
+                  </td>
+                  <td className="data">{r.usageKind === "perMinute" ? `${num(r.avgShare, 1)}/min` : pct(r.avgShare, 1)}</td>
+                  <td className="data">{pct(r.winRateHigh)}</td>
+                  <td className="data">{pct(r.winRateLow)}</td>
+                  <td className="data" style={deltaColor(r.delta)}>
+                    {r.delta !== null ? `${r.delta >= 0 ? "+" : ""}${num(r.delta * 100, 1)} pp` : "—"}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
           <div className="hint">
-            Usage is the move's share of your landed hits that game (so "winners land more of everything" doesn't skew
-            it); games are median-split into heavy vs light usage and the win rates compared. Red rows near the top are
-            moves you lean on in games you lose — a practice lead, not proof. Moves under 2% of your offense are hidden.
+            Move usage is that move's share of your landed hits that game (so "winners land more of everything" doesn't
+            skew it); action usage is the count per minute of game time. Games are median-split into heavy vs light
+            usage and the win rates compared. Red rows near the top are habits that swell in games you lose — a
+            practice lead, not proof. Faded rows are moves under 2% of your offense: their deltas run noisy, trust them
+            less.
           </div>
         </div>
       )}

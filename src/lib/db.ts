@@ -145,6 +145,18 @@ class SsbmDb extends Dexie {
         await tx.table("packs").clear();
         await tx.table("seen").clear();
       });
+    // v11 added per-move attempt counts to MoveAgg (normals + aerials).
+    this.version(11)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("packs").clear();
+        await tx.table("seen").clear();
+      });
   }
 }
 
