@@ -6,7 +6,7 @@ import { INCLUDED_STAGE_IDS } from "./config";
  * matching the parser). The demo player has a deliberate tell for the move-
  * impact analysis: side-B spam swells in losses, dair/bair carry wins.
  */
-function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDamage: number, isMe: boolean, iWin: boolean): Record<number, MoveAgg> {
+function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDamage: number, isMe: boolean, iWin: boolean, lcRate: number): Record<number, MoveAgg> {
   // [moveId, weight, avgDmgPerHit]
   const mix: [number, number, number][] = [
     [2, 1.6, 3], // jab
@@ -34,7 +34,16 @@ function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDa
     const landed = Math.round(minutes * w * (0.7 + rand() * 0.6));
     if (landed <= 0) continue;
     const damage = landed * dmgPer * (0.8 + rand() * 0.4);
-    out[id] = { landed, damage, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 };
+    // Aerials get L-cancel counts: attempts exceed landed (whiffs count too),
+    // per-move rate jitters around the game rate — dair runs a little worse.
+    let lcSuccess = 0, lcFail = 0;
+    if (id >= 13 && id <= 17) {
+      const attempts = Math.round(landed * (1.1 + rand() * 0.5));
+      const rate = Math.min(0.98, Math.max(0.2, lcRate + (rand() - 0.5) * 0.12 - (id === 17 ? 0.05 : 0)));
+      lcSuccess = Math.round(attempts * rate);
+      lcFail = attempts - lcSuccess;
+    }
+    out[id] = { landed, damage, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess, lcFail };
     rawDmg += damage;
   }
   // Scale damages so the per-move sum matches the game's totalDamage.
@@ -177,7 +186,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
       const totalDamage = kills * (95 + rand() * 40);
       return {
-      moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin),
+      moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin, isMe ? lcRate : 0.6 + rand() * 0.3),
       port: isMe ? 1 : 2,
       connectCode: isMe ? DEMO_CODE : rival.code,
       displayName: isMe ? "demo" : rival.name,

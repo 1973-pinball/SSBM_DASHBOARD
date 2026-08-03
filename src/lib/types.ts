@@ -34,6 +34,9 @@ export interface MoveAgg {
   killPctSum: number; // victim % at those kills (avg = /kills)
   openings: number; // conversions this move started
   openingDmg: number; // total damage of the conversions it started
+  /** L-cancels on this aerial's landing lag, whiffs included. Aerials only; 0 elsewhere. */
+  lcSuccess: number;
+  lcFail: number;
 }
 
 export interface PlayerSide {

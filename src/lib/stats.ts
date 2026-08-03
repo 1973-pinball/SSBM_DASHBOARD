@@ -668,6 +668,8 @@ export interface MoveRow {
   openings: number;
   openingShare: number | null;
   dmgPerOpening: number | null;
+  lCancelAttempts: number; // whiffs included; aerials only, 0 elsewhere
+  lCancelPct: number | null;
 }
 
 /**
@@ -676,7 +678,7 @@ export interface MoveRow {
  * schema, and all teams games, have none).
  */
 export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: number } {
-  const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number }>();
+  const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number; lcS: number; lcF: number }>();
   let covered = 0;
   let totalDamage = 0, totalKills = 0, totalOpenings = 0;
   for (const g of games) {
@@ -687,7 +689,7 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
       const grp = moveGroup(Number(idStr));
       let a = agg.get(grp.key);
       if (!a) {
-        a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 };
+        a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcS: 0, lcF: 0 };
         agg.set(grp.key, a);
       }
       a.landed += m.landed;
@@ -696,13 +698,15 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
       a.killPctSum += m.killPctSum;
       a.openings += m.openings;
       a.openingDmg += m.openingDmg;
+      a.lcS += m.lcSuccess ?? 0;
+      a.lcF += m.lcFail ?? 0;
       totalDamage += m.damage;
       totalKills += m.kills;
       totalOpenings += m.openings;
     }
   }
   const rows: MoveRow[] = Array.from(agg.entries())
-    .filter(([, a]) => a.landed > 0)
+    .filter(([, a]) => a.landed > 0 || a.lcS + a.lcF > 0)
     .map(([key, a]) => ({
       key,
       label: a.label,
@@ -718,6 +722,8 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
       openings: a.openings,
       openingShare: totalOpenings > 0 ? a.openings / totalOpenings : null,
       dmgPerOpening: a.openings ? a.openingDmg / a.openings : null,
+      lCancelAttempts: a.lcS + a.lcF,
+      lCancelPct: a.lcS + a.lcF > 0 ? a.lcS / (a.lcS + a.lcF) : null,
     }))
     .sort((a, b) => b.damage - a.damage);
   return { rows, covered };

@@ -132,6 +132,19 @@ class SsbmDb extends Dexie {
         await tx.table("packs").clear();
         await tx.table("seen").clear();
       });
+    // v10 added per-aerial L-cancel counts to MoveAgg; v9 rows lack the
+    // fields and would silently understate rates. Clear and re-parse.
+    this.version(10)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("packs").clear();
+        await tx.table("seen").clear();
+      });
   }
 }
 

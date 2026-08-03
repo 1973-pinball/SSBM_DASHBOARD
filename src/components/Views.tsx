@@ -813,6 +813,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
               <th className="data">Kills</th>
               <th className="data">Kill share</th>
               <th className="data">Avg kill %</th>
+              <th className="data">L-cancel</th>
             </tr>
           </thead>
           <tbody>
@@ -826,14 +827,19 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
                 <td className="data">{r.kills.toLocaleString()}</td>
                 <td className="data">{pct(r.killShare, 0)}</td>
                 <td className="data">{r.avgKillPct !== null ? `${num(r.avgKillPct, 0)}%` : "—"}</td>
+                <td className="data" title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}>
+                  {pct(r.lCancelPct)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
         <div className="hint">
-          Landed hits only (whiffs aren't in the replay hit data). Avg kill % is the opponent's percent when the move
-          closed a stock — a high number on a kill move means you're fishing with it stale. Over{" "}
-          {covered.toLocaleString()} games{covered < games.length ? ` (${(games.length - covered).toLocaleString()} lack move data)` : ""}.
+          Landed hits only (whiffs aren't in the replay hit data) — except L-cancel, which counts every landing of that
+          aerial, whiffs included (hover for attempts; it can differ a hair from the headline rate, which corrects for
+          edge-cancels). Avg kill % is the opponent's percent when the move closed a stock — a high number on a kill
+          move means you're fishing with it stale. Over {covered.toLocaleString()} games
+          {covered < games.length ? ` (${(games.length - covered).toLocaleString()} lack move data)` : ""}.
         </div>
       </div>
 

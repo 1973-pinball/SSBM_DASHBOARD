@@ -166,7 +166,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
         if (pi === undefined) return;
         const side = players[pi];
         const byMove = (side.moveStats ??= {});
-        const a: MoveAgg = (byMove[m.moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0 });
+        const a: MoveAgg = (byMove[m.moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
         a.landed++;
         a.damage += m.damage;
         if (mi === 0) {
@@ -177,6 +177,39 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
           a.kills++;
           a.killPctSum += c.endPercent ?? c.currentPercent;
         }
+      });
+    }
+  }
+
+  // Per-aerial L-cancels (singles): the landing action state says which aerial
+  // (0x46–0x4a = nair..dair landing lag) and `lCancelStatus` on that frame says
+  // hit or miss — whiffed aerials included, unlike the conversion-based stats.
+  // Mirrors slippi-js's isNewAction guard; we skip its rare edge-cancel
+  // correction, so per-move sums can differ from the headline rate by a hair.
+  if (!isTeams && settings.players.length === 2) {
+    const LANDING_TO_MOVE: Record<number, number> = { 0x46: 13, 0x47: 14, 0x48: 15, 0x49: 16, 0x4a: 17 };
+    const frames = game.getFrames();
+    const frameNums = Object.keys(frames).map(Number).sort((a, b) => a - b);
+    const prevAnim: (number | null)[] = [null, null];
+    const prevCounter: (number | null)[] = [null, null];
+    for (const fn of frameNums) {
+      const frame = frames[fn];
+      if (!frame?.players) continue;
+      settings.players.forEach((p, i) => {
+        const post = frame.players[p.playerIndex]?.post;
+        if (!post) return;
+        const anim = post.actionStateId ?? null;
+        const counter = post.actionStateCounter ?? null;
+        const isNewAction =
+          anim !== prevAnim[i] || (prevCounter[i] !== null && counter !== null && prevCounter[i]! > counter);
+        if (isNewAction && anim !== null && LANDING_TO_MOVE[anim] !== undefined && (post.lCancelStatus === 1 || post.lCancelStatus === 2)) {
+          const byMove = (players[i].moveStats ??= {});
+          const a: MoveAgg = (byMove[LANDING_TO_MOVE[anim]] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
+          if (post.lCancelStatus === 1) a.lcSuccess++;
+          else a.lcFail++;
+        }
+        prevAnim[i] = anim;
+        prevCounter[i] = counter;
       });
     }
   }
