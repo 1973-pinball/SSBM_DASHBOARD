@@ -784,6 +784,9 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
 
 /** Per-move damage, kills, openings, and the volume-vs-wins impact analysis. */
 function MovesSection({ games }: { games: ResolvedGame[] }) {
+  // Effectiveness reads the recent window (current habits); openings and the
+  // impact analysis keep the full filter, which they need for sample size.
+  const recent = useMemo(() => moveTable(games.slice(-100)), [games]);
   const { rows, covered } = useMemo(() => moveTable(games), [games]);
   const impact = useMemo(() => moveImpact(games), [games]);
   if (rows.length === 0) {
@@ -801,7 +804,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
   return (
     <>
       <div className="panel">
-        <h2>Move effectiveness — where your damage and kills come from</h2>
+        <h2>Move effectiveness (past {Math.min(100, recent.covered).toLocaleString()} games)</h2>
         <table>
           <thead>
             <tr>
@@ -817,7 +820,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {recent.rows.map((r) => (
               <tr key={r.key}>
                 <td>{r.label}</td>
                 <td className="data">{num(r.landedPerGame, 1)}</td>
@@ -835,11 +838,11 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
           </tbody>
         </table>
         <div className="hint">
-          Landed hits only (whiffs aren't in the replay hit data) — except L-cancel, which counts every landing of that
-          aerial, whiffs included (hover for attempts; it can differ a hair from the headline rate, which corrects for
-          edge-cancels). Avg kill % is the opponent's percent when the move closed a stock — a high number on a kill
-          move means you're fishing with it stale. Over {covered.toLocaleString()} games
-          {covered < games.length ? ` (${(games.length - covered).toLocaleString()} lack move data)` : ""}.
+          Your most recent {Math.min(100, recent.covered).toLocaleString()} games in this filter — current habits, not
+          career averages. Landed hits only (whiffs aren't in the replay hit data) — except L-cancel, which counts
+          every landing of that aerial, whiffs included (hover for attempts; it can differ a hair from the headline
+          rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a stock — a
+          high number on a kill move means you're fishing with it stale.
         </div>
       </div>
 
