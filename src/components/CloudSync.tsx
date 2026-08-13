@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GameRecord } from "../lib/types";
 import { cloudEnabled, currentSession, onAuthChange, signInWithGoogle, signOut, type Session } from "../lib/supabase";
 import { pushMyCodes, syncRecords } from "../lib/cloudSync";
+import { GoogleG } from "./GoogleG";
 
 interface Props {
   records: GameRecord[];
@@ -119,7 +120,12 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
 
   if (!session) {
     return (
-      <button className="ghost" style={{ marginLeft: 10 }} onClick={() => void signInWithGoogle().catch(console.error)}>
+      <button
+        className="ghost"
+        style={{ marginLeft: 10, display: "inline-flex", alignItems: "center", gap: 8 }}
+        onClick={() => void signInWithGoogle().catch(console.error)}
+      >
+        <GoogleG size={14} />
         Sign in with Google
       </button>
     );

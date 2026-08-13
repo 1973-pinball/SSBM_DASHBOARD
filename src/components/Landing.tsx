@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { GoogleG } from "./GoogleG";
 
 interface Props {
   onPickDirectory: () => void;
@@ -36,7 +37,13 @@ export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess
           Explore with demo data
         </button>
         {onCloudSignIn && (
-          <button className="ghost" onClick={onCloudSignIn} disabled={cloudRestoring}>
+          <button
+            className="ghost"
+            style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+            onClick={onCloudSignIn}
+            disabled={cloudRestoring}
+          >
+            <GoogleG size={15} />
             {cloudRestoring ? "Restoring your stats…" : "Sign in with Google to restore"}
           </button>
         )}
