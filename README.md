@@ -30,7 +30,9 @@ No replays handy? The landing page has a demo-data mode (deterministic synthetic
 
 ## Cloud sync (optional)
 
-With no configuration the app is 100% local. To enable accounts + cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
+With no configuration the app is 100% local. When enabled, the cloud is a **mirror, not a backend**: the dashboard always renders from the local IndexedDB cache, and sync keeps that cache converged with the union of games from every device you've signed in on. That's why the app stays instant, works fully offline, and keeps working even if the cloud is unreachable — a failed sync only means the mirror is stale, never a broken dashboard.
+
+To enable accounts + cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
 
 1. **Create a Supabase project** (free tier is fine) at [database.new](https://database.new).
 2. **Create the tables**: open SQL Editor in the Supabase dashboard, paste [`supabase/schema.sql`](supabase/schema.sql), run it. This creates `game_records` and `user_settings` with row-level security so each user can only read/write their own rows.
