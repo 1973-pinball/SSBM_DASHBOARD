@@ -134,7 +134,7 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
       : hasPending
         ? `Sync ${pending.toLocaleString()} new game${pending === 1 ? "" : "s"}`
         : sync.kind === "done"
-          ? `Synced ↑${sync.pushed.toLocaleString()} ↓${sync.pulled.toLocaleString()}`
+          ? "Synced ✓"
           : sync.kind === "error"
             ? "Sync failed — retry"
             : "Sync to cloud";
@@ -144,6 +144,11 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
       <button
         className={hasPending ? "ghost attn" : "ghost"}
         style={{ marginLeft: 10 }}
+        title={
+          sync.kind === "done"
+            ? `Last sync: ${sync.pushed.toLocaleString()} pushed, ${sync.pulled.toLocaleString()} pulled`
+            : undefined
+        }
         onClick={() => void runSync()}
         disabled={sync.kind === "busy"}
       >
