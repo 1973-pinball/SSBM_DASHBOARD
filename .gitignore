@@ -24,3 +24,8 @@ dist-ssr
 *.sw?
 
 .vercel
+.env*
+!.env.example
+
+# Supabase CLI scratch
+supabase/.temp/
