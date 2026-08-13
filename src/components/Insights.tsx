@@ -1,9 +1,125 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ResolvedGame } from "../lib/types";
-import { WIN_MODEL_FEATURES, fitWinModel, quartileWinRates } from "../lib/model";
-import type { CoefRow } from "../lib/model";
+import { WIN_MODEL_FEATURES, buildWinModelInput, quartileWinRates } from "../lib/model";
+import type { CoefRow, FeatureDef, WinModel } from "../lib/model";
+import type { ModelWorkerJob, ModelWorkerResult } from "../worker/model.worker";
 import { COACH_MIN_DECIDED, recommendations } from "../lib/coach";
 import { num, pct, winRateColor } from "../lib/format";
+
+/**
+ * The IRLS fit is O(iterations · n · k²) — multi-hundred-ms on a big library —
+ * so it runs in a Web Worker instead of blocking the main thread. A lazily
+ * created singleton worker is enough: the cache below guarantees each
+ * (games, feature-set) pair is fitted at most once, so there's never a queue
+ * worth parallelizing.
+ */
+let modelWorker: Worker | null = null;
+let nextJobId = 1;
+const pendingJobs = new Map<number, { resolve: (m: WinModel | null) => void; reject: (e: Error) => void }>();
+
+function getModelWorker(): Worker {
+  if (modelWorker) return modelWorker;
+  const w = new Worker(new URL("../worker/model.worker.ts", import.meta.url), { type: "module" });
+  w.onmessage = (e: MessageEvent<ModelWorkerResult>) => {
+    const job = pendingJobs.get(e.data.id);
+    if (!job) return;
+    pendingJobs.delete(e.data.id);
+    if (e.data.ok) job.resolve(e.data.model ?? null);
+    else job.reject(new Error(e.data.error ?? "model fit failed"));
+  };
+  // Worker death — most commonly its script 404ing in a stale tab after a
+  // redeploy (see pool.ts) — would otherwise leave fits pending forever. Fail
+  // them and drop the worker so the next fit attempt starts a fresh one.
+  w.onerror = () => {
+    const jobs = [...pendingJobs.values()];
+    pendingJobs.clear();
+    w.terminate();
+    if (modelWorker === w) modelWorker = null;
+    for (const j of jobs) j.reject(new Error("model worker failed"));
+  };
+  modelWorker = w;
+  return w;
+}
+
+function fitInWorker(games: ResolvedGame[], features: FeatureDef[]): Promise<WinModel | null> {
+  // Feature extraction needs the FeatureDef closures, so it happens here on
+  // the main thread (cheap); only plain cloneable data crosses to the worker.
+  const input = buildWinModelInput(games, features);
+  return new Promise((resolve, reject) => {
+    const job: ModelWorkerJob = { id: nextJobId++, input };
+    pendingJobs.set(job.id, { resolve, reject });
+    getModelWorker().postMessage(job);
+  });
+}
+
+interface FitEntry {
+  status: "pending" | "done" | "error";
+  /** Meaningful once status is "done"; null there means "too little data". */
+  model: WinModel | null;
+  /** Settles (never rejects) once status and model hold their final values. */
+  settled: Promise<void>;
+}
+
+/**
+ * Fits cached by games-array identity, then by feature set. The `games` prop
+ * is a stable useMemo result upstream (it only changes when records or filters
+ * change), so reference identity is the right key — and because App unmounts
+ * this tab on every tab switch, the module-level cache is what keeps a return
+ * visit with unchanged data from refitting.
+ */
+const fitCache = new WeakMap<readonly ResolvedGame[], Map<string, FitEntry>>();
+
+function getOrStartFit(games: ResolvedGame[], features: FeatureDef[]): FitEntry {
+  let bySig = fitCache.get(games);
+  if (!bySig) {
+    bySig = new Map();
+    fitCache.set(games, bySig);
+  }
+  const sig = features.map((f) => f.key).join("|");
+  const cached = bySig.get(sig);
+  if (cached) return cached;
+  const entry: FitEntry = { status: "pending", model: null, settled: Promise.resolve() };
+  const inner = bySig;
+  entry.settled = fitInWorker(games, features).then(
+    (m) => {
+      entry.status = "done";
+      entry.model = m;
+    },
+    () => {
+      entry.status = "error";
+      // Forget failed fits so the next visit retries with a fresh worker
+      // instead of pinning the error until the data changes.
+      inner.delete(sig);
+    },
+  );
+  bySig.set(sig, entry);
+  return entry;
+}
+
+/** Async wrapper around the cache: re-renders once the fit settles. */
+function useWinModel(
+  games: ResolvedGame[],
+  features: FeatureDef[],
+): { status: FitEntry["status"]; model: WinModel | null } {
+  // getOrStartFit is idempotent per (games, features), so calling it during
+  // render is safe — repeat renders and StrictMode just hit the cache.
+  const entry = useMemo(() => getOrStartFit(games, features), [games, features]);
+  const [, setSettledTick] = useState(0);
+  useEffect(() => {
+    // Always subscribe — even when the status already looks settled. The fit
+    // can settle between the render that painted "pending" and this effect
+    // running; an early return on the new status would strand that stale
+    // frame forever. An already-settled promise just fires one extra tick.
+    let live = true;
+    void entry.settled.then(() => {
+      if (live) setSettledTick((t) => t + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, [entry]);
+  return { status: entry.status, model: entry.model };
+}
 
 /** Ranked plain-English "do this" list — the tab's front door for non-stats readers. */
 function CoachPanel({ games }: { games: ResolvedGame[] }) {
@@ -76,7 +192,8 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
     () => WIN_MODEL_FEATURES.filter((f) => f.group === "execution" || includeOutcome),
     [includeOutcome],
   );
-  const model = useMemo(() => fitWinModel(games, features), [games, features]);
+  const fit = useWinModel(games, features);
+  const model = fit.model;
   const quartiles = useMemo(() => quartileWinRates(games, features), [games, features]);
 
   // The adjusted fit is the headline when available; raw rides along for contrast.
@@ -120,6 +237,46 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
     </div>
   );
 
+  // Model-free and cheap, so it renders immediately in every state — including
+  // while the worker is still fitting the regression.
+  const quartilePanel = quartiles.length > 0 && (
+    <div className="panel">
+      <h2>Win rate by quartile — no model, just buckets</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th className="data">Q1 (low)</th>
+            <th className="data">Q2</th>
+            <th className="data">Q3</th>
+            <th className="data">Q4 (high)</th>
+            <th className="data">Q4 − Q1</th>
+          </tr>
+        </thead>
+        <tbody>
+          {quartiles.map((q) => (
+            <tr key={q.key}>
+              <td>{q.label}</td>
+              {q.quartiles.map((b, i) => (
+                <td key={i} className="data" style={{ color: winRateColor(b.winRate) }} title={`${num(b.lo, 1)}–${num(b.hi, 1)} · ${b.n} games`}>
+                  {pct(b.winRate, 0)}
+                </td>
+              ))}
+              <td className="data" style={{ color: q.spread >= 0 ? "#3fcf8e" : "#f0564f" }}>
+                {q.spread >= 0 ? "+" : ""}{num(q.spread * 100, 0)} pp
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="hint">
+        Games sorted by each metric and cut into four equal buckets; each cell is the win rate in that bucket (hover
+        for the value range). This is the raw association with nothing controlled — compare it against the adjusted
+        column above to see how much of it is context.
+      </div>
+    </div>
+  );
+
   if (!model || !primary) {
     return (
       <>
@@ -127,11 +284,21 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
         <div className="panel">
           <h2>What predicts your wins</h2>
           {toggle}
-          <div className="empty-note">
-            Not enough decided games in the current filter to fit a model — need at least 40 games with every metric
-            measurable and 10+ wins and losses.
-          </div>
+          {fit.status === "pending" ? (
+            <div className="empty-note">Fitting the win model in the background — everything else here is live.</div>
+          ) : fit.status === "error" ? (
+            <div className="empty-note">
+              The win model couldn't be computed — its background worker failed (often a stale tab after a site
+              update). The rest of this tab is unaffected; switch tabs and back, or reload, to retry.
+            </div>
+          ) : (
+            <div className="empty-note">
+              Not enough decided games in the current filter to fit a model — need at least 40 games with every metric
+              measurable and 10+ wins and losses.
+            </div>
+          )}
         </div>
+        {quartilePanel}
       </>
     );
   }
@@ -202,41 +369,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
         </div>
       </div>
 
-      <div className="panel">
-        <h2>Win rate by quartile — no model, just buckets</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Metric</th>
-              <th className="data">Q1 (low)</th>
-              <th className="data">Q2</th>
-              <th className="data">Q3</th>
-              <th className="data">Q4 (high)</th>
-              <th className="data">Q4 − Q1</th>
-            </tr>
-          </thead>
-          <tbody>
-            {quartiles.map((q) => (
-              <tr key={q.key}>
-                <td>{q.label}</td>
-                {q.quartiles.map((b, i) => (
-                  <td key={i} className="data" style={{ color: winRateColor(b.winRate) }} title={`${num(b.lo, 1)}–${num(b.hi, 1)} · ${b.n} games`}>
-                    {pct(b.winRate, 0)}
-                  </td>
-                ))}
-                <td className="data" style={{ color: q.spread >= 0 ? "#3fcf8e" : "#f0564f" }}>
-                  {q.spread >= 0 ? "+" : ""}{num(q.spread * 100, 0)} pp
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="hint">
-          Games sorted by each metric and cut into four equal buckets; each cell is the win rate in that bucket (hover
-          for the value range). This is the raw association with nothing controlled — compare it against the adjusted
-          column above to see how much of it is context.
-        </div>
-      </div>
+      {quartilePanel}
 
       <div className="panel">
         <h2>Reading this honestly</h2>

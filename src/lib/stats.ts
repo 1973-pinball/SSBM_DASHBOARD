@@ -9,6 +9,16 @@ export function localDay(d: Date): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/** Chart-label form of localDay: empty string for undated games. */
+const dayLabel = (d: Date | null): string => (d ? localDay(d) : "");
+
+/** Local-timezone YYYY-MM-DD of the Sunday starting this date's week. */
+function localWeekStart(date: Date): string {
+  const d = new Date(date);
+  d.setDate(d.getDate() - d.getDay()); // back up to Sunday, local time
+  return localDay(d);
+}
+
 // ---------- Identity ----------
 
 export interface CodeCandidate {
@@ -50,8 +60,9 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     const meIdx = rec.players.findIndex((p) => p.connectCode && myCodes.has(p.connectCode));
     if (meIdx < 0) continue;
-    const me = rec.players[meIdx];
-    const opp = rec.players[1 - meIdx];
+    // meIdx is 0 or 1 (players.length === 2 checked above), so both are in bounds.
+    const me = rec.players[meIdx]!;
+    const opp = rec.players[1 - meIdx]!;
     const isWin = rec.winnerIndex === null ? null : rec.winnerIndex === meIdx;
     out.push({ rec, me, opp, isWin, date: rec.playedAt ? new Date(rec.playedAt) : null });
   }
@@ -77,8 +88,8 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
     out.push({
       rec,
       me,
-      teammate: allies[0],
-      opps: [opps[0], opps[1]],
+      teammate: allies[0]!, // allies.length === 1 checked above
+      opps: [opps[0]!, opps[1]!], // opps.length === 2 checked above
       isWin,
       date: rec.playedAt ? new Date(rec.playedAt) : null,
     });
@@ -151,7 +162,7 @@ export function tally(games: Decidable[]): WL {
 function streakOf(games: Decidable[]): { kind: "W" | "L"; length: number } | null {
   let streak: { kind: "W" | "L"; length: number } | null = null;
   for (let i = games.length - 1; i >= 0; i--) {
-    const w = games[i].isWin;
+    const w = games[i]!.isWin;
     if (w === null) continue;
     const kind = w ? "W" : "L";
     if (!streak) streak = { kind, length: 1 };
@@ -184,9 +195,10 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
     frames += g.rec.durationFrames;
   }
   const streak = streakOf(games);
-  // Prior-window comparison (only meaningful for bounded ranges).
+  // Prior-window comparison (only meaningful for bounded ranges; a picked day
+  // overrides the range, so no prior window exists to compare against).
   let prevWinRate: number | null = null;
-  if (f.range !== "all") {
+  if (f.day === null && f.range !== "all") {
     const days = RANGE_DAYS[f.range];
     const end = Date.now() - days * 86_400_000;
     const start = end - days * 86_400_000;
@@ -285,13 +297,14 @@ export function rollingWinRate(games: ResolvedGame[], window = 50): RollingPoint
   const out: RollingPoint[] = [];
   let wins = 0;
   for (let i = 0; i < decided.length; i++) {
-    if (decided[i].isWin) wins++;
-    if (i >= window && decided[i - window].isWin) wins--;
+    const g = decided[i]!;
+    if (g.isWin) wins++;
+    if (i >= window && decided[i - window]!.isWin) wins--;
     const n = Math.min(i + 1, window);
     if (i + 1 >= Math.min(window, 10)) {
       out.push({
         index: i + 1,
-        date: decided[i].date?.toISOString().slice(0, 10) ?? "",
+        date: dayLabel(g.date),
         winRate: (wins / n) * 100,
       });
     }
@@ -463,19 +476,23 @@ export function winRateBySessionPosition(sessions: Session[]): SessionBucketRow[
       const pos = i + 1;
       const bi = defs.findIndex((d) => pos >= d.lo && pos <= d.hi);
       if (bi < 0) return;
-      agg[bi].games++;
-      if (g.isWin === true) agg[bi].wins++;
-      else if (g.isWin === false) agg[bi].losses++;
+      const a = agg[bi]!; // agg is index-aligned with defs
+      a.games++;
+      if (g.isWin === true) a.wins++;
+      else if (g.isWin === false) a.losses++;
     });
   }
-  return defs.map((d, i) => ({
-    label: d.label,
-    games: agg[i].games,
-    wins: agg[i].wins,
-    losses: agg[i].losses,
-    decided: agg[i].wins + agg[i].losses,
-    winRate: winRate(agg[i].wins, agg[i].wins + agg[i].losses),
-  }));
+  return defs.map((d, i) => {
+    const a = agg[i]!; // agg is index-aligned with defs
+    return {
+      label: d.label,
+      games: a.games,
+      wins: a.wins,
+      losses: a.losses,
+      decided: a.wins + a.losses,
+      winRate: winRate(a.wins, a.wins + a.losses),
+    };
+  });
 }
 
 /**
@@ -634,8 +651,10 @@ export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
     const mate = ps.indexOf(g.teammate);
     if (me < 0 || mate < 0) continue;
     const e = ff.get(code) ?? { toMe: 0, fromMe: 0, games: 0 };
-    e.toMe += dm[mate][me];
-    e.fromMe += dm[me][mate];
+    // A malformed (short) matrix would previously have produced NaN via
+    // `undefined` arithmetic; `!` keeps that behavior unchanged.
+    e.toMe += dm[mate]![me]!;
+    e.fromMe += dm[me]![mate]!;
     e.games++;
     ff.set(code, e);
   }
@@ -1015,7 +1034,7 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
   }
 
   const top = <K,>(m: Map<K, number>): [K, number] | null =>
-    m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0] : null;
+    m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0]! : null;
   const mainChar = top(myChars);
   const topOppChar = top(oppChars);
   // Home turf = best win rate among stages with a real sample (10+ decided
@@ -1098,7 +1117,7 @@ export function byOpponent(games: ResolvedGame[]): OpponentRow[] {
         name = g.opp.displayName ?? name;
         if (g.date && (!last || g.date > last)) last = g.date;
       }
-      const topCharacter = Array.from(chars.entries()).sort((a, b) => b[1] - a[1])[0][0];
+      const topCharacter = Array.from(chars.entries()).sort((a, b) => b[1] - a[1])[0]![0]; // gs is never empty
       return { code, displayName: name, lastPlayed: last, topCharacter, ...tally(gs) };
     })
     .sort((a, b) => b.games - a.games);
@@ -1138,7 +1157,7 @@ export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoi
     }
     out.push({
       index: i + 1,
-      date: games[i].date?.toISOString().slice(0, 10) ?? "",
+      date: dayLabel(games[i]!.date),
       lCancel: lcS + lcF > 0 ? (lcS / (lcS + lcF)) * 100 : null,
       opk: opkN ? opkSum / opkN : null,
       dpo: dpoN ? dpoSum / dpoN : null,
@@ -1215,16 +1234,18 @@ export function rollingExecutionSeries(
   const out: RollingExecutionPoint[] = [];
   let numSum = 0, denSum = 0;
   for (let i = 0; i < games.length; i++) {
-    numSum += num(games[i]);
-    denSum += den(games[i]);
+    const g = games[i]!;
+    numSum += num(g);
+    denSum += den(g);
     if (i >= window) {
-      numSum -= num(games[i - window]);
-      denSum -= den(games[i - window]);
+      const old = games[i - window]!;
+      numSum -= num(old);
+      denSum -= den(old);
     }
     if (i < emitStart) continue;
     out.push({
       index: i + 1,
-      date: games[i].date?.toISOString().slice(0, 10) ?? "",
+      date: dayLabel(g.date),
       value: denSum > 0 ? (numSum / denSum) * scale : null,
     });
   }
@@ -1247,10 +1268,10 @@ export function lCancelSeries(games: ResolvedGame[], limit = 500): LCancelPoint[
   const start = Math.max(0, games.length - limit);
   const out: LCancelPoint[] = [];
   for (let i = start; i < games.length; i++) {
-    const g = games[i];
+    const g = games[i]!;
     out.push({
       index: i + 1,
-      date: g.date?.toISOString().slice(0, 10) ?? "",
+      date: dayLabel(g.date),
       attempts: g.me.lCancelSuccess + g.me.lCancelFail,
       success: g.me.lCancelSuccess,
     });
@@ -1277,8 +1298,8 @@ export function perGameSeries(
   const start = Math.max(0, games.length - limit);
   const out: GameSeriesPoint[] = [];
   for (let i = start; i < games.length; i++) {
-    const g = games[i];
-    const point: GameSeriesPoint = { index: i + 1, date: g.date?.toISOString().slice(0, 10) ?? "" };
+    const g = games[i]!;
+    const point: GameSeriesPoint = { index: i + 1, date: dayLabel(g.date) };
     for (const p of picks) point[p.key] = p.value(g);
     out.push(point);
   }
@@ -1396,7 +1417,7 @@ export function byTeammate(games: ResolvedTeamGame[]): TeammateRow[] {
     .map(([code, e]) => ({
       code,
       displayName: e.name,
-      topCharacter: Array.from(e.chars.entries()).sort((a, b) => b[1] - a[1])[0][0],
+      topCharacter: Array.from(e.chars.entries()).sort((a, b) => b[1] - a[1])[0]![0], // e.gs is never empty
       stocksTakenPerGame: e.stockGames ? e.taken / e.stockGames : null,
       lastPlayed: e.last,
       ...tally(e.gs),
@@ -1499,16 +1520,19 @@ function accumulate(t: DmgTotals, g: ResolvedTeamGame): void {
   if (!ix) return;
   const [a, b] = ix.opps;
   t.games++;
-  t.myDmg += dm[ix.me][a] + dm[ix.me][b];
-  t.mateDmg += dm[ix.mate][a] + dm[ix.mate][b];
-  t.myFF += dm[ix.me][ix.mate];
-  t.mateFF += dm[ix.mate][ix.me];
-  t.myKills += km[ix.me][a] + km[ix.me][b];
-  t.mateKills += km[ix.mate][a] + km[ix.mate][b];
-  t.myFFKills += km[ix.me][ix.mate];
-  t.mateFFKills += km[ix.mate][ix.me];
-  t.myTaken += dm[a][ix.me] + dm[b][ix.me];
-  t.mateTaken += dm[a][ix.mate] + dm[b][ix.mate];
+  // 4x4 matrices with indices from teamIdx (all in 0..3); a malformed (short)
+  // matrix would previously have produced NaN via `undefined` arithmetic, and
+  // `!` keeps that behavior unchanged.
+  t.myDmg += dm[ix.me]![a]! + dm[ix.me]![b]!;
+  t.mateDmg += dm[ix.mate]![a]! + dm[ix.mate]![b]!;
+  t.myFF += dm[ix.me]![ix.mate]!;
+  t.mateFF += dm[ix.mate]![ix.me]!;
+  t.myKills += km[ix.me]![a]! + km[ix.me]![b]!;
+  t.mateKills += km[ix.mate]![a]! + km[ix.mate]![b]!;
+  t.myFFKills += km[ix.me]![ix.mate]!;
+  t.mateFFKills += km[ix.mate]![ix.me]!;
+  t.myTaken += dm[a]![ix.me]! + dm[b]![ix.me]!;
+  t.mateTaken += dm[a]![ix.mate]! + dm[b]![ix.mate]!;
 }
 
 export interface TeamsDamageOverview {
@@ -1590,9 +1614,7 @@ export function teamsDamageByWeek(games: ResolvedTeamGame[]): TeamsDamageWeek[] 
   const map = new Map<string, DmgTotals>();
   for (const g of games) {
     if (!g.date) continue;
-    const d = new Date(g.date);
-    d.setUTCDate(d.getUTCDate() - d.getUTCDay()); // week start (Sunday)
-    const key = d.toISOString().slice(0, 10);
+    const key = localWeekStart(g.date);
     let t = map.get(key);
     if (!t) {
       t = emptyTotals();
@@ -1665,10 +1687,7 @@ export function gamesPerWeek(games: ResolvedGame[]): WeekBar[] {
   const map = new Map<string, number>();
   for (const g of games) {
     if (!g.date) continue;
-    const d = new Date(g.date);
-    const day = d.getUTCDay();
-    d.setUTCDate(d.getUTCDate() - day); // week start (Sunday)
-    const key = d.toISOString().slice(0, 10);
+    const key = localWeekStart(g.date);
     map.set(key, (map.get(key) ?? 0) + 1);
   }
   return Array.from(map.entries())

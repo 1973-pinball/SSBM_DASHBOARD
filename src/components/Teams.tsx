@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { ResolvedTeamGame } from "../lib/types";
 import {
   teamOverview, byTeammate, teamsByMyCharacter, teamsByOppCharacter, teamsByStage,
@@ -8,7 +8,7 @@ import {
 import { pct, num, int, duration, shortDate, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
-import { axisStyle, tooltipStyle } from "./chartStyle";
+import { axisStyle, tooltipStyle, gridStyle, dayTick } from "./chartStyle";
 
 interface Props {
   games: ResolvedTeamGame[]; // filtered
@@ -227,9 +227,21 @@ function DamageTab({ games, onSelectTeammate }: Props) {
         ) : (
           <ResponsiveContainer width="100%" height={260}>
             <LineChart data={weeks} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-              <XAxis dataKey="week" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+              <CartesianGrid {...gridStyle} />
+              <XAxis
+                dataKey="week"
+                tick={axisStyle}
+                tickLine={false}
+                axisLine={{ stroke: "var(--line)" }}
+                minTickGap={48}
+                tickFormatter={dayTick}
+              />
               <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-              <Tooltip {...tooltipStyle} formatter={(v) => `${Number(v).toFixed(1)}%`} />
+              <Tooltip
+                {...tooltipStyle}
+                labelFormatter={(v) => `Week of ${dayTick(String(v))}`}
+                formatter={(v) => `${Number(v).toFixed(1)}%`}
+              />
               <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
               <Line type="monotone" dataKey="myDmg" name="My damage" stroke="var(--accent)" strokeWidth={2} dot={false} />
               <Line type="monotone" dataKey="mateDmg" name="Teammate damage" stroke="#3fcf8e" strokeWidth={2} dot={false} />

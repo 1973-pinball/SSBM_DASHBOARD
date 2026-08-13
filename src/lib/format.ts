@@ -15,7 +15,9 @@ export const duration = (seconds: number | null): string => {
 
 export const shortDate = (d: Date | string | null): string => {
   if (!d) return "—";
-  const date = typeof d === "string" ? new Date(d) : d;
+  // Date-only strings ("YYYY-MM-DD") would parse as UTC midnight and render as
+  // the previous day west of Greenwich — pin them to local noon instead.
+  const date = typeof d === "string" ? new Date(/^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00` : d) : d;
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "2-digit" });
 };
 

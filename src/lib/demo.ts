@@ -54,14 +54,16 @@ function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDa
   // Kills go to the plausible closers; openings mostly to neutral tools.
   const killers = [15, 17, 10, 11, 16].filter((id) => out[id]);
   for (let k = 0; k < kills && killers.length; k++) {
-    const a = out[killers[Math.floor(rand() * killers.length)]];
+    // !: rand() < 1 keeps the index in [0, length), and the filter above guarantees out[id] exists.
+    const a = out[killers[Math.floor(rand() * killers.length)]!]!;
     a.kills++;
     a.killPctSum += 75 + rand() * 65;
   }
   const openers = [13, 17, 18, 9, 56].filter((id) => out[id]);
   const openings = Math.floor(6 + rand() * 10);
   for (let o = 0; o < openings && openers.length; o++) {
-    const a = out[openers[Math.floor(rand() * openers.length)]];
+    // !: same in-bounds/filter argument as killers above.
+    const a = out[openers[Math.floor(rand() * openers.length)]!]!;
     a.openings++;
     a.openingDmg += 12 + rand() * 28;
   }
@@ -147,7 +149,7 @@ function pickWeighted<T extends { weight: number }>(rand: () => number, items: T
     r -= item.weight;
     if (r <= 0) return item;
   }
-  return items[items.length - 1];
+  return items[items.length - 1]!; // callers always pass non-empty const arrays
 }
 
 export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[] {
@@ -171,7 +173,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const playedAt = new Date(clockMs);
     const rival = pickWeighted(rand, RIVALS);
     const mine = pickWeighted(rand, MY_CHARS.map((c) => ({ ...c, weight: c.weight * 100 })));
-    const oppChar = rival.chars[Math.floor(rand() * rival.chars.length)];
+    const oppChar = rival.chars[Math.floor(rand() * rival.chars.length)]!; // rand() < 1, chars non-empty
     const pWin = Math.min(0.85, Math.max(0.15, rival.skill + mine.edge + t * 0.08 + (rand() - 0.5) * 0.06));
     const iWin = rand() < pWin;
 
@@ -219,7 +221,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       path: `demo/Game_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),
       durationFrames,
-      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)],
+      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)]!, // rand() < 1 keeps the index in bounds
       gameType: rare < 0.55 ? "ranked" : rare < 0.9 ? "unranked" : "direct",
       isTeams: false,
       players: [me, opp],
@@ -241,7 +243,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
     const mine = pickWeighted(rand, MY_CHARS.map((c) => ({ ...c, weight: c.weight * 100 })));
     const rivalA = pickWeighted(rand, RIVALS);
     let rivalB = pickWeighted(rand, RIVALS);
-    if (rivalB.code === rivalA.code) rivalB = RIVALS[(RIVALS.indexOf(rivalA) + 1) % RIVALS.length];
+    if (rivalB.code === rivalA.code) rivalB = RIVALS[(RIVALS.indexOf(rivalA) + 1) % RIVALS.length]!; // modulo keeps the index in bounds
 
     const pWin = Math.min(0.88, Math.max(0.12, 0.5 + mate.synergy + mine.edge + t * 0.06 + (rand() - 0.5) * 0.12));
     const weWin = rand() < pWin;
@@ -258,26 +260,27 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
     const dmgMatrix = [0, 1, 2, 3].map(() => [0, 0, 0, 0]);
     const killMatrix = [0, 1, 2, 3].map(() => [0, 0, 0, 0]);
     const mateOf = [1, 0, 3, 2];
+    // !: the matrices are 4x4 and every index below (vi, ai, mateOf/enemies entries) is in 0..3.
     for (let vi = 0; vi < 4; vi++) {
-      const deaths = 4 - stocks[vi];
-      const enemies = vi < 2 ? [2, 3] : [0, 1];
+      const deaths = 4 - stocks[vi]!;
+      const enemies: [number, number] = vi < 2 ? [2, 3] : [0, 1];
       // The demo player carries slightly; enemy credit is otherwise even.
       const pFirst = enemies[0] === 0 ? 0.55 : 0.5;
       for (let d = 0; d < deaths; d++) {
         const ff = rand() < 0.04; // the occasional up-smash nobody talks about
-        const ai = ff ? mateOf[vi] : enemies[rand() < pFirst ? 0 : 1];
-        killMatrix[ai][vi]++;
+        const ai = ff ? mateOf[vi]! : enemies[rand() < pFirst ? 0 : 1];
+        killMatrix[ai]![vi]!++;
       }
       const taken = deaths * (95 + rand() * 35) + rand() * 80;
       const firstShare = 0.35 + rand() * 0.3;
-      dmgMatrix[enemies[0]][vi] += taken * firstShare;
-      dmgMatrix[enemies[1]][vi] += taken * (1 - firstShare);
+      dmgMatrix[enemies[0]]![vi]! += taken * firstShare;
+      dmgMatrix[enemies[1]]![vi]! += taken * (1 - firstShare);
     }
     // FF damage: my teammate's sloppiness scales inversely with synergy.
-    dmgMatrix[0][1] += 5 + rand() * 12;
-    dmgMatrix[1][0] += 8 + Math.max(0, 0.15 - mate.synergy) * 90 + rand() * 10;
-    dmgMatrix[2][3] += 4 + rand() * 8;
-    dmgMatrix[3][2] += 4 + rand() * 8;
+    dmgMatrix[0]![1]! += 5 + rand() * 12;
+    dmgMatrix[1]![0]! += 8 + Math.max(0, 0.15 - mate.synergy) * 90 + rand() * 10;
+    dmgMatrix[2]![3]! += 4 + rand() * 8;
+    dmgMatrix[3]![2]! += 4 + rand() * 8;
 
     const mk = (idx: number, teamId: number, code: string, name: string, characterId: number, isMe: boolean): PlayerSide => {
       const enemies = idx < 2 ? [2, 3] : [0, 1];
@@ -291,9 +294,10 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
         characterId,
         colorId: teamId,
         teamId,
-        stocksRemaining: stocks[idx],
-        kills: enemies.reduce((s, e) => s + killMatrix[idx][e], 0),
-        totalDamage: enemies.reduce((s, e) => s + dmgMatrix[idx][e], 0),
+        // !: idx and e are in 0..3 against 4-wide stocks/matrices built above.
+        stocksRemaining: stocks[idx]!,
+        kills: enemies.reduce((s, e) => s + killMatrix[idx]![e]!, 0),
+        totalDamage: enemies.reduce((s, e) => s + dmgMatrix[idx]![e]!, 0),
         // Conversion-based stats stay null/zero in doubles, matching the parser.
         openingsPerKill: null,
         damagePerOpening: null,
@@ -311,8 +315,8 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
     const players: PlayerSide[] = [
       mk(0, 0, DEMO_CODE, "demo", mine.id, true),
       mk(1, 0, mate.code, mate.name, mate.char, false),
-      mk(2, 1, rivalA.code, rivalA.name, rivalA.chars[0], false),
-      mk(3, 1, rivalB.code, rivalB.name, rivalB.chars[0], false),
+      mk(2, 1, rivalA.code, rivalA.name, rivalA.chars[0]!, false), // every RIVALS entry has 1+ chars
+      mk(3, 1, rivalB.code, rivalB.name, rivalB.chars[0]!, false),
     ];
 
     const rare = rand();
@@ -321,7 +325,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       path: `demo/Teams_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),
       durationFrames,
-      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)],
+      stageId: INCLUDED_STAGE_IDS[Math.floor(rand() * INCLUDED_STAGE_IDS.length)]!, // rand() < 1 keeps the index in bounds
       gameType: rare < 0.7 ? "direct" : "unranked", // no ranked doubles matchmaking
       isTeams: true,
       players,

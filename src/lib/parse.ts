@@ -80,8 +80,8 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStat
         const lhb = post.lastHitBy;
         const ai = lhb !== null && lhb !== undefined && lhb !== p.playerIndex && posOf.has(lhb) ? posOf.get(lhb)! : vi;
         const dmg = calcDamageTaken(post, prevPost);
-        if (dmg > 0) dmgMatrix[ai][vi] += dmg;
-        if (didLoseStock(post, prevPost)) killMatrix[ai][vi] += 1;
+        if (dmg > 0) dmgMatrix[ai]![vi]! += dmg;
+        if (didLoseStock(post, prevPost)) killMatrix[ai]![vi]! += 1;
       }
     }
     prev = frame;
@@ -164,7 +164,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       c.moves.forEach((m, mi) => {
         const pi = idxOf.get(m.playerIndex);
         if (pi === undefined) return;
-        const side = players[pi];
+        const side = players[pi]!;
         const byMove = (side.moveStats ??= {});
         const a: MoveAgg = (byMove[m.moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
         a.landed++;
@@ -203,7 +203,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
         const isNewAction =
           anim !== prevAnim[i] || (prevCounter[i] !== null && counter !== null && prevCounter[i]! > counter);
         if (isNewAction && anim !== null && LANDING_TO_MOVE[anim] !== undefined && (post.lCancelStatus === 1 || post.lCancelStatus === 2)) {
-          const byMove = (players[i].moveStats ??= {});
+          const byMove = (players[i]!.moveStats ??= {});
           const a: MoveAgg = (byMove[LANDING_TO_MOVE[anim]] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
           if (post.lCancelStatus === 1) a.lcSuccess++;
           else a.lcFail++;
@@ -223,7 +223,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     settings.players.forEach((p, i) => {
       const ac = stats?.actionCounts?.find((a) => a.playerIndex === p.playerIndex)?.attackCount;
       if (!ac) return;
-      const byMove = (players[i].moveStats ??= {});
+      const byMove = (players[i]!.moveStats ??= {});
       const put = (moveId: number, attempts: number) => {
         if (attempts <= 0 && !byMove[moveId]) return;
         const a: MoveAgg = (byMove[moveId] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
@@ -252,13 +252,13 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   if (teamsStats) {
     const minutes = durationFrames / 3600;
     settings.players.forEach((p, i) => {
-      const side = players[i];
+      const side = players[i]!;
       let enemyDmg = 0;
       let enemyKills = 0;
       settings.players.forEach((v, j) => {
         if (i === j || v.teamId === p.teamId) return;
-        enemyDmg += teamsStats.dmgMatrix[i][j];
-        enemyKills += teamsStats.killMatrix[i][j];
+        enemyDmg += teamsStats.dmgMatrix[i]![j]!;
+        enemyKills += teamsStats.killMatrix[i]![j]!;
       });
       side.totalDamage = enemyDmg;
       side.kills = enemyKills;
@@ -308,7 +308,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
       if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
         // Stock-out: survivor wins.
         const [a, b] = players;
-        if (a.stocksRemaining !== null && b.stocksRemaining !== null && a.stocksRemaining !== b.stocksRemaining) {
+        if (a && b && a.stocksRemaining !== null && b.stocksRemaining !== null && a.stocksRemaining !== b.stocksRemaining) {
           winnerIndex = a.stocksRemaining > b.stocksRemaining ? 0 : 1;
         }
       } else if (gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST && gameEnd.lrasInitiatorIndex !== null && gameEnd.lrasInitiatorIndex !== undefined && gameEnd.lrasInitiatorIndex >= 0) {
@@ -329,7 +329,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   if (isTeams && players.length === 4 && teamIds.size === 2) {
     const teamOfPlayerIndex = (playerIndex: number): number | null => {
       const idx = settings.players.findIndex((p) => p.playerIndex === playerIndex);
-      return idx >= 0 ? players[idx].teamId : null;
+      return idx >= 0 ? players[idx]!.teamId : null;
     };
 
     const first = placementsValid ? gameEnd?.placements?.find((pl) => pl.position === 0) : undefined;
@@ -349,7 +349,9 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
           stocks.set(p.teamId, (stocks.get(p.teamId) ?? 0) + p.stocksRemaining);
         }
         if (complete && stocks.size === 2) {
-          const [[tA, sA], [tB, sB]] = Array.from(stocks.entries());
+          const entries = Array.from(stocks.entries());
+          const [tA, sA] = entries[0]!;
+          const [tB, sB] = entries[1]!;
           if (sA !== sB) winnerTeamId = sA > sB ? tA : tB;
         }
       } else if (

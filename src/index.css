@@ -255,6 +255,29 @@ tr.clickable:hover td { background: var(--panel-2); cursor: pointer; }
 
 /* ---- Matchup matrix ---- */
 .matrix-wrap { overflow-x: auto; }
+/* Narrow viewports: tables scroll inside their panel instead of clipping. */
+.panel:has(table) { overflow-x: auto; }
+.matrix-legend {
+  position: sticky; /* stays put while a wide matrix scrolls underneath */
+  left: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--muted);
+}
+.matrix-legend .ramp {
+  width: 56px;
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgb(240, 86, 79), rgb(110, 102, 150));
+}
+.matrix-legend .ramp-hi {
+  background: linear-gradient(90deg, rgb(110, 102, 150), rgb(63, 207, 142));
+}
+.matrix-legend .sep { color: var(--faint); }
 .matrix { border-collapse: separate; border-spacing: 3px; }
 .matrix th { border: none; padding: 4px 6px; }
 .matrix td.cell {
@@ -460,6 +483,22 @@ tr.detail-row td {
 @media (max-width: 560px) {
   .sc-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* ---- Site footer ---- */
+.site-footer {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 48px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--faint);
+}
+.site-footer a { color: var(--muted); text-decoration: none; }
+.site-footer a:hover { color: var(--accent); text-decoration: underline; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

@@ -16,8 +16,11 @@ import type { ResolvedGame } from "./types";
  *    come with more wins?". The gap between the two columns is confounding
  *    made visible.
  *
- * Cost is O(iterations · n · k²); k stays ≤ ~60 even with controls, so this
- * is fast even on 30k-game libraries.
+ * Cost is O(iterations · n · k²) and k can reach ~70 with controls — heavy
+ * enough on a 30k-game library to jank the main thread. The fit is therefore
+ * split in two: buildWinModelInput() turns games into plain structured-
+ * cloneable data (cheap, main thread), and fitWinModelFromInput() does the
+ * math — normally inside src/worker/model.worker.ts.
  */
 
 export type FeatureGroup = "execution" | "outcome";
@@ -107,16 +110,18 @@ function invert(A: number[][]): number[][] | null {
   const M = A.map((row, i) => [...row, ...Array.from({ length: n }, (_, j) => (i === j ? 1 : 0))]);
   for (let col = 0; col < n; col++) {
     let piv = col;
-    for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
-    if (Math.abs(M[piv][col]) < 1e-12) return null;
-    if (piv !== col) [M[piv], M[col]] = [M[col], M[piv]];
-    const d = M[col][col];
-    for (let c = 0; c < 2 * n; c++) M[col][c] /= d;
+    for (let r = col + 1; r < n; r++) if (Math.abs(M[r]![col]!) > Math.abs(M[piv]![col]!)) piv = r;
+    if (Math.abs(M[piv]![col]!) < 1e-12) return null;
+    if (piv !== col) [M[piv], M[col]] = [M[col]!, M[piv]!];
+    const pivRow = M[col]!;
+    const d = pivRow[col]!;
+    for (let c = 0; c < 2 * n; c++) pivRow[c]! /= d;
     for (let r = 0; r < n; r++) {
       if (r === col) continue;
-      const f = M[r][col];
+      const row = M[r]!;
+      const f = row[col]!;
       if (f === 0) continue;
-      for (let c = 0; c < 2 * n; c++) M[r][c] -= f * M[col][c];
+      for (let c = 0; c < 2 * n; c++) row[c]! -= f * pivRow[c]!;
     }
   }
   return M.map((row) => row.slice(n));
@@ -133,19 +138,19 @@ const twoSidedP = (z: number): number => Math.min(1, 2 * upperTail(Math.abs(z)))
 
 /** Mann-Whitney AUC with average ranks for ties. */
 function computeAuc(scores: number[], y: number[]): number {
-  const idx = scores.map((_, i) => i).sort((a, b) => scores[a] - scores[b]);
+  const idx = scores.map((_, i) => i).sort((a, b) => scores[a]! - scores[b]!);
   const ranks = new Array<number>(scores.length);
   let i = 0;
   while (i < idx.length) {
     let j = i;
-    while (j + 1 < idx.length && scores[idx[j + 1]] === scores[idx[i]]) j++;
+    while (j + 1 < idx.length && scores[idx[j + 1]!] === scores[idx[i]!]) j++;
     const avg = (i + j) / 2 + 1;
-    for (let k = i; k <= j; k++) ranks[idx[k]] = avg;
+    for (let k = i; k <= j; k++) ranks[idx[k]!] = avg;
     i = j + 1;
   }
   let posRankSum = 0, nPos = 0;
   for (let r = 0; r < y.length; r++) {
-    if (y[r] === 1) { posRankSum += ranks[r]; nPos++; }
+    if (y[r] === 1) { posRankSum += ranks[r]!; nPos++; }
   }
   const nNeg = y.length - nPos;
   if (nPos === 0 || nNeg === 0) return 0.5;
@@ -165,40 +170,43 @@ interface CoreFit {
 /** IRLS on a pre-built design matrix (column 0 = intercept). */
 function fitCore(X: number[][], y: number[], lambdas: number[]): CoreFit | null {
   const n = X.length;
-  const k = X[0].length;
+  const k = X[0]!.length;
   let beta = new Array<number>(k).fill(0);
   let converged = false;
   let Hinv: number[][] | null = null;
   for (let iter = 0; iter < 60; iter++) {
-    const p = X.map((row) => clampExp(row.reduce((s, v, j) => s + v * beta[j], 0)));
+    const p = X.map((row) => clampExp(row.reduce((s, v, j) => s + v * beta[j]!, 0)));
     const grad = new Array<number>(k).fill(0);
     const H: number[][] = Array.from({ length: k }, () => new Array<number>(k).fill(0));
     for (let r = 0; r < n; r++) {
-      const w = Math.max(1e-9, p[r] * (1 - p[r]));
-      const resid = y[r] - p[r];
-      const row = X[r];
+      const pr = p[r]!;
+      const w = Math.max(1e-9, pr * (1 - pr));
+      const resid = y[r]! - pr;
+      const row = X[r]!;
       for (let j = 0; j < k; j++) {
-        grad[j] += row[j] * resid;
-        const rw = row[j] * w;
-        for (let l = j; l < k; l++) H[j][l] += rw * row[l];
+        const rowj = row[j]!;
+        grad[j]! += rowj * resid;
+        const rw = rowj * w;
+        const Hj = H[j]!;
+        for (let l = j; l < k; l++) Hj[l]! += rw * row[l]!;
       }
     }
-    for (let j = 0; j < k; j++) for (let l = 0; l < j; l++) H[j][l] = H[l][j];
+    for (let j = 0; j < k; j++) for (let l = 0; l < j; l++) H[j]![l] = H[l]![j]!;
     for (let j = 1; j < k; j++) {
-      grad[j] -= lambdas[j] * beta[j];
-      H[j][j] += lambdas[j];
+      grad[j]! -= lambdas[j]! * beta[j]!;
+      H[j]![j]! += lambdas[j]!;
     }
     Hinv = invert(H);
     if (!Hinv) return null;
-    const step = Hinv.map((row) => row.reduce((s, v, j) => s + v * grad[j], 0));
-    beta = beta.map((b, j) => b + step[j]);
+    const step = Hinv.map((row) => row.reduce((s, v, j) => s + v * grad[j]!, 0));
+    beta = beta.map((b, j) => b + step[j]!);
     if (Math.max(...step.map(Math.abs)) < 1e-8) { converged = true; break; }
   }
   if (!Hinv) return null;
-  const scores = X.map((row) => row.reduce((s, v, j) => s + v * beta[j], 0));
+  const scores = X.map((row) => row.reduce((s, v, j) => s + v * beta[j]!, 0));
   let ll = 0;
   for (let r = 0; r < n; r++) {
-    const p = clampExp(scores[r]);
+    const p = clampExp(scores[r]!);
     ll += y[r] === 1 ? Math.log(Math.max(1e-12, p)) : Math.log(Math.max(1e-12, 1 - p));
   }
   return { beta, Hinv, converged, ll, auc: computeAuc(scores, y) };
@@ -210,7 +218,7 @@ function standardize(col: number[]): boolean {
   const mean = col.reduce((s, v) => s + v, 0) / n;
   const sd = Math.sqrt(col.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
   if (sd < 1e-9) return false;
-  for (let i = 0; i < n; i++) col[i] = (col[i] - mean) / sd;
+  for (let i = 0; i < n; i++) col[i] = (col[i]! - mean) / sd;
   return true;
 }
 
@@ -218,14 +226,36 @@ function standardize(col: number[]): boolean {
 const MIN_CONTEXT_GAMES = 15;
 const MAX_OPPONENT_DUMMIES = 25;
 
+/** Feature metadata without the value closure — safe to structured-clone. */
+export interface WinModelFeatureMeta {
+  key: string;
+  label: string;
+  group: FeatureGroup;
+}
+
+/** One usable game: feature values (order matches `features`) + context ids. */
+export interface WinModelRow {
+  f: number[];
+  opp: string;
+  char: number;
+  stage: number;
+}
+
+/** Plain-data fit input, structured-cloneable so it can cross a worker boundary. */
+export interface WinModelInput {
+  features: WinModelFeatureMeta[];
+  rows: WinModelRow[];
+  y: number[];
+}
+
 /**
- * Fit the raw and context-adjusted win models on games where the outcome and
- * every requested feature are known (listwise deletion). Returns null when
- * there's too little data to say anything (n < 40 or < 10 of either class).
+ * Extract the fit input from resolved games (listwise deletion: a game is
+ * kept only when the outcome and every requested feature are measurable).
+ * Cheap — O(n · k) — so it can run on the main thread; the expensive IRLS
+ * consumes the result, normally in the model worker.
  */
-export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinModel | null {
-  interface Row { f: number[]; opp: string; char: number; stage: number }
-  const rows: Row[] = [];
+export function buildWinModelInput(games: ResolvedGame[], features: FeatureDef[]): WinModelInput {
+  const rows: WinModelRow[] = [];
   const y: number[] = [];
   for (const g of games) {
     if (g.isWin === null) continue;
@@ -240,6 +270,17 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
     rows.push({ f, opp: g.opp.connectCode ?? `port:${g.opp.port}`, char: g.me.characterId, stage: g.rec.stageId });
     y.push(g.isWin ? 1 : 0);
   }
+  return { features: features.map(({ key, label, group }) => ({ key, label, group })), rows, y };
+}
+
+/**
+ * Fit the raw and context-adjusted win models on a pre-extracted input.
+ * Returns null when there's too little data to say anything (n < 40 or < 10
+ * of either class). Pure math on plain data — this is what the model worker
+ * runs.
+ */
+export function fitWinModelFromInput(input: WinModelInput): WinModel | null {
+  const { features, rows, y } = input;
 
   const n = rows.length;
   const wins = y.reduce((s, v) => s + v, 0);
@@ -250,7 +291,7 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
   const dropped: string[] = [];
   const featCols: number[][] = [];
   features.forEach((def, j) => {
-    const col = rows.map((r) => r.f[j]);
+    const col = rows.map((r) => r.f[j]!);
     if (standardize(col)) { kept.push(j); featCols.push(col); }
     else dropped.push(def.label);
   });
@@ -259,16 +300,18 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
   // Collinearity report on the standardized features.
   const collinear: { a: string; b: string; r: number }[] = [];
   for (let a = 0; a < kept.length; a++) {
+    const colA = featCols[a]!;
     for (let b = a + 1; b < kept.length; b++) {
+      const colB = featCols[b]!;
       let s = 0;
-      for (let i = 0; i < n; i++) s += featCols[a][i] * featCols[b][i];
+      for (let i = 0; i < n; i++) s += colA[i]! * colB[i]!;
       const r = s / n;
-      if (Math.abs(r) > 0.7) collinear.push({ a: features[kept[a]].label, b: features[kept[b]].label, r });
+      if (Math.abs(r) > 0.7) collinear.push({ a: features[kept[a]!]!.label, b: features[kept[b]!]!.label, r });
     }
   }
 
   // --- Control columns: opponent / my character / stage dummies + time trend ---
-  const countBy = <T>(pick: (r: Row) => T): Map<T, number> => {
+  const countBy = <T>(pick: (r: WinModelRow) => T): Map<T, number> => {
     const m = new Map<T, number>();
     for (const r of rows) m.set(pick(r), (m.get(pick(r)) ?? 0) + 1);
     return m;
@@ -283,7 +326,7 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
 
   const controlCols: number[][] = [];
   const controls: string[] = [];
-  const addDummies = <T>(levels: T[], pick: (r: Row) => T, label: string) => {
+  const addDummies = <T>(levels: T[], pick: (r: WinModelRow) => T, label: string) => {
     let added = 0;
     for (const level of levels) {
       const col = rows.map((r) => (pick(r) === level ? 1 : 0));
@@ -305,13 +348,14 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
     const base = wins / n;
     const ll0 = wins * Math.log(base) + (n - wins) * Math.log(1 - base);
     const coefs = kept.map((j, idx) => {
-      const coef = fit.beta[idx + 1];
-      const se = Math.sqrt(Math.max(0, fit.Hinv[idx + 1][idx + 1]));
+      const def = features[j]!;
+      const coef = fit.beta[idx + 1]!;
+      const se = Math.sqrt(Math.max(0, fit.Hinv[idx + 1]![idx + 1]!));
       const z = se > 0 ? coef / se : 0;
       return {
-        key: features[j].key,
-        label: features[j].label,
-        group: features[j].group,
+        key: def.key,
+        label: def.label,
+        group: def.group,
         coef, se, z,
         p: twoSidedP(z),
         oddsPerSd: Math.exp(coef),
@@ -320,7 +364,7 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
     return { coefs, mcfaddenR2: ll0 < 0 ? 1 - fit.ll / ll0 : 0, auc: fit.auc, converged: fit.converged };
   };
 
-  const Xraw = Array.from({ length: n }, (_, i) => [1, ...featCols.map((c) => c[i])]);
+  const Xraw = Array.from({ length: n }, (_, i) => [1, ...featCols.map((c) => c[i]!)]);
   const rawFit = fitCore(Xraw, y, [0, ...featCols.map(() => 0.01)]);
   if (!rawFit) return null;
   const raw = buildStats(rawFit);
@@ -329,8 +373,8 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
   if (controlCols.length > 0) {
     const Xadj = Array.from({ length: n }, (_, i) => [
       1,
-      ...featCols.map((c) => c[i]),
-      ...controlCols.map((c) => c[i]),
+      ...featCols.map((c) => c[i]!),
+      ...controlCols.map((c) => c[i]!),
     ]);
     // Slightly stronger ridge on the dummies: a regular you've never beaten
     // would otherwise push its fixed effect toward ±infinity.
@@ -349,6 +393,11 @@ export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinM
     collinear,
     dropped,
   };
+}
+
+/** Synchronous convenience wrapper: extract + fit in one call, on the caller's thread. */
+export function fitWinModel(games: ResolvedGame[], features: FeatureDef[]): WinModel | null {
+  return fitWinModelFromInput(buildWinModelInput(games, features));
 }
 
 export interface QuartileRow {
@@ -384,7 +433,7 @@ export function quartileWinRates(games: ResolvedGame[], features: FeatureDef[]):
       const hi = Math.floor(((q + 1) * pts.length) / 4);
       const slice = pts.slice(lo, hi);
       const winSum = slice.reduce((s, p) => s + p.win, 0);
-      return { winRate: winSum / slice.length, n: slice.length, lo: slice[0].v, hi: slice[slice.length - 1].v };
+      return { winRate: winSum / slice.length, n: slice.length, lo: slice[0]!.v, hi: slice[slice.length - 1]!.v };
     });
     out.push({
       key: f.key,
@@ -392,7 +441,7 @@ export function quartileWinRates(games: ResolvedGame[], features: FeatureDef[]):
       group: f.group,
       n: pts.length,
       quartiles,
-      spread: quartiles[3].winRate - quartiles[0].winRate,
+      spread: quartiles[3]!.winRate - quartiles[0]!.winRate,
     });
   }
   out.sort((a, b) => Math.abs(b.spread) - Math.abs(a.spread));

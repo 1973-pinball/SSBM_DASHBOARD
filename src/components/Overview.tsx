@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import {
-  LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine,
+  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine, CartesianGrid,
 } from "recharts";
 import type { Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, applyFilters } from "../lib/stats";
@@ -8,7 +8,7 @@ import { pct, num, int, duration, winRateColor } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { ShareCard } from "./ShareCard";
-import { axisStyle, tooltipStyle } from "./chartStyle";
+import { axisStyle, tooltipStyle, gridStyle, dayTick } from "./chartStyle";
 
 interface Props {
   games: ResolvedGame[]; // filtered
@@ -118,13 +118,27 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
             <div className="empty-note">Not enough decided games yet.</div>
           ) : (
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={rolling} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
-                <YAxis domain={[0, 100]} tick={axisStyle} tickLine={false} axisLine={false} unit="%" />
-                <ReferenceLine y={50} stroke="#4a4469" strokeDasharray="4 4" />
-                <Tooltip {...tooltipStyle} formatter={(v) => [`${Number(v).toFixed(1)}%`, "win rate"]} />
-                <Line type="monotone" dataKey="winRate" stroke="var(--accent)" strokeWidth={2} dot={false} />
-              </LineChart>
+              <AreaChart data={rolling} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="wr-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.22} />
+                    <stop offset="100%" stopColor="var(--accent)" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid {...gridStyle} />
+                <XAxis
+                  dataKey="date"
+                  tick={axisStyle}
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--line)" }}
+                  minTickGap={48}
+                  tickFormatter={dayTick}
+                />
+                <YAxis domain={[0, 100]} ticks={[0, 25, 50, 75, 100]} tick={axisStyle} tickLine={false} axisLine={false} unit="%" />
+                <ReferenceLine y={50} stroke="var(--faint)" strokeDasharray="4 4" />
+                <Tooltip {...tooltipStyle} labelFormatter={(v) => dayTick(String(v))} formatter={(v) => [`${Number(v).toFixed(1)}%`, "win rate"]} />
+                <Area type="monotone" dataKey="winRate" stroke="var(--accent)" strokeWidth={2} fill="url(#wr-fill)" dot={false} />
+              </AreaChart>
             </ResponsiveContainer>
           )}
         </div>
@@ -136,9 +150,22 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
           ) : (
             <ResponsiveContainer width="100%" height={220}>
               <BarChart data={weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
-                <XAxis dataKey="week" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis
+                  dataKey="week"
+                  tick={axisStyle}
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--line)" }}
+                  minTickGap={48}
+                  tickFormatter={dayTick}
+                />
                 <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
-                <Tooltip {...tooltipStyle} />
+                <Tooltip
+                  {...tooltipStyle}
+                  cursor={{ fill: "var(--panel-2)", opacity: 0.5 }}
+                  labelFormatter={(v) => `Week of ${dayTick(String(v))}`}
+                  formatter={(v) => [Number(v).toLocaleString(), "games"]}
+                />
                 <Bar dataKey="games" fill="var(--accent-dim)" radius={[3, 3, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>

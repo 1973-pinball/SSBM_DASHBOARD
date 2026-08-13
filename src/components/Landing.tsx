@@ -5,9 +5,12 @@ interface Props {
   onPickFiles: (files: FileList) => void;
   onDemo: () => void;
   supportsFsAccess: boolean;
+  /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
+  onCloudSignIn: (() => void) | null;
+  cloudRestoring: boolean;
 }
 
-export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess }: Props) {
+export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess, onCloudSignIn, cloudRestoring }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -32,6 +35,11 @@ export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess
         <button className="ghost" onClick={onDemo}>
           Explore with demo data
         </button>
+        {onCloudSignIn && (
+          <button className="ghost" onClick={onCloudSignIn} disabled={cloudRestoring}>
+            {cloudRestoring ? "Restoring your stats…" : "Sign in with Google to restore"}
+          </button>
+        )}
       </div>
       <input
         ref={inputRef}
@@ -47,7 +55,12 @@ export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess
         (<span style={{ fontFamily: "var(--font-data)" }}>~/Slippi</span> on Mac/Linux) — the picker opens in Documents
         to get you close.
       </div>
-      <div className="privacy">Your replays never leave your machine. No uploads, no accounts, no tracking.</div>
+      <div className="privacy">
+        Your replays never leave your machine.
+        {onCloudSignIn
+          ? " Signing in syncs only parsed stats — never replay files — to your own account."
+          : " No uploads, no accounts, no tracking."}
+      </div>
     </div>
   );
 }

@@ -1,13 +1,16 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS } from "./lib/types";
-import { discoverFromHandle, discoverFromFileList, runParsePipeline } from "./lib/pool";
+import { discoverFromHandle, discoverFromFileList, runParsePipeline, RecordSaveError } from "./lib/pool";
 import { allRecords, clearAll, getMyCodes, setMyCodes, getDirHandle, setDirHandle } from "./lib/db";
 import { inferIdentity, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
 import { generateDemoRecords, DEMO_CODE } from "./lib/demo";
 import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
+import { CloudSync } from "./components/CloudSync";
+import { cloudEnabled, currentSession, signInWithGoogle } from "./lib/supabase";
+import { syncRecords, pullMyCodes } from "./lib/cloudSync";
 
 // Dashboard views are lazy so the landing/parsing path doesn't pay for
 // recharts — it's the biggest dependency in the app and none of it renders
@@ -74,23 +77,69 @@ export default function App() {
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [cloudRestoring, setCloudRestoring] = useState(false);
   const autoSyncDone = useRef(false);
+  // Bumped by reset(); async work captures the value at start and drops its
+  // results if a reset happened in between, so an abandoned scan or cloud sync
+  // can't write stale records into a wiped session.
+  const generation = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
 
   const supportsFsAccess = typeof window !== "undefined" && "showDirectoryPicker" in window;
 
-  // Restore cache on load: if records + identity exist, go straight to dashboard.
+  /**
+   * Append records to state, deduped by id. Both the folder scan and a cloud
+   * pull can race on dashboard entry and hand us the same game (ids are
+   * machine-independent path|size|mtime), so blind appends double-count.
+   */
+  const appendRecords = useCallback((incoming: GameRecord[]) => {
+    if (!incoming.length) return;
+    setRecords((prev) => {
+      const have = new Set(prev.map((r) => r.id));
+      const fresh = incoming.filter((r) => !have.has(r.id));
+      return fresh.length ? [...prev, ...fresh] : prev;
+    });
+  }, []);
+
+  // Restore cache on load: if records + identity exist, go straight to
+  // dashboard. With an empty cache but a live cloud session (e.g. first visit
+  // on a new device, or returning from the OAuth redirect), restore from the
+  // cloud instead — that's the whole point of signing in.
   useEffect(() => {
     void (async () => {
-      const [cached, codes, handle] = await Promise.all([allRecords(), getMyCodes(), getDirHandle()]);
-      if (handle) setDirHandleState(handle);
-      if (cached.length > 0) {
-        setRecords(cached);
-        if (codes.length > 0) {
-          setMyCodesState(codes);
-          setPhase("dashboard");
-        } else {
-          setPhase("identity");
+      try {
+        const [cached, codes, handle] = await Promise.all([allRecords(), getMyCodes(), getDirHandle()]);
+        if (handle) setDirHandleState(handle);
+        if (cached.length > 0) {
+          setRecords(cached);
+          if (codes.length > 0) {
+            setMyCodesState(codes);
+            setPhase("dashboard");
+          } else {
+            setPhase("identity");
+          }
+        } else if (cloudEnabled && (await currentSession())) {
+          const gen = generation.current;
+          setCloudRestoring(true);
+          try {
+            const { pulled } = await syncRecords([]); // local is empty: pure pull, already cached
+            const cloudCodes = (await pullMyCodes()) ?? [];
+            if (generation.current !== gen || pulled.length === 0) return;
+            setRecords(pulled);
+            if (cloudCodes.length > 0) {
+              setMyCodesState(cloudCodes);
+              void setMyCodes(cloudCodes);
+              setPhase("dashboard");
+            } else {
+              setPhase("identity");
+            }
+          } finally {
+            setCloudRestoring(false);
+          }
         }
+      } catch (err) {
+        console.error(err);
+        setPipelineError("Couldn't read the local replay cache — your browser may be blocking storage.");
       }
     })();
   }, []);
@@ -99,16 +148,25 @@ export default function App() {
     async (discover: () => Promise<{ id: string; path: string; file: File }[]>) => {
       setPhase("parsing");
       setPipelineError(null);
+      const gen = generation.current;
+      const controller = new AbortController();
+      abortRef.current = controller;
       try {
         const files = await discover();
         if (files.length === 0) {
-          setPhase("landing");
+          if (generation.current === gen) setPhase("landing");
           return;
         }
-        await runParsePipeline(files, (p, newRecords) => {
-          setProgress(p);
-          if (newRecords.length) setRecords((prev) => [...prev, ...newRecords]);
-        });
+        await runParsePipeline(
+          files,
+          (p, newRecords) => {
+            if (generation.current !== gen) return;
+            setProgress(p);
+            appendRecords(newRecords);
+          },
+          controller.signal,
+        );
+        if (generation.current !== gen) return;
         const all = await allRecords();
         setRecords(all);
         const codes = await getMyCodes();
@@ -120,16 +178,19 @@ export default function App() {
         }
       } catch (err) {
         console.error(err);
-        // AbortError is the user cancelling the folder picker — not a failure.
-        if (!(err instanceof DOMException && err.name === "AbortError")) {
+        if (generation.current !== gen) return; // reset mid-run: nothing to report
+        if (err instanceof RecordSaveError) {
+          setPipelineError(err.message);
+        } else if (!(err instanceof DOMException && err.name === "AbortError")) {
+          // AbortError is the user cancelling the folder picker — not a failure.
           setPipelineError("Parsing failed to start. Reload the page and try again — this usually happens when the site updated while this tab was open.");
         }
         setPhase("landing");
       } finally {
-        setProgress(null);
+        if (generation.current === gen) setProgress(null);
       }
     },
-    [],
+    [appendRecords],
   );
 
   /**
@@ -137,22 +198,38 @@ export default function App() {
    * the dashboard on screen — the cache dedups on path|size|mtime, so only replays
    * added since the last scan actually parse.
    */
-  const syncFolder = useCallback(async (handle: FileSystemDirectoryHandle) => {
-    setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0 });
-    setPipelineError(null);
-    try {
-      const files = await discoverFromHandle(handle);
-      await runParsePipeline(files, (p, newRecords) => {
-        setSyncing(p);
-        if (newRecords.length) setRecords((prev) => [...prev, ...newRecords]);
-      });
-    } catch (err) {
-      console.error(err);
-      setPipelineError("Refresh failed mid-scan. Reload the page and try again — this usually happens when the site updated while this tab was open.");
-    } finally {
-      setSyncing(null);
-    }
-  }, []);
+  const syncFolder = useCallback(
+    async (handle: FileSystemDirectoryHandle) => {
+      setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0 });
+      setPipelineError(null);
+      const gen = generation.current;
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const files = await discoverFromHandle(handle);
+        await runParsePipeline(
+          files,
+          (p, newRecords) => {
+            if (generation.current !== gen) return;
+            setSyncing(p);
+            appendRecords(newRecords);
+          },
+          controller.signal,
+        );
+      } catch (err) {
+        console.error(err);
+        if (generation.current !== gen) return;
+        setPipelineError(
+          err instanceof RecordSaveError
+            ? err.message
+            : "Refresh failed mid-scan. Reload the page and try again — this usually happens when the site updated while this tab was open.",
+        );
+      } finally {
+        if (generation.current === gen) setSyncing(null);
+      }
+    },
+    [appendRecords],
+  );
 
   // Warm the lazy view chunks once the dashboard is idle so the first click
   // on each tab renders instantly instead of showing the Suspense fallback.
@@ -183,8 +260,14 @@ export default function App() {
     if (phase !== "dashboard" || isDemo || !dirHandle || autoSyncDone.current) return;
     autoSyncDone.current = true;
     void (async () => {
-      const perm = await dirHandle.queryPermission({ mode: "read" });
-      if (perm === "granted") await syncFolder(dirHandle);
+      try {
+        const perm = await dirHandle.queryPermission({ mode: "read" });
+        if (perm === "granted") await syncFolder(dirHandle);
+      } catch (err) {
+        // syncFolder handles its own failures; this is queryPermission dying.
+        console.error(err);
+        setPipelineError("Couldn't check access to the remembered replay folder — use Refresh to try again.");
+      }
     })();
   }, [phase, isDemo, dirHandle, syncFolder]);
 
@@ -193,9 +276,16 @@ export default function App() {
   const onRefresh = useCallback(() => {
     if (!dirHandle) return;
     void (async () => {
-      let perm = await dirHandle.queryPermission({ mode: "read" });
-      if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
-      if (perm === "granted") await syncFolder(dirHandle);
+      try {
+        let perm = await dirHandle.queryPermission({ mode: "read" });
+        if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
+        if (perm === "granted") await syncFolder(dirHandle);
+      } catch (err) {
+        console.error(err);
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setPipelineError('Couldn\'t access the replay folder — re-pick it with "Change folder".');
+        }
+      }
     })();
   }, [dirHandle, syncFolder]);
 
@@ -205,6 +295,9 @@ export default function App() {
       const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
       setDirHandleState(dir);
       await setDirHandle(dir);
+      // This parse walks the whole tree itself; without this the auto-sync
+      // effect would immediately re-walk it just to skip everything as cached.
+      autoSyncDone.current = true;
       return discoverFromHandle(dir);
     });
   }, [startPipeline]);
@@ -229,16 +322,39 @@ export default function App() {
     setPhase("dashboard");
   }, []);
 
+  // Cloud pulls land in the Dexie cache before this fires; state just catches
+  // up. `gen` is captured by the sync when it starts — a pull that raced a
+  // reset is stale and must not resurrect records into the new session.
+  const onCloudPulled = useCallback(
+    (pulled: GameRecord[], gen: number) => {
+      if (gen !== generation.current) return;
+      appendRecords(pulled);
+    },
+    [appendRecords],
+  );
+
   const reset = useCallback(() => {
+    generation.current++; // invalidate in-flight scans and cloud syncs
+    abortRef.current?.abort();
+    abortRef.current = null;
     if (!isDemo) void clearAll(); // also drops the stored dirHandle
     setRecords([]);
     setMyCodesState([]);
     setFilters(DEFAULT_FILTERS);
     setIsDemo(false);
     setDirHandleState(null);
+    setProgress(null);
+    setSyncing(null);
     autoSyncDone.current = false;
     setPhase("landing");
   }, [isDemo]);
+
+  const onCloudSignIn = useCallback(() => {
+    void signInWithGoogle().catch((err) => {
+      console.error(err);
+      setPipelineError("Couldn't start Google sign-in — check your network and try again.");
+    });
+  }, []);
 
   const resolved = useMemo(() => resolveGames(records, new Set(myCodes)), [records, myCodes]);
   const resolvedTeams = useMemo(() => resolveTeamGames(records, new Set(myCodes)), [records, myCodes]);
@@ -271,6 +387,13 @@ export default function App() {
                     : "Refresh"}
                 </button>
               )}
+              <CloudSync
+                records={records}
+                myCodes={myCodes}
+                isDemo={isDemo}
+                generation={generation.current}
+                onPulled={onCloudPulled}
+              />
               <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowGuide(true)}>
                 Metrics guide
               </button>
@@ -292,7 +415,14 @@ export default function App() {
       )}
 
       {phase === "landing" && (
-        <Landing onPickDirectory={onPickDirectory} onPickFiles={onPickFiles} onDemo={onDemo} supportsFsAccess={supportsFsAccess} />
+        <Landing
+          onPickDirectory={onPickDirectory}
+          onPickFiles={onPickFiles}
+          onDemo={onDemo}
+          supportsFsAccess={supportsFsAccess}
+          onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
+          cloudRestoring={cloudRestoring}
+        />
       )}
 
       {phase === "parsing" && progress && <ProgressBar p={progress} />}
@@ -378,6 +508,11 @@ export default function App() {
           <MetricsGuide onClose={() => setShowGuide(false)} />
         </Suspense>
       )}
+
+      <footer className="site-footer">
+        <span>Brought to you by Studio Pinball · © 2026</span>
+        <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
+      </footer>
     </div>
   );
 }

@@ -1,13 +1,13 @@
 import { Fragment, useMemo, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import type { PlayerSide, ResolvedGame } from "../lib/types";
+import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
+import type { ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
-import { axisStyle, tooltipStyle } from "./chartStyle";
+import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
 
 // ---------------- Matchups ----------------
 
@@ -77,6 +77,7 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
             </tbody>
           </table>
         </div>
+        <MatrixLegend />
         <div className="hint">Click a cell to filter the dashboard to that matchup. Faded cells are below the sample threshold.</div>
       </div>
 
@@ -106,6 +107,21 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
         </table>
       </div>
     </>
+  );
+}
+
+/** Color-scale key for the win-rate matrices: loss red → neutral → win green. */
+function MatrixLegend() {
+  return (
+    <div className="matrix-legend">
+      <span>0%</span>
+      <span className="ramp" aria-hidden="true" />
+      <span>50%</span>
+      <span className="ramp ramp-hi" aria-hidden="true" />
+      <span>100% win rate</span>
+      <span className="sep">·</span>
+      <span>faded = small sample</span>
+    </div>
   );
 }
 
@@ -167,6 +183,7 @@ function StageCharGrid({
           ))}
         </tbody>
       </table>
+      <MatrixLegend />
     </div>
   );
 }
@@ -328,12 +345,12 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
 export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
   const [query, setQuery] = useState("");
   const rows = useMemo(() => byOpponent(games), [games]);
-  const filtered = rows.filter(
-    (r) =>
-      !query ||
-      r.code.toLowerCase().includes(query.toLowerCase()) ||
-      (r.displayName ?? "").toLowerCase().includes(query.toLowerCase()),
-  );
+  const filtered = useMemo(() => {
+    const q = query.toLowerCase();
+    return rows.filter(
+      (r) => !q || r.code.toLowerCase().includes(q) || (r.displayName ?? "").toLowerCase().includes(q),
+    );
+  }, [rows, query]);
   if (rows.length === 0) return <div className="empty-note">No opponents with connect codes in the current filter.</div>;
   return (
     <>
@@ -401,10 +418,10 @@ const EXEC_CHARTS: {
   color: string;
   compare?: { key: string; label: string; color: string };
 }[] = [
-  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)", compare: { key: "oppLCancel", label: "Opponents", color: "#f0564f" } },
-  { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d", compare: { key: "oppOpk", label: "Opponents", color: "#f0564f" } },
-  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e", compare: { key: "oppDpo", label: "Opponents", color: "#f0564f" } },
-  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: "#f0564f" } },
+  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)", compare: { key: "oppLCancel", label: "Opponents", color: OPP_SERIES_COLOR } },
+  { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d", compare: { key: "oppOpk", label: "Opponents", color: OPP_SERIES_COLOR } },
+  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e", compare: { key: "oppDpo", label: "Opponents", color: OPP_SERIES_COLOR } },
+  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: OPP_SERIES_COLOR } },
 ];
 
 const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color: string }[] = [
@@ -441,21 +458,22 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+          <CartesianGrid {...gridStyle} />
           {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
           <XAxis
             dataKey="index"
             tick={axisStyle}
             tickLine={false}
-            axisLine={{ stroke: "#34305a" }}
+            axisLine={{ stroke: "var(--line)" }}
             minTickGap={48}
-            tickFormatter={(v: number) => data[v - data[0].index]?.date ?? ""}
+            tickFormatter={(v: number) => dayTick(data[v - data[0]!.index]?.date)} // ticks only exist when data is non-empty
           />
           <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={def.unit} />
           <Tooltip
             {...tooltipStyle}
             labelFormatter={(v, payload) => {
               const d = payload?.[0]?.payload?.date;
-              return d ? `Game ${v} — ${d}` : `Game ${v}`;
+              return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
             }}
             formatter={(v) => [`${Number(v).toFixed(1)}${def.unit}`, def.label]}
           />
@@ -484,8 +502,9 @@ const NEUTRAL_SERIES: SeriesDef[] = [
   { key: "beneficialTrades", label: "Beneficial trades", color: "#3fcf8e", value: (g) => g.me.beneficialTrades },
 ];
 
-const ACTION_COLORS: Record<string, string> = {
-  rolls: "#f0564f",
+// No reds here: red stays reserved for loss/danger, not series identity.
+const ACTION_COLORS: Record<keyof ActionCounts, string> = {
+  rolls: "#4fc9c4",
   airDodges: "#e8b54d",
   spotDodges: "#e87fd0",
   wavedashes: "#8f7ff7",
@@ -560,10 +579,10 @@ function PerGameMetricChart({
           <button
             className={`chip ${showOpp ? "on" : ""}`}
             aria-pressed={showOpp}
-            style={showOpp ? { borderColor: "#f0564f" } : undefined}
+            style={showOpp ? { borderColor: OPP_SERIES_COLOR } : undefined}
             onClick={() => setShowOpp((v) => !v)}
           >
-            <span className="dot" style={{ background: "#f0564f", opacity: showOpp ? 1 : 0.35 }} />
+            <span className="dot" style={{ background: OPP_SERIES_COLOR, opacity: showOpp ? 1 : 0.35 }} />
             vs opponents
           </button>
         )}
@@ -573,21 +592,22 @@ function PerGameMetricChart({
       ) : (
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+            <CartesianGrid {...gridStyle} />
             {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
             <XAxis
               dataKey="index"
               tick={axisStyle}
               tickLine={false}
-              axisLine={{ stroke: "#34305a" }}
+              axisLine={{ stroke: "var(--line)" }}
               minTickGap={48}
-              tickFormatter={(v: number) => (data[v - data[0].index] as { date?: string })?.date ?? ""}
+              tickFormatter={(v: number) => dayTick((data[v - data[0]!.index] as { date?: string })?.date)} // ticks only exist when data is non-empty
             />
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
                 const d = payload?.[0]?.payload?.date;
-                return d ? `Game ${v} — ${d}` : `Game ${v}`;
+                return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
               }}
               formatter={(v, name) => [int(Number(v)), name]}
             />
@@ -606,7 +626,7 @@ function PerGameMetricChart({
                     type="monotone"
                     dataKey={`opp:${s.key}`}
                     name={`${s.label} — opponents`}
-                    stroke="#f0564f"
+                    stroke={OPP_SERIES_COLOR}
                     strokeWidth={1.5}
                     strokeDasharray="5 4"
                     strokeOpacity={0.9}
@@ -643,9 +663,21 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
             <h2>{c.label}</h2>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-                <XAxis dataKey="date" tick={axisStyle} tickLine={false} axisLine={{ stroke: "#34305a" }} minTickGap={48} />
+                <CartesianGrid {...gridStyle} />
+                <XAxis
+                  dataKey="date"
+                  tick={axisStyle}
+                  tickLine={false}
+                  axisLine={{ stroke: "var(--line)" }}
+                  minTickGap={48}
+                  tickFormatter={dayTick}
+                />
                 <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={c.unit} />
-                <Tooltip {...tooltipStyle} formatter={(v, name) => [`${Number(v).toFixed(1)}${c.unit}`, name]} />
+                <Tooltip
+                  {...tooltipStyle}
+                  labelFormatter={(v) => dayTick(String(v))}
+                  formatter={(v, name) => [`${Number(v).toFixed(1)}${c.unit}`, name]}
+                />
                 {c.compare && <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />}
                 <Line type="monotone" dataKey={c.key} name={c.compare ? "Me" : c.label} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
                 {c.compare && (
@@ -672,6 +704,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
         <h2>L-cancel volume — per game</h2>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+            <CartesianGrid {...gridStyle} />
             {/* The axis must key on the unique game index — keying on `date` makes
                 recharts treat same-day games as one category, so every hover
                 resolves to the first game of that day. Ticks still render dates. */}
@@ -679,16 +712,16 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
               dataKey="index"
               tick={axisStyle}
               tickLine={false}
-              axisLine={{ stroke: "#34305a" }}
+              axisLine={{ stroke: "var(--line)" }}
               minTickGap={48}
-              tickFormatter={(v: number) => lcVolume[v - lcVolume[0].index]?.date ?? ""}
+              tickFormatter={(v: number) => dayTick(lcVolume[v - lcVolume[0]!.index]?.date)} // ticks only exist when data is non-empty
             />
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
                 const d = payload?.[0]?.payload?.date;
-                return d ? `Game ${v} — ${d}` : `Game ${v}`;
+                return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
               }}
               formatter={(v, name) => [int(Number(v)), name]}
             />

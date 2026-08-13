@@ -52,7 +52,7 @@ export function IdentityPicker({ candidates, onConfirm }: IdentityProps) {
           </button>
         ))}
       </div>
-      <p className="hint">Playing on multiple accounts? Pick your main now — you can add alt codes later in the header.</p>
+      <p className="hint">Playing on multiple accounts? Pick your main — the dashboard tracks one code at a time for now.</p>
     </div>
   );
 }

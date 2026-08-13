@@ -1,5 +1,6 @@
 import type { GameRecord, ParseProgress } from "./types";
 import { cachedIds, putRecords } from "./db";
+import type { WorkerResult } from "../worker/parser.worker";
 
 export interface DiscoveredFile {
   id: string;
@@ -40,9 +41,10 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
   const lane = async () => {
     while (next < found.length) {
       const i = next++;
+      const entry = found[i]!;
       try {
-        const file = await found[i].handle.getFile();
-        out[i] = { id: fileId(found[i].path, file), path: found[i].path, file };
+        const file = await entry.handle.getFile();
+        out[i] = { id: fileId(entry.path, file), path: entry.path, file };
       } catch {
         // skip: locked or vanished mid-scan
       }
@@ -65,6 +67,25 @@ export function discoverFromFileList(files: FileList): DiscoveredFile[] {
 
 const BATCH_FLUSH = 25;
 
+// UI record delivery is throttled by time, not batch size: every append
+// invalidates App's memoized resolve+sort of the entire library, so per-batch
+// delivery on a 30k-file parse would mean ~1,200 full re-resolves — during
+// syncFolder with the whole dashboard mounted. Progress counts only re-render
+// the progress bar / topbar button, so they may go out more often.
+const UI_RECORDS_MS = 1000;
+const UI_PROGRESS_MS = 250;
+
+/** Parsed records that could not be written to IndexedDB (quota, private browsing). */
+export class RecordSaveError extends Error {
+  constructor(unsaved: number, cause: Error) {
+    super(
+      `Couldn't save ${unsaved.toLocaleString()} parsed game${unsaved === 1 ? "" : "s"} to the local replay cache — ` +
+        `your browser may be blocking storage or out of space (${cause.message}).`,
+    );
+    this.name = "RecordSaveError";
+  }
+}
+
 /**
  * Parse all not-yet-cached files across a pool of web workers.
  * Streams progress and flushes records to IndexedDB in batches so the
@@ -73,6 +94,10 @@ const BATCH_FLUSH = 25;
 export async function runParsePipeline(
   files: DiscoveredFile[],
   onProgress: (p: ParseProgress, newRecords: GameRecord[]) => void,
+  // Aborting (App's reset) must stop DB writes and callbacks immediately —
+  // a pipeline that keeps committing after clearAll() resurrects the old
+  // folder's records into the wiped cache and the fresh React state.
+  signal?: AbortSignal,
 ): Promise<void> {
   const cached = await cachedIds();
   const queue = files.filter((f) => !cached.has(f.id));
@@ -98,26 +123,59 @@ export async function runParsePipeline(
   }));
 
   let next = 0;
-  let pendingFlush: GameRecord[] = [];
+  let pendingDb: GameRecord[] = [];
+  let pendingUi: GameRecord[] = [];
+  let lastProgressEmit = 0;
+  let lastRecordsEmit = 0;
 
-  const flush = async () => {
-    if (!pendingFlush.length) return;
-    const batch = pendingFlush;
-    pendingFlush = [];
-    await putRecords(batch);
+  const emitUi = () => {
+    if (signal?.aborted) return;
+    const now = Date.now();
+    if (now - lastProgressEmit < UI_PROGRESS_MS) return;
+    lastProgressEmit = now;
+    let batch: GameRecord[] = [];
+    if (pendingUi.length && now - lastRecordsEmit >= UI_RECORDS_MS) {
+      lastRecordsEmit = now;
+      batch = pendingUi;
+      pendingUi = [];
+    }
     onProgress({ ...progress }, batch);
   };
 
-  await new Promise<void>((resolve, reject) => {
+  // DB writes are chained so batches commit in order and a rejection can't
+  // escape as an unhandled rejection mid-pipeline — the chain never rejects;
+  // failures are captured here and surfaced after the worker loop settles.
+  let flushChain: Promise<void> = Promise.resolve();
+  let flushError: Error | null = null;
+  let unsaved = 0;
+
+  const flush = () => {
+    if (!pendingDb.length || signal?.aborted) return;
+    const batch = pendingDb;
+    pendingDb = [];
+    flushChain = flushChain.then(async () => {
+      try {
+        await putRecords(batch);
+      } catch (err) {
+        flushError ??= err instanceof Error ? err : new Error(String(err));
+        unsaved += batch.length;
+      }
+    });
+  };
+
+  const workerLoop = new Promise<void>((resolve, reject) => {
     let inFlight = 0;
 
     const feed = (slot: Slot) => {
       if (slot.dead) return;
-      if (next >= queue.length) {
+      // Once a cache write fails, later ones will too (quota, private
+      // browsing) — stop starting new files instead of parsing into batches
+      // that can't be saved.
+      if (next >= queue.length || flushError || signal?.aborted) {
         if (inFlight === 0) resolve();
         return;
       }
-      const job = queue[next++];
+      const job = queue[next++]!;
       slot.job = job;
       inFlight++;
       job.file
@@ -128,6 +186,7 @@ export async function runParsePipeline(
           slot.job = null;
           progress.done++;
           progress.errors++;
+          emitUi(); // read failures must still move the bar
           feed(slot);
         });
     };
@@ -137,13 +196,14 @@ export async function runParsePipeline(
         inFlight--;
         slot.job = null;
         progress.done++;
-        const res = e.data as { ok: boolean; record?: GameRecord; id: string; path: string; error?: string };
+        const res = e.data as WorkerResult;
         if (res.ok && res.record) {
-          pendingFlush.push(res.record);
+          pendingDb.push(res.record);
+          pendingUi.push(res.record);
         } else {
           progress.errors++;
           // Store a tombstone so corrupt files are not re-parsed every visit.
-          pendingFlush.push({
+          const tombstone: GameRecord = {
             id: res.id,
             path: res.path,
             playedAt: null,
@@ -155,9 +215,12 @@ export async function runParsePipeline(
             winnerIndex: null,
             winnerTeamId: null,
             parseError: res.error ?? "parse failed",
-          });
+          };
+          pendingDb.push(tombstone);
+          pendingUi.push(tombstone);
         }
-        if (pendingFlush.length >= BATCH_FLUSH) void flush();
+        if (pendingDb.length >= BATCH_FLUSH) flush();
+        emitUi();
         feed(slot);
       };
       // A worker that dies — most commonly its script 404ing because a new
@@ -185,7 +248,20 @@ export async function runParsePipeline(
     }
   });
 
-  await flush();
-  onProgress({ ...progress }, []);
-  slots.forEach((s) => s.worker.terminate());
+  try {
+    await workerLoop;
+  } finally {
+    // Terminate on rejection too — a failed pipeline must not leak the pool.
+    slots.forEach((s) => s.worker.terminate());
+  }
+
+  if (signal?.aborted) return; // parsed-but-unflushed records are dropped by design
+  flush();
+  await flushChain;
+  if (signal?.aborted) return;
+  // Trailing delivery: syncFolder builds its record state solely from these
+  // callbacks, so every remaining record must go out, exactly once.
+  onProgress({ ...progress }, pendingUi);
+  pendingUi = [];
+  if (flushError) throw new RecordSaveError(unsaved, flushError);
 }
