@@ -63,6 +63,12 @@ button.primary {
 }
 button.primary:hover { background: #a094ff; }
 button.ghost { background: transparent; }
+/* Attention state: work is waiting on this button (e.g. unsynced games). */
+button.ghost.attn {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+button.ghost.attn:hover { border-color: var(--gold); filter: brightness(1.15); }
 
 select {
   background: var(--panel-2);

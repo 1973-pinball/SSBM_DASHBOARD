@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GameRecord } from "../lib/types";
 import { cloudEnabled, currentSession, onAuthChange, signInWithGoogle, signOut, type Session } from "../lib/supabase";
 import { pushMyCodes, syncRecords } from "../lib/cloudSync";
@@ -23,6 +23,11 @@ type SyncState = { kind: "idle" } | { kind: "busy" } | { kind: "done"; pushed: n
 export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [sync, setSync] = useState<SyncState>({ kind: "idle" });
+  // Ids known to be in the cloud as of the last successful sync. After a sync
+  // every then-current record is in the cloud by definition, so anything local
+  // that isn't in this set was parsed since — those are the "unsynced" games
+  // the gold button state calls out. Null until the first sync of this visit.
+  const [syncedIds, setSyncedIds] = useState<Set<string> | null>(null);
   const autoSynced = useRef(false);
 
   // Latest props for the auto-sync effect without re-triggering it per change.
@@ -44,6 +49,11 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
       // The dashboard always has codes (identity is confirmed before entry);
       // fresh-device adoption of cloud codes happens in App's landing restore.
       if (codes.length) await pushMyCodes(codes);
+      // parseError tombstones are never pushed, so they never count as pending.
+      const ids = new Set<string>();
+      for (const r of recs) if (!r.parseError) ids.add(r.id);
+      for (const r of result.pulled) ids.add(r.id);
+      setSyncedIds(ids);
       setSync({ kind: "done", pushed: result.pushed, pulled: result.pulled.length });
     } catch (err) {
       console.error(err);
@@ -58,6 +68,14 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     void runSync();
   }, [session, isDemo, runSync]);
 
+  // Games parsed since the last sync (e.g. a folder Refresh mid-session).
+  const pending = useMemo(() => {
+    if (!syncedIds) return 0;
+    let n = 0;
+    for (const r of records) if (!r.parseError && !syncedIds.has(r.id)) n++;
+    return n;
+  }, [records, syncedIds]);
+
   if (!cloudEnabled || isDemo) return null;
 
   if (!session) {
@@ -68,25 +86,40 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     );
   }
 
+  // Pending games outrank the "done" receipt: after a folder Refresh the
+  // button flips gold to say new games still need a push.
+  const hasPending = sync.kind !== "busy" && pending > 0;
   const label =
     sync.kind === "busy"
       ? "Syncing…"
-      : sync.kind === "done"
-        ? `Synced ↑${sync.pushed.toLocaleString()} ↓${sync.pulled.toLocaleString()}`
-        : sync.kind === "error"
-          ? "Sync failed — retry"
-          : "Sync to cloud";
+      : hasPending
+        ? `Sync ${pending.toLocaleString()} new game${pending === 1 ? "" : "s"}`
+        : sync.kind === "done"
+          ? `Synced ↑${sync.pushed.toLocaleString()} ↓${sync.pulled.toLocaleString()}`
+          : sync.kind === "error"
+            ? "Sync failed — retry"
+            : "Sync to cloud";
 
   return (
     <>
-      <button className="ghost" style={{ marginLeft: 10 }} onClick={() => void runSync()} disabled={sync.kind === "busy"}>
+      <button
+        className={hasPending ? "ghost attn" : "ghost"}
+        style={{ marginLeft: 10 }}
+        onClick={() => void runSync()}
+        disabled={sync.kind === "busy"}
+      >
         {label}
       </button>
       <button
         className="ghost"
         style={{ marginLeft: 10 }}
         title={session.user.email ?? undefined}
-        onClick={() => void signOut().then(() => setSync({ kind: "idle" }))}
+        onClick={() =>
+          void signOut().then(() => {
+            setSync({ kind: "idle" });
+            setSyncedIds(null);
+          })
+        }
       >
         Sign out
       </button>
