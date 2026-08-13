@@ -40,7 +40,12 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     return onAuthChange(setSession);
   }, []);
 
+  const busyRef = useRef(false);
+  const lastSyncAt = useRef(0);
+
   const runSync = useCallback(async () => {
+    if (busyRef.current) return; // auto-triggers can race the manual button
+    busyRef.current = true;
     setSync({ kind: "busy" });
     try {
       const { records: recs, myCodes: codes, generation: gen } = latest.current;
@@ -58,6 +63,9 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     } catch (err) {
       console.error(err);
       setSync({ kind: "error" });
+    } finally {
+      busyRef.current = false;
+      lastSyncAt.current = Date.now();
     }
   }, [onPulled]);
 
@@ -75,6 +83,37 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     for (const r of records) if (!r.parseError && !syncedIds.has(r.id)) n++;
     return n;
   }, [records, syncedIds]);
+
+  // Auto-push: newly parsed games sync on their own once the parse stream goes
+  // quiet (record appends arrive ~1/s, so 2.5s of quiet ≈ done). One attempt
+  // per pending count — a failure (offline) leaves the gold manual button
+  // rather than a retry loop, and any further parsing re-arms the attempt.
+  const autoPushTried = useRef<number | null>(null);
+  useEffect(() => {
+    if (pending === 0) {
+      autoPushTried.current = null;
+      return;
+    }
+    if (!session || sync.kind === "busy" || autoPushTried.current === pending) return;
+    const t = window.setTimeout(() => {
+      autoPushTried.current = pending;
+      void runSync();
+    }, 2500);
+    return () => window.clearTimeout(t);
+  }, [pending, session, sync.kind, runSync]);
+
+  // Auto-pull: returning to the tab re-syncs (≥60s apart) so games pushed from
+  // another device appear without a manual sync or reload.
+  useEffect(() => {
+    if (!session || isDemo) return;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastSyncAt.current < 60_000) return;
+      void runSync();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [session, isDemo, runSync]);
 
   if (!cloudEnabled || isDemo) return null;
 
