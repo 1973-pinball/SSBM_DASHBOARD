@@ -29,3 +29,6 @@ dist-ssr
 
 # Supabase CLI scratch
 supabase/.temp/
+
+# Machine-local dev-server launch config (see .claude/launch.example.json)
+.claude/launch.json
