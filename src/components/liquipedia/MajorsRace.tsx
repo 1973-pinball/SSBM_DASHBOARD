@@ -110,7 +110,7 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
             <th>Player</th>
             <th>Main</th>
             <th className="data">Majors</th>
-            <th className="data">Career winnings</th>
+            <th className="data">All-Smash career winnings</th>
             <th className="data">First · last major</th>
           </tr>
         </thead>
@@ -134,7 +134,9 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
         </tbody>
       </table>
       <div className="hint">
-        Winnings are Liquipedia's "approx. total winnings" — all tracked Smash events for that player, not majors alone.
+        Winnings are Liquipedia's "approx. total winnings": every tracked Smash event for that player — Melee, Ultimate,
+        64, Project M — not Melee alone and not majors alone. Liquipedia publishes no per-game breakdown, so a
+        Melee-only figure isn't available to quote.
       </div>
     </>
   );

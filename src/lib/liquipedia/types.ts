@@ -38,7 +38,11 @@ export interface RankingEdition {
 }
 
 export interface PlayerMeta {
-  /** Approx. total winnings (USD) per Liquipedia infobox; null = not listed. */
+  /**
+   * Liquipedia's "approx. total winnings" (USD); null = not listed. This spans
+   * every Smash title the player competed in, not Melee alone — Liquipedia
+   * publishes no per-game split, so label it as all-Smash wherever it shows.
+   */
   earningsUsd: number | null;
   /** Main character(s), primary first. */
   mains: string[];
