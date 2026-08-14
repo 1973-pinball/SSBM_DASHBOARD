@@ -8,6 +8,29 @@
     <meta name="theme-color" content="#121022" />
     <title>SSBM Dashboard — your Slippi stats, parsed in-browser</title>
     <meta name="description" content="Point it at your Slippi replay folder and get win rates, matchups, and execution trends. Parsed in your browser — your replays never leave your machine." />
+
+    <!--
+      Link previews. og:image must be an absolute URL — crawlers don't resolve
+      relative paths — so this is pinned to the production origin and will show
+      production's image even when the link points at a preview deploy.
+
+      The image is /share/melee-majors-race.png, the same poster the weekly
+      workflow regenerates alongside the data, so a shared link keeps showing
+      current standings instead of a screenshot that ages.
+    -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="SSBM Dashboard" />
+    <meta property="og:url" content="https://ssbm-dashboard.vercel.app/" />
+    <meta property="og:title" content="SSBM Dashboard — Melee stats and scene history" />
+    <meta property="og:description" content="Your Slippi replays parsed in the browser, plus every Melee major since 2003 and the top 100 by character." />
+    <meta property="og:image" content="https://ssbm-dashboard.vercel.app/share/melee-majors-race.png" />
+    <meta property="og:image:width" content="900" />
+    <meta property="og:image:height" content="600" />
+    <meta property="og:image:alt" content="All-time Melee major titles: Hungrybox, Mang0 and Zain leading a bar chart." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="SSBM Dashboard — Melee stats and scene history" />
+    <meta name="twitter:description" content="Your Slippi replays parsed in the browser, plus every Melee major since 2003 and the top 100 by character." />
+    <meta name="twitter:image" content="https://ssbm-dashboard.vercel.app/share/melee-majors-race.png" />
   </head>
   <body>
     <div id="root"></div>

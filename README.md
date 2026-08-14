@@ -45,12 +45,23 @@ Both animated charts also have a **Share GIF** button that exports the animation
 node scripts/render-liquipedia-assets.mjs
 ```
 
+Link previews (Open Graph / Twitter cards) point at `/share/melee-majors-race.png`, so a pasted link shows the current standings rather than a screenshot that ages.
+
 A weekly GitHub Action runs the refresh and the asset render and commits anything that changed, so new majors and each newly published year-end ranking edition arrive on their own (SSBMRank's mid-season lists are skipped deliberately, so a season isn't counted twice). The refresh is append-only — it adds majors and editions that aren't already present and never rewrites existing rows — and it rate-limits itself hard; if Liquipedia throttles a run it exits 2, leaves the file untouched, and the next run tries again. It also revisits any player whose winnings are still unknown, so a page that was unreachable one week gets filled in later.
 
 Two things the tab counts deliberately:
 
 - **Offline majors only.** Liquipedia lists a venue per event, and the 2020–21 netplay era put 16 online events on the majors list — including individual weeks of online leagues, which sat beside Genesis as equal titles and inflated that era's champions. They're excluded from every total, the tab says so at the top, and the rows stay in the dataset flagged `online: true` so the choice stays auditable.
 - **Winnings are all-Smash.** Liquipedia's "approx. total winnings" spans every Smash title a player competed in, and there's no per-game breakdown to quote, so the column is labelled *All-Smash career winnings* rather than implying Melee prize money.
+
+The refresh is append-only, so a parser fix never reaches rows already in the file. To re-derive the whole dataset from the source pages:
+
+```bash
+node scripts/rebuild-liquipedia.mjs           # keep known winnings
+node scripts/rebuild-liquipedia.mjs --force   # re-fetch player pages too
+```
+
+It's manual on purpose: a full run is one request per major winner, serialized 30 seconds apart, so roughly fifteen minutes.
 
 When a parser stops finding something, the figures usually moved into rendered HTML rather than the page source. `scripts/inspect-liquipedia-page.mjs` prints the real markup around a match; the **Inspect Liquipedia page** workflow runs it from a GitHub runner, which matters because Liquipedia rate-limits a development machine for hours after any burst of requests.
 
