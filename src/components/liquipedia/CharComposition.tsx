@@ -101,7 +101,7 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
   const share = useShareGif();
 
   const onShare = () => {
-    if (share.state.status === "ready") return share.send(share.state.file);
+    if (share.state.status === "ready") return share.send(share.state.files);
     void share.run(async () => {
       const { drawCharFrame } = await import("../../../scripts/lib/gif-draw.mjs");
       const names = [...new Set(comps.flatMap((c) => c.chars.map((s) => s.char)))];

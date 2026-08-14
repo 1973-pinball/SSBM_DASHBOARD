@@ -15,6 +15,12 @@
  * already serves.
  */
 
+export interface ShareFiles {
+  gif: File;
+  /** Final frame as a PNG — the current standings / latest ranking edition. */
+  still: File;
+}
+
 export interface BuildGifOptions {
   frameCount: number;
   /** Paint frame `i`. Called more than once per frame — keep it pure. */
@@ -53,7 +59,7 @@ export async function loadIcons(entries: [key: string, charId: number][]): Promi
   return out;
 }
 
-export async function buildGifFile(opts: BuildGifOptions): Promise<File> {
+export async function buildShareFiles(opts: BuildGifOptions): Promise<ShareFiles> {
   const { frameCount, draw, stepMs, finalHoldMs = 3000, filename, onProgress } = opts;
   // Both pulled in on demand so the encoder never lands in the tab's chunk.
   const [{ encodeGifStreamed }, { CANVAS }] = await Promise.all([
@@ -90,7 +96,19 @@ export async function buildGifFile(opts: BuildGifOptions): Promise<File> {
     onProgress,
   });
 
-  return new File([gif as BlobPart], filename, { type: "image/gif" });
+  // A still of where things stand goes alongside the animation: share sheets
+  // and feeds preview a PNG properly, and some places won't take a GIF at all.
+  // The canvas already holds the last frame from the encode, but redraw it so
+  // this doesn't depend on the encoder's internal call order.
+  draw(ctx, frameCount - 1);
+  const still = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("couldn't render the still"))), "image/png"),
+  );
+
+  return {
+    gif: new File([gif as BlobPart], filename, { type: "image/gif" }),
+    still: new File([still], filename.replace(/\.gif$/, ".png"), { type: "image/png" }),
+  };
 }
 
 /**
@@ -98,16 +116,16 @@ export async function buildGifFile(opts: BuildGifOptions): Promise<File> {
  * desktop browsers, which is why they download instead — canShare is the only
  * reliable test, since Safari rejects shares it can't service.
  */
-export const canShareFile = (file: File): boolean => navigator.canShare?.({ files: [file] }) ?? false;
+export const canShareFiles = (files: File[]): boolean => navigator.canShare?.({ files }) ?? false;
 
 /**
  * Open the share sheet. MUST be called straight from a click handler with no
  * awaits before it, or the user activation will have lapsed and iOS will
  * reject it. Returns false if the sheet couldn't open at all.
  */
-export async function shareFile(file: File): Promise<boolean> {
+export async function shareFiles(files: File[]): Promise<boolean> {
   try {
-    await navigator.share({ files: [file] });
+    await navigator.share({ files });
     return true;
   } catch (err) {
     // Dismissing the sheet throws AbortError — that's a choice, not a fault.

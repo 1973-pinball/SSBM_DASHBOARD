@@ -29,7 +29,7 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
   // Frame 0 is the empty "before any major" state; the GIF starts at the first
   // actual result so it opens on something rather than a blank board.
   const onShare = () => {
-    if (share.state.status === "ready") return share.send(share.state.file);
+    if (share.state.status === "ready") return share.send(share.state.files);
     void share.run(async () => {
       const { drawRaceFrame } = await import("../../../scripts/lib/gif-draw.mjs");
       const icons = await loadIcons(

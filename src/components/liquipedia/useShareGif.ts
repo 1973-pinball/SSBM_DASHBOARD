@@ -1,11 +1,11 @@
 import { useCallback, useRef, useState } from "react";
-import { buildGifFile, canShareFile, downloadFile, shareFile, type BuildGifOptions } from "./gifShare";
+import { buildShareFiles, canShareFiles, downloadFile, shareFiles, type BuildGifOptions } from "./gifShare";
 
 export type ShareState =
   | { status: "idle" }
   | { status: "working"; pct: number }
   /** Built and waiting for a second tap, so `share()` gets a live gesture. */
-  | { status: "ready"; file: File }
+  | { status: "ready"; files: File[] }
   | { status: "error"; message: string };
 
 /**
@@ -17,6 +17,10 @@ export type ShareState =
  * far longer than that window, so sharing at the end of the render is rejected
  * and the browser falls back to a download. Desktop browsers can't share files
  * at all, so there the first tap renders and saves in one go.
+ *
+ * Both the animation and a still of the final frame go out together: some
+ * destinations preview a PNG where they'd show a GIF as a grey box, and some
+ * won't accept an animation at all.
  */
 export function useShareGif() {
   const [state, setState] = useState<ShareState>({ status: "idle" });
@@ -28,11 +32,20 @@ export function useShareGif() {
     setState({ status: "working", pct: 0 });
     try {
       const opts = await build();
-      const file = await buildGifFile({ ...opts, onProgress: (pct) => setState({ status: "working", pct }) });
-      if (canShareFile(file)) {
-        setState({ status: "ready", file });
+      const { gif, still } = await buildShareFiles({
+        ...opts,
+        onProgress: (pct) => setState({ status: "working", pct }),
+      });
+      // Some browsers accept a lone file but refuse a set; fall back to the
+      // animation alone rather than losing the share sheet entirely.
+      const files = canShareFiles([gif, still]) ? [gif, still] : canShareFiles([gif]) ? [gif] : [];
+      if (files.length) {
+        setState({ status: "ready", files });
       } else {
-        downloadFile(file);
+        downloadFile(gif);
+        // Space the second save: back-to-back downloads look like a popup
+        // storm to the browser and the second is silently dropped.
+        setTimeout(() => downloadFile(still), 600);
         setState({ status: "idle" });
       }
     } catch (err) {
@@ -43,16 +56,16 @@ export function useShareGif() {
     }
   }, []);
 
-  /** Second tap: hand the built file to the OS. No awaits before share(). */
-  const send = useCallback((file: File) => {
-    void shareFile(file).then((ok) => {
+  /** Second tap: hand the built files to the OS. No awaits before share(). */
+  const send = useCallback((files: File[]) => {
+    void shareFiles(files).then((ok) => {
       // If the sheet refused outright, saving is better than a dead button.
-      if (!ok) downloadFile(file);
+      if (!ok) files.forEach((f, i) => setTimeout(() => downloadFile(f), i * 600));
       setState({ status: "idle" });
     });
   }, []);
 
-  /** Drop a built file that no longer matches the settings on screen. */
+  /** Drop built files that no longer match the settings on screen. */
   const reset = useCallback(() => {
     setState((s) => (s.status === "ready" || s.status === "error" ? { status: "idle" } : s));
   }, []);
@@ -65,7 +78,7 @@ export const shareLabel = (state: ShareState): string => {
     case "working":
       return `Rendering ${Math.round(state.pct * 100)}%`;
     case "ready":
-      return "Send GIF ›";
+      return "Send GIF + still ›";
     default:
       return "Share GIF";
   }
