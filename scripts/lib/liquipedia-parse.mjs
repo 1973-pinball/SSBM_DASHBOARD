@@ -285,19 +285,28 @@ export function parseRankingEditions(wikitext) {
 /** Year-end editions only — mid-season lists would double-count a season. */
 export const yearEndEditions = (editions) => editions.filter((e) => !e.isSummer && e.entries.length >= 50);
 
-// ------------------------------------------------------- player page (wikitext)
+// ----------------------------------------------------- player page (rendered)
 
-/** Approx. total winnings + mains from a player page infobox. */
-export function parsePlayerPage(wikitext) {
-  const money = wikitext.match(/\|\s*(?:totalearnings|earnings|winnings)\s*=\s*\$?\s*([\d,]+)/i);
-  const chars = [];
-  for (const m of wikitext.matchAll(/\|\s*game\d*_?char\d*\s*=\s*([^|\n}]+)/gi)) chars.push(m[1]);
-  if (chars.length === 0) {
-    const main = wikitext.match(/\|\s*mains?\s*=\s*([^|\n}]+)/i);
-    if (main) chars.push(...main[1].split(/[,/]/));
-  }
-  return {
-    earningsUsd: money ? Number(money[1].replace(/,/g, "")) : null,
-    mains: chars.map((c) => canonChar(c)).filter(Boolean),
-  };
+/**
+ * Career winnings from a player page. This one needs the RENDERED page, not
+ * wikitext: "Approx. Total Winnings" is computed from Liquipedia's prize-pool
+ * database and never appears in the source, so parsing wikitext silently
+ * returns null for everyone. Matching label-then-amount rather than the
+ * surrounding markup keeps it working across infobox template changes.
+ */
+export function parsePlayerEarnings(html) {
+  const m = html.match(/Total\s+Winnings[\s\S]{0,300}?\$\s*([\d,]+)/i);
+  if (!m) return null;
+  const value = Number(m[1].replace(/,/g, ""));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+/** Main character(s) from a player page's infobox wikitext, primary first. */
+export function parsePlayerMains(wikitext) {
+  const line = wikitext.match(/\|\s*main-melee\s*=\s*([^|\n}]+)/i) ?? wikitext.match(/\|\s*mains?\s*=\s*([^|\n}]+)/i);
+  if (!line) return [];
+  return line[1]
+    .split(",")
+    .map((c) => canonChar(c))
+    .filter(Boolean);
 }

@@ -5,7 +5,7 @@ import type { Major } from "../../lib/liquipedia/types";
 import { careerLeaderboard, compositionByEdition, majorsPerYear, sortedMajors } from "../../lib/liquipedia/select";
 import { Kpi } from "../Kpi";
 import { axisStyle, gridStyle, tooltipStyle } from "../chartStyle";
-import { CharStorylinesTable, CompositionArea, CompositionExplorer, PodiumTimeline, Trailblazers } from "./CharComposition";
+import { CharStorylinesTable, CompositionBars, CompositionExplorer, PodiumTimeline, Trailblazers } from "./CharComposition";
 import { MajorsRace } from "./MajorsRace";
 
 /** Ordinal, not categorical: a supermajor IS a major, so one hue, two steps. */
@@ -119,7 +119,7 @@ export function Liquipedia() {
 
       <div className="panel">
         <h2>Top 100 by main — over time</h2>
-        <CompositionArea comps={comps} />
+        <CompositionBars comps={comps} />
       </div>
 
       <div className="panel">

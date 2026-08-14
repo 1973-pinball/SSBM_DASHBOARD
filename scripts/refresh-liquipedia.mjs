@@ -17,7 +17,8 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   parseMajorsHtml,
-  parsePlayerPage,
+  parsePlayerEarnings,
+  parsePlayerMains,
   parseRankingEditions,
   yearEndEditions,
   displayName,
@@ -200,13 +201,19 @@ async function main() {
   let metaChanged = false;
   for (const tag of needMeta.slice(0, MAX_BACKFILL)) {
     try {
-      const meta = parsePlayerPage(await fetchPage(tag, "wikitext"));
       const prev = data.players[tag];
-      const mains = meta.mains.length
-        ? meta.mains
+      // Winnings only exist in the rendered page; mains only in the source.
+      // Skip the second request when we already know the character.
+      const earnings = parsePlayerEarnings(await fetchPage(tag, "text"));
+      const mains =
+        prev?.mains?.length || !earnings
+          ? (prev?.mains ?? [])
+          : parsePlayerMains(await fetchPage(tag, "wikitext"));
+      const resolvedMains = mains.length
+        ? mains
         : (prev?.mains ?? addedMajors.find((m) => m.winner === tag)?.winnerChars ?? []);
       // Never overwrite a known figure with a null we failed to read.
-      const next = { earningsUsd: meta.earningsUsd ?? prev?.earningsUsd ?? null, mains };
+      const next = { earningsUsd: earnings ?? prev?.earningsUsd ?? null, mains: resolvedMains };
       if (!prev || prev.earningsUsd !== next.earningsUsd || prev.mains.join() !== next.mains.join()) {
         data.players[tag] = next;
         metaChanged = true;

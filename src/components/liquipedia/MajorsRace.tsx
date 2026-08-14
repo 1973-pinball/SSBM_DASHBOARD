@@ -8,7 +8,7 @@ import { Mains, Stock } from "./Stock";
 
 const VISIBLE = 12; // bars shown at once
 const ROW_H = 34;
-const PLAY_MS = 700;
+const PLAY_MS = 440; // 1× step; 2× lands near 220ms, which reads as fast but still legible
 
 const usd = (n: number | null): string => (n === null ? "—" : `$${Math.round(n).toLocaleString("en-US")}`);
 

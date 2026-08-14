@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHAR_STACK_ORDER, OTHER_CHAR, charColor } from "../../lib/liquipedia/chars";
 import type { EditionComposition } from "../../lib/liquipedia/select";
 import { breakthroughLabel, breakthroughs, charStorylines, compositionSeries } from "../../lib/liquipedia/select";
@@ -9,18 +9,18 @@ import { usePlayback } from "./usePlayback";
 import { Stock } from "./Stock";
 
 const ROW_H = 30;
-const PLAY_MS = 1100;
+const PLAY_MS = 750; // editions are sparse, so each one holds longer than a major
 
 // ---------------- Stacked area: composition over time ----------------
 
-/** Named characters + Other, stacked per edition — the dominance-share picture. */
-export function CompositionArea({ comps }: { comps: EditionComposition[] }) {
+/** Named characters + Other, one stacked bar per edition — the dominance picture. */
+export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
   const rows = useMemo(() => compositionSeries(comps), [comps]);
   const byLabel = useMemo(() => new Map(comps.map((c) => [String(c.edition.year), c])), [comps]);
-  const chartData = useMemo(
-    () => rows.map((r) => ({ label: r.label, ...r.values })),
-    [rows],
-  );
+  const totals = useMemo(() => new Map(rows.map((r) => [r.label, r.total])), [rows]);
+  // Bars carry shares, not head-counts: a few editions rank 101–104 players,
+  // and only a normalized stack tops out at exactly 100.
+  const chartData = useMemo(() => rows.map((r) => ({ label: r.label, ...r.shares })), [rows]);
   if (rows.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
 
   const series = [...CHAR_STACK_ORDER, OTHER_CHAR];
@@ -36,20 +36,31 @@ export function CompositionArea({ comps }: { comps: EditionComposition[] }) {
           </span>
         ))}
       </div>
-      <ResponsiveContainer width="100%" height={280}>
-        <AreaChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: -18 }}>
+      <ResponsiveContainer width="100%" height={300}>
+        <BarChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: -20 }}>
           <CartesianGrid {...gridStyle} />
           <XAxis dataKey="label" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
-          <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+          <YAxis
+            tick={axisStyle}
+            tickLine={false}
+            axisLine={false}
+            domain={[0, 100]}
+            ticks={[0, 25, 50, 75, 100]}
+            tickFormatter={(v: number) => `${v}`}
+          />
           <Tooltip
             {...tooltipStyle}
+            cursor={{ fill: "rgba(143, 127, 247, 0.08)" }}
             content={({ active, label }) => {
               if (!active || label === undefined) return null;
               const comp = byLabel.get(String(label));
               if (!comp) return null;
+              const total = totals.get(String(label)) ?? 0;
               return (
                 <div style={tooltipStyle.contentStyle} className="lq-tip">
-                  <div className="lq-tip-title">{comp.edition.title}</div>
+                  <div className="lq-tip-title">
+                    {comp.edition.title} · {total} ranked
+                  </div>
                   {comp.chars.slice(0, 10).map((s) => (
                     <div key={s.char} className="lq-tip-row">
                       <span className="dot" style={{ background: charColor(s.char) }} />
@@ -65,22 +76,14 @@ export function CompositionArea({ comps }: { comps: EditionComposition[] }) {
             }}
           />
           {series.map((c) => (
-            <Area
-              key={c}
-              dataKey={c}
-              stackId="chars"
-              stroke={charColor(c)}
-              fill={charColor(c)}
-              fillOpacity={0.55}
-              strokeWidth={1.5}
-              isAnimationActive={false}
-            />
+            <Bar key={c} dataKey={c} stackId="chars" fill={charColor(c)} isAnimationActive={false} />
           ))}
-        </AreaChart>
+        </BarChart>
       </ResponsiveContainer>
       <div className="hint">
-        Players counted by primary main (first-listed character). Editions are evenly spaced — there were no rankings in
-        2020–21 (COVID). Hover an edition for each character's top player.
+        One bar per ranking edition, split by primary main and scaled to 100 — a few editions rank 101–104 players
+        because of ties, so the axis is share of the list rather than raw head-count (hover for the real numbers).
+        Bars are evenly spaced: there were no rankings in 2020–21.
       </div>
     </>
   );

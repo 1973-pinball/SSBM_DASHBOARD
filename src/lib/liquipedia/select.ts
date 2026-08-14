@@ -154,14 +154,23 @@ export function compositionByEdition(editions: RankingEdition[]): EditionComposi
     });
 }
 
-/** Row shape for the stacked composition area chart. */
+/** Row shape for the stacked composition chart. */
 export interface CompositionRow {
   label: string;
   year: number;
-  values: Record<string, number>; // CHAR_STACK_ORDER keys + Other
+  /** Head-count per character (CHAR_STACK_ORDER keys + Other). */
+  values: Record<string, number>;
+  /** Share of the edition, in percent — the same keys, summing to 100. */
+  shares: Record<string, number>;
+  /** Players ranked that edition; 100 most years, but ties push a few to 104. */
+  total: number;
 }
 
-/** Named-character counts per edition with the long tail folded into Other. */
+/**
+ * Named-character counts per edition with the long tail folded into Other,
+ * plus each character's share. Shares are what the chart plots: a handful of
+ * editions rank 101–104 players, so only a normalized bar reaches exactly 100.
+ */
 export function compositionSeries(comps: EditionComposition[]): CompositionRow[] {
   return comps.map((c) => {
     const values: Record<string, number> = {};
@@ -173,7 +182,9 @@ export function compositionSeries(comps: EditionComposition[]): CompositionRow[]
     }
     const total = c.chars.reduce((s, ch) => s + ch.count, 0);
     values[OTHER_CHAR] = total - named;
-    return { label: editionLabel(c.edition), year: c.edition.year, values };
+    const shares: Record<string, number> = {};
+    for (const [char, n] of Object.entries(values)) shares[char] = total > 0 ? (n / total) * 100 : 0;
+    return { label: editionLabel(c.edition), year: c.edition.year, values, shares, total };
   });
 }
 

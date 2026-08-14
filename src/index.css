@@ -548,7 +548,9 @@ tr.detail-row td {
   align-items: center;
   gap: 10px;
   height: 30px;
-  transition: transform 0.5s ease;
+  /* Shorter than the fastest step (2× ≈ 220ms) so bars actually arrive
+     instead of chasing a target that keeps moving. */
+  transition: transform 0.28s ease;
 }
 .lq-race-rank {
   font-family: var(--font-data);
