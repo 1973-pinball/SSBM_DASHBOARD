@@ -11,7 +11,9 @@ export const SPEEDS = [0.5, 1, 1.5, 2] as const;
 export function usePlayback(length: number, baseMs: number) {
   const [idx, setIdx] = useState(Math.max(0, length - 1));
   const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState<number>(1);
+  // 2x is the default: at 1x a 100-plus-step race is a slog to watch and the
+  // exported GIF inherits whatever is selected here.
+  const [speed, setSpeed] = useState<number>(2);
 
   // Re-armed each frame so the stop condition lives here rather than inside a
   // state updater, which has to stay pure.

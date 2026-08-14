@@ -21,9 +21,10 @@ const DATA_PATH = resolve(ROOT, "src/lib/liquipedia/data.ts");
 const OUT_DIR = resolve(ROOT, "public/share");
 const STOCK_DIR = resolve(ROOT, "public/stock");
 
-// Matches the app's playback defaults so a committed GIF plays at 1x speed.
-const RACE_STEP_MS = 440;
-const CHAR_STEP_MS = 750;
+// The app's 1x steps, halved: playback defaults to 2x, and a committed GIF
+// should play at the same speed as one exported from the page.
+const RACE_STEP_MS = 440 / 2;
+const CHAR_STEP_MS = 750 / 2;
 const FINAL_HOLD_MS = 3000;
 
 const NAME_TO_ID = {
