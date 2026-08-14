@@ -48,6 +48,12 @@ jobs:
         env:
           LIQUIPEDIA_CONTACT: ${{ vars.LIQUIPEDIA_CONTACT || 'info.studio.pinball@gmail.com' }}
 
+      # Assets are derived from the snapshot, so they regenerate with it — same
+      # painters and encoder the in-app Share buttons use, run headlessly.
+      - name: Render shareable assets
+        if: steps.refresh.outputs.changed == 'true'
+        run: node scripts/render-liquipedia-assets.mjs
+
       # A broken dataset must never reach main.
       - name: Type-check and build
         if: steps.refresh.outputs.changed == 'true'
@@ -64,6 +70,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/liquipedia/data.ts
+          git add src/lib/liquipedia/data.ts public/share
           git commit -m "Liquipedia snapshot: $SUMMARY"
           git push

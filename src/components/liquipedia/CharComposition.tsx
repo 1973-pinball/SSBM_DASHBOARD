@@ -1,11 +1,13 @@
 import { useMemo } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { CHAR_STACK_ORDER, OTHER_CHAR, charColor } from "../../lib/liquipedia/chars";
+import { CHAR_STACK_ORDER, OTHER_CHAR, charColor, charId } from "../../lib/liquipedia/chars";
 import type { EditionComposition } from "../../lib/liquipedia/select";
 import { breakthroughLabel, breakthroughs, charStorylines, compositionSeries } from "../../lib/liquipedia/select";
 import { axisStyle, gridStyle, tooltipStyle } from "../chartStyle";
 import { Playbar } from "./Playback";
 import { usePlayback } from "./usePlayback";
+import { loadIcons } from "./gifShare";
+import { useShareGif } from "./useShareGif";
 import { Stock } from "./Stock";
 
 const ROW_H = 30;
@@ -100,6 +102,42 @@ export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
 export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) {
   const playback = usePlayback(comps.length, PLAY_MS);
   const ticks = useMemo(() => comps.map((c) => String(c.edition.year)), [comps]);
+  const share = useShareGif();
+
+  const onShare = () =>
+    void share.run(async () => {
+      const { drawCharFrame } = await import("../../../scripts/lib/gif-draw.mjs");
+      const names = [...new Set(comps.flatMap((c) => c.chars.map((s) => s.char)))];
+      const icons = await loadIcons(
+        names.map((n) => [n, charId(n)] as [string, number | null]).filter((e): e is [string, number] => e[1] !== null),
+      );
+      const max = Math.max(1, ...comps.flatMap((c) => c.chars.map((s) => s.count)));
+      return {
+        frameCount: comps.length,
+        stepMs: PLAY_MS / playback.speed,
+        filename: "melee-top100-by-main.gif",
+        draw: (ctx, i) => {
+          const c = comps[i]!;
+          const before = i > 0 ? comps[i - 1] : undefined;
+          drawCharFrame(
+            ctx,
+            {
+              title: c.edition.title,
+              year: c.edition.year,
+              total: c.edition.entries.length,
+              chars: c.chars.map((s) => ({
+                char: s.char,
+                count: s.count,
+                topPlayer: s.reps[0]?.player,
+                topRank: s.reps[0]?.rank,
+                isNew: before !== undefined && !before.byChar.has(s.char),
+              })),
+            },
+            { max, icons },
+          );
+        },
+      };
+    });
 
   if (comps.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
 
@@ -112,6 +150,8 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
       <Playbar
         playback={playback}
         max={comps.length - 1}
+        onShare={onShare}
+        shareState={share.state}
         sliderLabel="Ranking edition"
         ticks={ticks}
         valueText={`${comp.edition.title}, ${comp.edition.entries.length} players ranked`}

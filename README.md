@@ -39,7 +39,13 @@ It ships in the bundle rather than being fetched at runtime: the app has no back
 node scripts/refresh-liquipedia.mjs
 ```
 
-A monthly GitHub Action runs exactly that and commits any change, so each month picks up new majors and any newly published ranking edition. The script is append-only — it adds majors dated after the snapshot and editions not already present, never rewriting existing rows — and it rate-limits itself; if Liquipedia throttles the run it exits 2, leaves the file untouched, and the next run tries again.
+Both animated charts also have a **Share GIF** button that exports the animation at whatever playback speed is selected, rendered entirely in your browser. The same painters run headlessly to produce the committed images in [`public/share/`](public/share) (served at `/share/…`), so those links always show the current data:
+
+```bash
+node scripts/render-liquipedia-assets.mjs
+```
+
+A monthly GitHub Action runs the refresh and the asset render, and commits any change, so each month picks up new majors and any newly published ranking edition. The script is append-only — it adds majors dated after the snapshot and editions not already present, never rewriting existing rows — and it rate-limits itself; if Liquipedia throttles the run it exits 2, leaves the file untouched, and the next run tries again.
 
 ## Cloud sync (optional)
 

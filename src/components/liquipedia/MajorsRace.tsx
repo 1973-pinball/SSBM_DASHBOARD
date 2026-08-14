@@ -2,8 +2,11 @@ import { useMemo } from "react";
 import type { Major, PlayerMeta } from "../../lib/liquipedia/types";
 import { careerLeaderboard, raceFrames } from "../../lib/liquipedia/select";
 import { shortDate } from "../../lib/format";
+import { charId } from "../../lib/liquipedia/chars";
 import { Playbar } from "./Playback";
 import { usePlayback } from "./usePlayback";
+import { loadIcons } from "./gifShare";
+import { useShareGif } from "./useShareGif";
 import { Mains, Stock } from "./Stock";
 
 const VISIBLE = 12; // bars shown at once
@@ -21,6 +24,29 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
   const frames = useMemo(() => raceFrames(majors), [majors]);
   const leaderboard = useMemo(() => careerLeaderboard(majors, players), [majors, players]);
   const playback = usePlayback(frames.length, PLAY_MS);
+  const share = useShareGif();
+
+  // Frame 0 is the empty "before any major" state; the GIF starts at the first
+  // actual result so it opens on something rather than a blank board.
+  const onShare = () =>
+    void share.run(async () => {
+      const { drawRaceFrame } = await import("../../../scripts/lib/gif-draw.mjs");
+      const icons = await loadIcons(
+        Object.entries(players)
+          .map(([tag, meta]) => [tag, charId(meta.mains[0] ?? "")] as [string, number | null])
+          .filter((e): e is [string, number] => e[1] !== null),
+      );
+      const max = Math.max(1, ...(frames[frames.length - 1]?.standings.map((s) => s.count) ?? [1]));
+      return {
+        frameCount: frames.length - 1,
+        stepMs: PLAY_MS / playback.speed,
+        filename: "melee-majors-race.gif",
+        draw: (ctx, i) => {
+          const f = frames[i + 1]!;
+          drawRaceFrame(ctx, { name: f.major!.name, year: f.major!.year, winner: f.major!.winner, standings: f.standings }, { max, icons });
+        },
+      };
+    });
 
   if (frames.length <= 1) return <div className="empty-note">No majors data bundled.</div>;
 
@@ -33,6 +59,8 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
       <Playbar
         playback={playback}
         max={frames.length - 1}
+        onShare={onShare}
+        shareState={share.state}
         sliderLabel="Timeline position (one step per major)"
         valueText={
           current.major ? `${current.major.name}, ${shortDate(current.major.date)}, won by ${current.major.winner}` : "Before the first major"

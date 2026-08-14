@@ -529,6 +529,10 @@ tr.detail-row td {
 .lq-speed:last-child { border-right: none; }
 .lq-speed:hover { color: var(--text); background: var(--panel-2); }
 .lq-speed.on { background: var(--accent-dim); color: var(--text); }
+
+.lq-share { font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+.lq-share:disabled { opacity: 0.6; cursor: progress; }
+.lq-share-error { font-size: 12px; color: var(--loss); }
 .lq-frame-label {
   font-family: var(--font-data);
   font-size: 12px;
@@ -714,6 +718,7 @@ tr.detail-row td {
 .lq-tl-first { border-color: var(--gold); }
 .lq-tl-first .lq-tl-rank { color: var(--gold); }
 
+.lq-share-blurb { color: var(--muted); font-size: 13px; margin: 0 0 10px; max-width: 720px; }
 .lq-sources { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
 .lq-sources a { color: var(--accent); text-decoration: none; }
 .lq-sources a:hover { text-decoration: underline; }

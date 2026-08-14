@@ -143,6 +143,29 @@ export function Liquipedia() {
       </div>
 
       <div className="panel">
+        <h2>Shareable images</h2>
+        <p className="lq-share-blurb">
+          These are rendered from the same snapshot and regenerated whenever the data updates, so the links always point
+          at the current picture — handy for sending to someone. The Share GIF buttons above export the same animations
+          at whatever speed you've selected.
+        </p>
+        <ul className="lq-sources">
+          <li>
+            <a href="/share/melee-majors-race.gif" target="_blank" rel="noreferrer">
+              Major titles race (animated GIF)
+            </a>{" "}
+            · <a href="/share/melee-majors-race.png" target="_blank" rel="noreferrer">still image</a>
+          </li>
+          <li>
+            <a href="/share/melee-top100-by-main.gif" target="_blank" rel="noreferrer">
+              Top 100 by main (animated GIF)
+            </a>{" "}
+            · <a href="/share/melee-top100-by-main.png" target="_blank" rel="noreferrer">still image</a>
+          </li>
+        </ul>
+      </div>
+
+      <div className="panel">
         <h2>Sources</h2>
         <ul className="lq-sources">
           {SOURCES.map((s) => (

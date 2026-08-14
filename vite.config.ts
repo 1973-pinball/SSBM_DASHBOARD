@@ -28,6 +28,10 @@ export default defineConfig({
         // Precache every build asset (all views are lazy chunks — offline needs
         // them all); fonts are hashed woff2 files, safe to cache immutably.
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
+        // public/share holds the generated share images — multi-megabyte GIFs
+        // plus their posters. They're for sending to other people, not for
+        // running the app, so they stay out of the offline bundle.
+        globIgnores: ['**/share/**'],
         navigateFallback: '/index.html',
       },
     }),

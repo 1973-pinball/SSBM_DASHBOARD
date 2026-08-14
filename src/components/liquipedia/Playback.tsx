@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { SPEEDS, type Playback } from "./usePlayback";
+import { shareLabel, type ShareState } from "./useShareGif";
 
 /** Play/pause + speed + scrubber row, with a caption for the current frame. */
 export function Playbar({
@@ -9,6 +10,8 @@ export function Playbar({
   caption,
   ticks,
   valueText,
+  onShare,
+  shareState,
 }: {
   playback: Playback;
   max: number;
@@ -18,6 +21,9 @@ export function Playbar({
   ticks?: string[];
   /** What frame `idx` actually is, spoken instead of the bare index. */
   valueText: string;
+  /** Renders the animation to a GIF at the selected speed. */
+  onShare?: () => void;
+  shareState?: ShareState;
 }) {
   const { idx, playing, speed, setSpeed, atEnd, toggle, scrub } = playback;
   const ticksId = ticks ? `${sliderLabel.replace(/\W+/g, "-")}-ticks` : undefined;
@@ -71,6 +77,22 @@ export function Playbar({
       <span className="lq-frame-label" role="status" aria-live="polite">
         {caption}
       </span>
+
+      {onShare && (
+        <button
+          className="ghost lq-share"
+          onClick={onShare}
+          disabled={shareState?.status === "working"}
+          title="Download an animated GIF of this chart, timed to the speed selected here"
+        >
+          {shareLabel(shareState ?? { status: "idle" })}
+        </button>
+      )}
+      {shareState?.status === "error" && (
+        <span className="lq-share-error" role="alert">
+          {shareState.message}
+        </span>
+      )}
     </div>
   );
 }
