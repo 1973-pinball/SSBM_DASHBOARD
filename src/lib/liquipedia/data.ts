@@ -10095,7 +10095,7 @@ export const PLAYERS: Record<string, PlayerMeta> = {
     "country": "NL"
   },
   "Hungrybox": {
-    "earningsUsd": null,
+    "earningsUsd": 435367,
     "mains": [
       "Jigglypuff"
     ]
@@ -10132,13 +10132,13 @@ export const PLAYERS: Record<string, PlayerMeta> = {
     "country": "US"
   },
   "Zain": {
-    "earningsUsd": null,
+    "earningsUsd": 204949,
     "mains": [
       "Marth"
     ]
   },
   "Wizzrobe": {
-    "earningsUsd": null,
+    "earningsUsd": 90542,
     "mains": [
       "Captain Falcon"
     ]
@@ -10179,19 +10179,19 @@ export const PLAYERS: Record<string, PlayerMeta> = {
     "country": "JP"
   },
   "Jmook": {
-    "earningsUsd": null,
+    "earningsUsd": 67445,
     "mains": [
       "Sheik"
     ]
   },
   "moky": {
-    "earningsUsd": null,
+    "earningsUsd": 40985,
     "mains": [
       "Fox"
     ]
   },
   "lloD": {
-    "earningsUsd": null,
+    "earningsUsd": 19459,
     "mains": [
       "Peach"
     ]
