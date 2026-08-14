@@ -13,16 +13,17 @@ import { Stock } from "./Stock";
 const ROW_H = 30;
 const PLAY_MS = 750; // editions are sparse, so each one holds longer than a major
 
-// ---------------- Stacked area: composition over time ----------------
+// ---------------- Clustered bars: composition over time ----------------
 
-/** Named characters + Other, one stacked bar per edition — the dominance picture. */
+/** A cluster of character bars per ranking edition — the dominance picture. */
 export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
   const rows = useMemo(() => compositionSeries(comps), [comps]);
   const byLabel = useMemo(() => new Map(comps.map((c) => [String(c.edition.year), c])), [comps]);
   const totals = useMemo(() => new Map(rows.map((r) => [r.label, r.total])), [rows]);
-  // Bars carry shares, not head-counts: a few editions rank 101–104 players,
-  // and only a normalized stack tops out at exactly 100.
-  const chartData = useMemo(() => rows.map((r) => ({ label: r.label, ...r.shares })), [rows]);
+  // Clustered bars carry head-counts. Shares only earned their keep while the
+  // bars were stacked and had to top out at exactly 100; side by side, "28
+  // players mained Fox" reads better than "28% of the list did".
+  const chartData = useMemo(() => rows.map((r) => ({ label: r.label, ...r.values })), [rows]);
   if (rows.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
 
   const series = [...CHAR_STACK_ORDER, OTHER_CHAR];
@@ -38,18 +39,13 @@ export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
           </span>
         ))}
       </div>
-      <ResponsiveContainer width="100%" height={300}>
-        <BarChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: -20 }}>
+      <ResponsiveContainer width="100%" height={320}>
+        {/* barCategoryGap separates the year clusters; barGap keeps the bars
+            inside one cluster touching, so a cluster reads as a single group. */}
+        <BarChart data={chartData} margin={{ top: 6, right: 12, bottom: 0, left: -20 }} barCategoryGap="22%" barGap={1}>
           <CartesianGrid {...gridStyle} />
           <XAxis dataKey="label" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
-          <YAxis
-            tick={axisStyle}
-            tickLine={false}
-            axisLine={false}
-            domain={[0, 100]}
-            ticks={[0, 25, 50, 75, 100]}
-            tickFormatter={(v: number) => `${v}`}
-          />
+          <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
           <Tooltip
             {...tooltipStyle}
             cursor={{ fill: "rgba(143, 127, 247, 0.08)" }}
@@ -78,14 +74,14 @@ export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
             }}
           />
           {series.map((c) => (
-            <Bar key={c} dataKey={c} stackId="chars" fill={charColor(c)} isAnimationActive={false} />
+            <Bar key={c} dataKey={c} fill={charColor(c)} isAnimationActive={false} />
           ))}
         </BarChart>
       </ResponsiveContainer>
       <div className="hint">
-        One bar per ranking edition, split by primary main and scaled to 100 — a few editions rank 101–104 players
-        because of ties, so the axis is share of the list rather than raw head-count (hover for the real numbers).
-        Bars are evenly spaced: there were no rankings in 2020–21.
+        A cluster per ranking edition, one bar per character, counting players by primary main. Editions rank 100–104
+        players (ties), so counts are near-enough comparable across years — hover for the exact list size. Clusters are
+        evenly spaced: there were no rankings in 2020–21.
       </div>
     </>
   );

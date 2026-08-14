@@ -11,12 +11,12 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
                           React dashboard ◄── aggregation ◄── IndexedDB (Dexie)
 ```
 
-- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across `hardwareConcurrency` web workers. Each game is reduced to a ~1–2 KB `GameRecord`; frame data is discarded.
+- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one web worker per core, capped at 8. Each game is reduced to a ~1–2 KB `GameRecord`; frame data is discarded.
 - **Cache** (`src/lib/db.ts`): records persist in IndexedDB keyed on `path|size|mtime`, so repeat visits only parse new files. Corrupt files get tombstones so they aren't retried every visit.
 - **Identity** (`src/lib/stats.ts`): games store both players neutrally; "you" is inferred as the connect code appearing in the most games, confirmed once, and changeable without a re-parse. Multiple codes (alts) are supported.
 - **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates (still visible in the game log).
 - **Views**: Overview (KPIs, rolling win rate, by-character table, weekly volume, plus an exportable share-card PNG), Matchups (character × character matrix), Stages, Opponents, Sessions (per-session W/L, fatigue and tilt tables), Execution (L-cancel %, openings/kill, damage/opening, inputs/min), Insights (logistic-regression win-factor model + coaching hints), Records (personal bests: streaks, fastest win, nemesis), and a Game log with CSV export. 2v2 games get their own consolidated Teams view (team-level W/L, teammate breakdowns) via the singles/teams filter switch.
-- **Liquipedia**: one tab steps outside your own replays to cover competitive Melee history — majors per year by tier, an animated race of major titles ending in the all-time champions table with career winnings, and top-100 character composition over every SSBMRank edition, including which player first put each character on the board. The dataset is a bundled snapshot (see [Scene data](#scene-data-the-liquipedia-tab)), so it works offline like the rest of the app.
+- **Liquipedia**: one view steps outside your own replays to cover competitive Melee history — majors per year by tier, an animated race of major titles ending in the all-time champions table, and top-100 character composition over every SSBMRank edition, including which player first put each character on the board. It needs no replays, so it's reachable straight from the landing page as well as from a dashboard tab. The dataset is a bundled snapshot (see [Scene data](#scene-data-the-liquipedia-tab)), so it works offline like the rest of the app.
 - **Installable PWA**: the full app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
 
 ## Development
@@ -45,7 +45,14 @@ Both animated charts also have a **Share GIF** button that exports the animation
 node scripts/render-liquipedia-assets.mjs
 ```
 
-A monthly GitHub Action runs the refresh and the asset render, and commits any change, so each month picks up new majors and any newly published ranking edition. The script is append-only — it adds majors dated after the snapshot and editions not already present, never rewriting existing rows — and it rate-limits itself; if Liquipedia throttles the run it exits 2, leaves the file untouched, and the next run tries again.
+A weekly GitHub Action runs the refresh and the asset render and commits anything that changed, so new majors and each newly published year-end ranking edition arrive on their own (SSBMRank's mid-season lists are skipped deliberately, so a season isn't counted twice). The refresh is append-only — it adds majors and editions that aren't already present and never rewrites existing rows — and it rate-limits itself hard; if Liquipedia throttles a run it exits 2, leaves the file untouched, and the next run tries again. It also revisits any player whose winnings are still unknown, so a page that was unreachable one week gets filled in later.
+
+Two things the tab counts deliberately:
+
+- **Offline majors only.** Liquipedia lists a venue per event, and the 2020–21 netplay era put 16 online events on the majors list — including individual weeks of online leagues, which sat beside Genesis as equal titles and inflated that era's champions. They're excluded from every total, the tab says so at the top, and the rows stay in the dataset flagged `online: true` so the choice stays auditable.
+- **Winnings are all-Smash.** Liquipedia's "approx. total winnings" spans every Smash title a player competed in, and there's no per-game breakdown to quote, so the column is labelled *All-Smash career winnings* rather than implying Melee prize money.
+
+When a parser stops finding something, the figures usually moved into rendered HTML rather than the page source. `scripts/inspect-liquipedia-page.mjs` prints the real markup around a match; the **Inspect Liquipedia page** workflow runs it from a GitHub runner, which matters because Liquipedia rate-limits a development machine for hours after any burst of requests.
 
 ## Cloud sync (optional)
 
