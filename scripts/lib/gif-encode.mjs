@@ -128,6 +128,23 @@ function paletteFromHistogram(hist) {
   return palette;
 }
 
+/**
+ * Which frames to keep so an animation stays under `maxFrames`, always
+ * including the last one — the final frame is the punchline (it's the one held
+ * on the loop), and a plain stride walk drops it whenever the count isn't a
+ * multiple of the stride.
+ *
+ * Shared so the in-app export and the deploy-time render sample identically;
+ * they used to disagree, and the exported GIF quietly ended a step early.
+ */
+export function sampleFrameIndices(count, maxFrames) {
+  const stride = count > maxFrames ? Math.ceil(count / maxFrames) : 1;
+  const indices = [];
+  for (let i = 0; i < count; i += stride) indices.push(i);
+  if (indices[indices.length - 1] !== count - 1) indices.push(count - 1);
+  return { indices, stride };
+}
+
 const tick = () => new Promise((r) => setTimeout(r, 0));
 
 /**

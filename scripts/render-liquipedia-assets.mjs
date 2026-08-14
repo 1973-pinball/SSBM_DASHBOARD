@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { encodeGifStreamed } from "./lib/gif-encode.mjs";
+import { encodeGifStreamed, sampleFrameIndices } from "./lib/gif-encode.mjs";
 import { CANVAS, drawCharFrame, drawRaceFrame } from "./lib/gif-draw.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -164,8 +164,8 @@ async function main() {
   // Sampling every other tournament and doubling the hold keeps the artwork
   // and the running time identical at half the bytes. The in-app Share button
   // applies the same rule, so the two stay identical.
-  const raceStride = race.length > 150 ? 2 : 1;
-  const raceSampled = race.filter((_, i) => i % raceStride === 0 || i === race.length - 1);
+  const { indices: raceIndices, stride: raceStride } = sampleFrameIndices(race.length, 150);
+  const raceSampled = raceIndices.map((i) => race[i]);
   const raceOut = await renderGif({
     frames: raceSampled,
     draw: drawRaceFrame,

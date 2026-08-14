@@ -25,6 +25,7 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
 npm install
 npm run dev      # dev server
 npm run build    # type-check + production build
+npm run assets   # render the share images into public/share (gitignored)
 ```
 
 No replays handy? The landing page has a demo-data mode (deterministic synthetic year of a Falco player's netplay).
@@ -63,7 +64,7 @@ node scripts/rebuild-liquipedia.mjs           # keep known winnings
 node scripts/rebuild-liquipedia.mjs --force   # re-fetch player pages too
 ```
 
-It's manual on purpose: a full run is one request per major winner, serialized 30 seconds apart, so roughly fifteen minutes.
+It's manual on purpose. Without `--force` it reuses every player whose winnings are already known, so it fetches only the two index pages and finishes in under a minute. With `--force` it makes two requests per champion — winnings from the rendered page, mains from the source — and every request is spaced 30 seconds apart, so about half an hour for the current 25 champions.
 
 When a parser stops finding something, the figures usually moved into rendered HTML rather than the page source. `scripts/inspect-liquipedia-page.mjs` prints the real markup around a match; the **Inspect Liquipedia page** workflow runs it from a GitHub runner, which matters because Liquipedia rate-limits a development machine for hours after any burst of requests.
 

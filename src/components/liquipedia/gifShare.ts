@@ -62,7 +62,7 @@ export async function loadIcons(entries: [key: string, charId: number][]): Promi
 export async function buildShareFiles(opts: BuildGifOptions): Promise<ShareFiles> {
   const { frameCount, draw, stepMs, finalHoldMs = 3000, filename, onProgress } = opts;
   // Both pulled in on demand so the encoder never lands in the tab's chunk.
-  const [{ encodeGifStreamed }, { CANVAS }] = await Promise.all([
+  const [{ encodeGifStreamed, sampleFrameIndices }, { CANVAS }] = await Promise.all([
     import("../../../scripts/lib/gif-encode.mjs"),
     import("../../../scripts/lib/gif-draw.mjs"),
   ]);
@@ -73,13 +73,14 @@ export async function buildShareFiles(opts: BuildGifOptions): Promise<ShareFiles
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("canvas 2d context unavailable");
 
-  // A long race is ~225 steps; at one frame each that's a 4.5 MB GIF, slow to
+  // A long race is ~210 steps; at one frame each that's a 4.5 MB GIF, slow to
   // build on a phone and awkward to send. Taking every other step and doubling
-  // the hold keeps the running time and pacing identical at half the size, and
-  // matches what the committed asset does.
-  const stride = frameCount > MAX_FRAMES ? Math.ceil(frameCount / MAX_FRAMES) : 1;
-  const indexOf = (n: number) => Math.min(frameCount - 1, n * stride);
-  const count = Math.ceil(frameCount / stride);
+  // the hold keeps the running time and pacing identical at half the size. The
+  // sampling is shared with the deploy-time render so both produce the same
+  // frames — and it always keeps the last one, which is what the loop holds on.
+  const { indices, stride } = sampleFrameIndices(frameCount, MAX_FRAMES);
+  const count = indices.length;
+  const indexOf = (n: number) => indices[n] ?? frameCount - 1;
 
   // GIF delays are centiseconds; most decoders treat anything under 2 as 10.
   const stepCs = Math.max(2, Math.round((stepMs * stride) / 10));

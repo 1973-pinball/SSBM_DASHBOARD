@@ -5,10 +5,11 @@
 // a parser fix or a schema change can't reach rows already in the file. This
 // is the escape hatch: it re-derives the whole dataset from the source pages.
 //
-// It is deliberately not automated. A full run makes one request per major
-// winner plus two page fetches, all serialized 30s apart (~15 minutes), and
-// re-fetching two dozen player pages every week to confirm figures that rarely
-// change would be rude to a wiki that already rate-limits us.
+// It is deliberately not automated. --force makes two requests per champion
+// (winnings from the rendered page, mains from the source) plus the two index
+// pages, all serialized 30s apart — about half an hour at today's 25 champions.
+// Re-fetching two dozen player pages weekly to confirm figures that rarely move
+// would be rude to a wiki that already rate-limits us.
 //
 //   node scripts/rebuild-liquipedia.mjs            # keep known winnings
 //   node scripts/rebuild-liquipedia.mjs --force    # re-fetch every player too

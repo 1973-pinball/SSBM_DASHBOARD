@@ -16,3 +16,6 @@ export interface EncodeGifOptions {
 }
 
 export function encodeGifStreamed(opts: EncodeGifOptions): Promise<Uint8Array>;
+
+/** Frame indices keeping an animation under `maxFrames`, last frame included. */
+export function sampleFrameIndices(count: number, maxFrames: number): { indices: number[]; stride: number };
