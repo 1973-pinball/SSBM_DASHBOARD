@@ -16,6 +16,7 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
 - **Identity** (`src/lib/stats.ts`): games store both players neutrally; "you" is inferred as the connect code appearing in the most games, confirmed once, and changeable without a re-parse. Multiple codes (alts) are supported.
 - **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates (still visible in the game log).
 - **Views**: Overview (KPIs, rolling win rate, by-character table, weekly volume, plus an exportable share-card PNG), Matchups (character × character matrix), Stages, Opponents, Sessions (per-session W/L, fatigue and tilt tables), Execution (L-cancel %, openings/kill, damage/opening, inputs/min), Insights (logistic-regression win-factor model + coaching hints), Records (personal bests: streaks, fastest win, nemesis), and a Game log with CSV export. 2v2 games get their own consolidated Teams view (team-level W/L, teammate breakdowns) via the singles/teams filter switch.
+- **Liquipedia**: one tab steps outside your own replays to cover competitive Melee history — majors per year by tier, an animated race of major titles ending in the all-time champions table with career winnings, and top-100 character composition over every SSBMRank edition, including which player first put each character on the board. The dataset is a bundled snapshot (see [Scene data](#scene-data-the-liquipedia-tab)), so it works offline like the rest of the app.
 - **Installable PWA**: the full app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
 
 ## Development
@@ -27,6 +28,18 @@ npm run build    # type-check + production build
 ```
 
 No replays handy? The landing page has a demo-data mode (deterministic synthetic year of a Falco player's netplay).
+
+## Scene data (the Liquipedia tab)
+
+The Liquipedia tab reads from `src/lib/liquipedia/data.ts`, a snapshot compiled from [Liquipedia's Smash wiki](https://liquipedia.net/smash) (content licensed [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)) — primarily [Major Tournaments/Melee](https://liquipedia.net/smash/Major_Tournaments/Melee), the [SSBMRank](https://liquipedia.net/smash/SSBMRank) editions, and individual player pages for career winnings. Every source is listed in-app at the bottom of the tab.
+
+It ships in the bundle rather than being fetched at runtime: the app has no backend, its CSP allows only itself and Supabase, and the tab has to work offline. Refreshing it is therefore a commit:
+
+```bash
+node scripts/refresh-liquipedia.mjs
+```
+
+A monthly GitHub Action runs exactly that and commits any change, so each month picks up new majors and any newly published ranking edition. The script is append-only — it adds majors dated after the snapshot and editions not already present, never rewriting existing rows — and it rate-limits itself; if Liquipedia throttles the run it exits 2, leaves the file untouched, and the next run tries again.
 
 ## Cloud sync (optional)
 

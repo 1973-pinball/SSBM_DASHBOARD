@@ -1,0 +1,69 @@
+name: Refresh Liquipedia snapshot
+
+# Monthly top-up of the bundled scene-history dataset: new majors since the
+# last snapshot, plus any newly published SSBMRank edition. The data ships in
+# the bundle (the app has no backend and a self+Supabase CSP), so "publishing"
+# is a commit to main — Vercel redeploys from there.
+on:
+  schedule:
+    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
+  workflow_dispatch: # manual run from the Actions tab
+
+permissions:
+  contents: write
+
+concurrency:
+  group: liquipedia-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      # Fetches only what's missing (majors dated after the snapshot, editions
+      # not yet present) and rate-limits itself. Exit 2 means Liquipedia was
+      # blocking us: data.ts is untouched, so treat it as "nothing to do" and
+      # let next month's run pick it up rather than paging anyone with a red X.
+      - name: Fetch new majors and rankings
+        id: refresh
+        run: |
+          set +e
+          node scripts/refresh-liquipedia.mjs
+          code=$?
+          if [ $code -eq 2 ]; then
+            echo "::warning::Liquipedia rate-limited this run; snapshot unchanged."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          exit $code
+        env:
+          LIQUIPEDIA_CONTACT: ${{ vars.LIQUIPEDIA_CONTACT || 'info.studio.pinball@gmail.com' }}
+
+      # A broken dataset must never reach main.
+      - name: Type-check and build
+        if: steps.refresh.outputs.changed == 'true'
+        run: npm run build
+
+      # SUMMARY is built from wiki-derived text (event and edition names), so it
+      # is passed through the environment rather than interpolated into the
+      # script — a ${{ }} expansion would let a wiki edit run commands in a job
+      # that holds contents:write.
+      - name: Commit the updated snapshot
+        if: steps.refresh.outputs.changed == 'true'
+        env:
+          SUMMARY: ${{ steps.refresh.outputs.summary }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/liquipedia/data.ts
+          git commit -m "Liquipedia snapshot: $SUMMARY"
+          git push

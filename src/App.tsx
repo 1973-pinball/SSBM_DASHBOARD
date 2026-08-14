@@ -26,6 +26,7 @@ const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: 
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
 const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
 const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
+const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
 
 /**
  * Last line of defense for lazy-chunk failures: main.tsx auto-reloads once on
@@ -51,7 +52,7 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log";
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log" | "liquipedia";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -63,6 +64,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "insights", label: "Insights" },
   { id: "records", label: "Records" },
   { id: "log", label: "Game log" },
+  { id: "liquipedia", label: "Liquipedia" },
 ];
 
 export default function App() {
@@ -243,6 +245,7 @@ export default function App() {
       void import("./components/Sessions");
       void import("./components/Records");
       void import("./components/MetricsGuide");
+      void import("./components/liquipedia/Liquipedia");
     };
     // Optional-chained: Safari didn't ship requestIdleCallback until late.
     const ric = window.requestIdleCallback?.bind(window);
@@ -496,6 +499,7 @@ export default function App() {
           {tab === "insights" && <Insights games={filtered} />}
           {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
           {tab === "log" && <GameLog games={filtered} />}
+          {tab === "liquipedia" && <Liquipedia />}
         </>
           )}
           </Suspense>

@@ -490,6 +490,232 @@ tr.detail-row td {
   .sc-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
+/* ---- Liquipedia tab ---- */
+.lq-scope-note {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--faint);
+  margin: -6px 0 10px;
+}
+.lq-stock { image-rendering: pixelated; vertical-align: -3px; flex-shrink: 0; }
+.lq-mains { display: inline-flex; gap: 4px; align-items: center; }
+
+.lq-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+.lq-controls input[type="range"] {
+  flex: 1;
+  min-width: 160px;
+  accent-color: var(--accent);
+}
+.lq-play { min-width: 104px; }
+
+/* Segmented speed selector */
+.lq-speeds { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.lq-speed {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-data);
+  font-size: 12px;
+  padding: 6px 9px;
+  border-right: 1px solid var(--line);
+}
+.lq-speed:last-child { border-right: none; }
+.lq-speed:hover { color: var(--text); background: var(--panel-2); }
+.lq-speed.on { background: var(--accent-dim); color: var(--text); }
+.lq-frame-label {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--muted);
+  min-width: 240px;
+}
+.lq-frame-label b { color: var(--text); }
+
+/* Animated bar lists (majors race + character explorer). Rows are absolutely
+   positioned and slide/resize via transform/width transitions. */
+.lq-race { position: relative; }
+.lq-race-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 30px;
+  transition: transform 0.5s ease;
+}
+.lq-race-rank {
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--faint);
+  width: 18px;
+  text-align: right;
+  flex-shrink: 0;
+}
+.lq-race-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-data);
+  font-size: 12.5px;
+  width: 150px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lq-race-track {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+/* Bars measure against this fixed slice of the row, never against whatever the
+   labels beside them leave over — otherwise the longest bar is the one that
+   gets flex-shrunk, and the leader looks tied with second place. */
+.lq-race-barwrap {
+  flex: 0 0 62%;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.lq-race-track--wide .lq-race-barwrap { flex-basis: 84%; }
+.lq-race-bar {
+  display: inline-block;
+  flex: 0 0 auto;
+  height: 16px;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  transition: width 0.5s ease;
+  min-width: 2px;
+}
+.lq-race-count {
+  font-family: var(--font-data);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.lq-race-note {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.lq-new {
+  font-family: var(--font-data);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--gold);
+  border: 1px solid var(--gold);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 2px;
+}
+.lq-subhead {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 18px 0 8px;
+}
+.lq-dim { color: var(--faint); }
+
+/* Legend + custom tooltips for the composition charts */
+.lq-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  margin-bottom: 8px;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.lq-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.lq-legend .dot, .lq-tip .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.lq-tip { padding: 8px 10px; max-width: 340px; }
+.lq-tip-title { color: var(--text); font-weight: 600; margin-bottom: 4px; }
+.lq-tip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+.lq-tip-char { width: 92px; overflow: hidden; text-overflow: ellipsis; }
+.lq-tip-event { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.lq-tip-row b { color: var(--text); }
+.lq-tip-top { color: var(--faint); }
+
+/* Trailblazer timeline: a year rail with breakthrough chips beside it */
+.lq-timeline { list-style: none; margin: 0; padding: 0; }
+.lq-timeline li {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(52, 48, 90, 0.45);
+}
+.lq-timeline li:last-child { border-bottom: none; }
+.lq-tl-year {
+  font-family: var(--font-data);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent);
+  width: 46px;
+  flex-shrink: 0;
+  padding-top: 3px;
+}
+.lq-tl-items { display: flex; flex-wrap: wrap; gap: 6px; }
+.lq-tl-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 11px 3px 6px;
+  font-size: 12px;
+  font-family: var(--font-data);
+  color: var(--muted);
+}
+.lq-tl-chip b { color: var(--text); font-weight: 600; }
+.lq-tl-who { color: var(--text); }
+.lq-tl-kind {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+/* A debut is the rarest event, so it gets the gold attention treatment. */
+.lq-tl-debut { border-color: var(--gold); }
+.lq-tl-debut .lq-tl-kind { color: var(--gold); }
+.lq-tl-top10 { border-color: var(--accent-dim); }
+.lq-tl-rank { color: var(--faint); font-size: 11px; }
+.lq-tl-first { border-color: var(--gold); }
+.lq-tl-first .lq-tl-rank { color: var(--gold); }
+
+.lq-sources { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 4px; }
+.lq-sources a { color: var(--accent); text-decoration: none; }
+.lq-sources a:hover { text-decoration: underline; }
+
 /* ---- Site footer ---- */
 .site-footer {
   display: flex;
