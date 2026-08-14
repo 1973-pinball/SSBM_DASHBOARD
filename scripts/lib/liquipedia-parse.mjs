@@ -190,6 +190,7 @@ export function parseMajorsHtml(html) {
       let date = null;
       let winner = null;
       let runnerUp = null;
+      let location = null;
       let winnerChars = [];
       for (const { cls, inner } of rowCells(row)) {
         if (cls.includes("Tournament") && name === null) {
@@ -198,6 +199,10 @@ export function parseMajorsHtml(html) {
           name = last ? last[1].trim() : stripTags(inner);
         } else if (cls.includes("EventDetails-Left-55") && date === null) {
           date = parseEventDate(stripTags(inner), head.year);
+        } else if (cls.includes("EventDetails-Right-60") && location === null) {
+          // Venue column: a city for offline events, the literal "Online" for
+          // the netplay-era ones.
+          location = stripTags(inner);
         } else if (cls.includes("FirstPlace")) {
           const p = placement(inner);
           winner = p.player;
@@ -216,6 +221,9 @@ export function parseMajorsHtml(html) {
         winner: displayName(winner),
         ...(runnerUp && !/^(TBD|TBA)$/i.test(runnerUp) ? { runnerUp: displayName(runnerUp) } : {}),
         tier,
+        // Kept on the record rather than dropped, so excluding netplay events
+        // downstream stays an auditable choice instead of a silent omission.
+        ...(/\bonline\b/i.test(location ?? "") ? { online: true } : {}),
         ...(winnerChars.length ? { winnerChars } : {}),
       });
     }

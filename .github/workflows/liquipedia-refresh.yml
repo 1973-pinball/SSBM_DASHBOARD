@@ -1,12 +1,14 @@
 name: Refresh Liquipedia snapshot
 
-# Monthly top-up of the bundled scene-history dataset: new majors since the
-# last snapshot, plus any newly published SSBMRank edition. The data ships in
-# the bundle (the app has no backend and a self+Supabase CSP), so "publishing"
-# is a commit to main — Vercel redeploys from there.
+# Weekly top-up of the bundled scene-history dataset: new majors since the
+# last snapshot, plus any newly published SSBMRank edition. Majors land more
+# often than monthly, and a run with nothing new costs one request and commits
+# nothing. The data ships in the bundle (the app has no backend and a
+# self+Supabase CSP), so "publishing" is a commit to main — Vercel redeploys
+# from there.
 on:
   schedule:
-    - cron: "0 9 1 * *" # 09:00 UTC on the 1st of each month
+    - cron: "0 9 * * 1" # 09:00 UTC every Monday
   workflow_dispatch: # manual run from the Actions tab
 
 permissions:
@@ -20,9 +22,9 @@ jobs:
   refresh:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm

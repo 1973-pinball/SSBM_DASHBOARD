@@ -76,6 +76,9 @@ export default function App() {
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [isDemo, setIsDemo] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  // Scene history stands alone: it reads no replays, so it must be reachable
+  // straight from the landing page rather than only as a dashboard tab.
+  const [browsingHistory, setBrowsingHistory] = useState(false);
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
@@ -371,13 +374,20 @@ export default function App() {
 
   return (
     <div className="shell">
-      {phase !== "landing" && (
+      {(browsingHistory || phase !== "landing") && (
         <div className="topbar">
           <div className="brand">
             <h1>SSBM Dashboard</h1>
             {isDemo && <span className="tag">demo data</span>}
           </div>
-          {phase === "dashboard" && (
+          {browsingHistory && (
+            <div className="identity">
+              <button className="ghost" onClick={() => setBrowsingHistory(false)}>
+                {phase === "dashboard" ? "Back to my stats" : "Back"}
+              </button>
+            </div>
+          )}
+          {!browsingHistory && phase === "dashboard" && (
             <div className="identity">
               <b>{myCodes.join(", ") || "—"}</b> ·{" "}
               {(showTeams ? resolvedTeams.length : resolved.length).toLocaleString()} {showTeams ? "2v2 games" : "games"}
@@ -417,22 +427,31 @@ export default function App() {
         </div>
       )}
 
-      {phase === "landing" && (
+      {browsingHistory && (
+        <ViewErrorBoundary>
+          <Suspense fallback={<div className="empty-note">Loading…</div>}>
+            <Liquipedia />
+          </Suspense>
+        </ViewErrorBoundary>
+      )}
+
+      {!browsingHistory && phase === "landing" && (
         <Landing
           onPickDirectory={onPickDirectory}
           onPickFiles={onPickFiles}
           onDemo={onDemo}
+          onBrowseHistory={() => setBrowsingHistory(true)}
           supportsFsAccess={supportsFsAccess}
           onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
           cloudRestoring={cloudRestoring}
         />
       )}
 
-      {phase === "parsing" && progress && <ProgressBar p={progress} />}
+      {!browsingHistory && phase === "parsing" && progress && <ProgressBar p={progress} />}
 
-      {phase === "identity" && <IdentityPicker candidates={candidates} onConfirm={confirmIdentity} />}
+      {!browsingHistory && phase === "identity" && <IdentityPicker candidates={candidates} onConfirm={confirmIdentity} />}
 
-      {phase === "dashboard" && (
+      {!browsingHistory && phase === "dashboard" && (
         <>
           <FilterBar
             filters={filters}

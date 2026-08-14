@@ -1,0 +1,36 @@
+name: Inspect Liquipedia page
+
+# Manual maintenance tool. The refresh parsers read rendered HTML, and when a
+# figure moves or a template changes, the fastest way to see the real markup is
+# to print it — from a runner, since Liquipedia rate-limits a developer machine
+# for hours after any burst of requests. Read-only: fetches one page, commits
+# nothing.
+on:
+  workflow_dispatch:
+    inputs:
+      page:
+        description: "Liquipedia page title (e.g. Hungrybox)"
+        required: true
+        default: "Hungrybox"
+      needle:
+        description: "Case-insensitive regex to locate in the rendered page"
+        required: false
+        default: "winnings|earnings"
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - name: Print matching markup
+        run: node scripts/inspect-liquipedia-page.mjs "$PAGE" "$NEEDLE"
+        env:
+          # Via the environment, never string-interpolated into the shell.
+          PAGE: ${{ inputs.page }}
+          NEEDLE: ${{ inputs.needle }}

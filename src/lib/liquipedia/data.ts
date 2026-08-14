@@ -1200,7 +1200,8 @@ export const MAJORS: Major[] = [
     "date": "2020-07-19",
     "winner": "n0ne",
     "runnerUp": "Cody Schwab",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Ludwig Ahgren Championship Series 2",
@@ -1208,7 +1209,8 @@ export const MAJORS: Major[] = [
     "date": "2020-07-26",
     "winner": "Zain",
     "runnerUp": "Mang0",
-    "tier": "supermajor"
+    "tier": "supermajor",
+    "online": true
   },
   {
     "name": "THE CLG MIXUP",
@@ -1216,7 +1218,8 @@ export const MAJORS: Major[] = [
     "date": "2020-09-26",
     "winner": "Mang0",
     "runnerUp": "Cody Schwab",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Slippi Champions League - Season 1 Week 1",
@@ -1224,7 +1227,8 @@ export const MAJORS: Major[] = [
     "date": "2020-10-11",
     "winner": "Mang0",
     "runnerUp": "Zain",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Slippi Champions League - Season 1 Week 2",
@@ -1232,7 +1236,8 @@ export const MAJORS: Major[] = [
     "date": "2020-10-18",
     "winner": "Zain",
     "runnerUp": "n0ne",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Slippi Champions League - Season 1 Week 3",
@@ -1240,7 +1245,8 @@ export const MAJORS: Major[] = [
     "date": "2020-10-25",
     "winner": "Zain",
     "runnerUp": "Captain Faceroll",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Slippi Champions League - Season 1 Week 4",
@@ -1248,7 +1254,8 @@ export const MAJORS: Major[] = [
     "date": "2020-10-31",
     "winner": "Zain",
     "runnerUp": "Spark",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Smash Summit 10 Online",
@@ -1256,7 +1263,8 @@ export const MAJORS: Major[] = [
     "date": "2020-11-22",
     "winner": "Zain",
     "runnerUp": "Mang0",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Ludwig Ahgren Championship Series 3",
@@ -1264,7 +1272,8 @@ export const MAJORS: Major[] = [
     "date": "2020-12-20",
     "winner": "Mang0",
     "runnerUp": "Cody Schwab",
-    "tier": "supermajor"
+    "tier": "supermajor",
+    "online": true
   },
   {
     "name": "Four Loko Fight Night",
@@ -1272,7 +1281,8 @@ export const MAJORS: Major[] = [
     "date": "2021-03-07",
     "winner": "Zain",
     "runnerUp": "S2J",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Galint Melee Open: Spring Edition",
@@ -1280,7 +1290,8 @@ export const MAJORS: Major[] = [
     "date": "2021-03-21",
     "winner": "S2J",
     "runnerUp": "Cody Schwab",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Summit Champions League - Season 2 Week 1",
@@ -1288,7 +1299,8 @@ export const MAJORS: Major[] = [
     "date": "2021-04-11",
     "winner": "Mang0",
     "runnerUp": "Zain",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Summit Champions League - Season 2 Week 2",
@@ -1296,7 +1308,8 @@ export const MAJORS: Major[] = [
     "date": "2021-04-18",
     "winner": "Zain",
     "runnerUp": "Mang0",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Summit Champions League - Season 2 Week 3",
@@ -1304,7 +1317,8 @@ export const MAJORS: Major[] = [
     "date": "2021-05-02",
     "winner": "Wizzrobe",
     "runnerUp": "Zain",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Summit Champions League - Season 2 Week 4",
@@ -1312,7 +1326,8 @@ export const MAJORS: Major[] = [
     "date": "2021-05-09",
     "winner": "Zain",
     "runnerUp": "Mang0",
-    "tier": "major"
+    "tier": "major",
+    "online": true
   },
   {
     "name": "Smash Summit 11",
@@ -1368,7 +1383,8 @@ export const MAJORS: Major[] = [
     "date": "2022-01-30",
     "winner": "Zain",
     "runnerUp": "Mang0",
-    "tier": "supermajor"
+    "tier": "supermajor",
+    "online": true
   },
   {
     "name": "GENESIS 8",

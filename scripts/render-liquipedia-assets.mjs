@@ -41,7 +41,9 @@ const block = (name) => {
   if (!m) throw new Error(`could not locate ${name} in ${DATA_PATH}`);
   return JSON.parse(m[1]);
 };
-const majors = block("MAJORS");
+// Offline majors only, matching the tab: netplay-era events are excluded from
+// every total, so an exported image must not disagree with the page.
+const majors = block("MAJORS").filter((m) => !m.online);
 const editions = block("RANKING_EDITIONS");
 const players = block("PLAYERS");
 if (majors.length === 0 || editions.length === 0) throw new Error("dataset is empty — nothing to render");

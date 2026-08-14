@@ -5,13 +5,23 @@ interface Props {
   onPickDirectory: () => void;
   onPickFiles: (files: FileList) => void;
   onDemo: () => void;
+  /** Opens the scene-history tab, which needs no replays at all. */
+  onBrowseHistory: () => void;
   supportsFsAccess: boolean;
   /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
   onCloudSignIn: (() => void) | null;
   cloudRestoring: boolean;
 }
 
-export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess, onCloudSignIn, cloudRestoring }: Props) {
+export function Landing({
+  onPickDirectory,
+  onPickFiles,
+  onDemo,
+  onBrowseHistory,
+  supportsFsAccess,
+  onCloudSignIn,
+  cloudRestoring,
+}: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
@@ -57,6 +67,12 @@ export function Landing({ onPickDirectory, onPickFiles, onDemo, supportsFsAccess
         {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => e.target.files && onPickFiles(e.target.files)}
       />
+      {/* Nothing on the history tab touches replays, so it shouldn't sit
+          behind the folder picker or demo mode. */}
+      <div className="landing-aside">
+        No replays to hand? <button className="linky" onClick={onBrowseHistory}>Browse Melee tournament history</button> —
+        every major since 2003 and the top 100 by character, no setup needed.
+      </div>
       <div className="hint" style={{ marginTop: 10 }}>
         Slippi saves replays to <span style={{ fontFamily: "var(--font-data)" }}>Documents\Slippi</span> by default
         (<span style={{ fontFamily: "var(--font-data)" }}>~/Slippi</span> on Mac/Linux) — the picker opens in Documents

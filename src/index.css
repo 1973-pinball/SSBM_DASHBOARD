@@ -425,6 +425,25 @@ tr.detail-row td {
 /* ---- Landing folder hint ---- */
 .landing .hint { font-size: 12px; color: var(--faint); }
 
+/* Secondary entry point: scene history needs no replays at all. */
+.landing-aside {
+  font-size: 13px;
+  color: var(--muted);
+  max-width: 520px;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+button.linky {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+button.linky:hover { color: #a094ff; }
+
 /* ---- Coach panel ---- */
 .coach-list { margin: 0; padding-left: 26px; display: flex; flex-direction: column; gap: 12px; }
 .coach-list li::marker { color: var(--accent); font-family: var(--font-data); font-weight: 600; }

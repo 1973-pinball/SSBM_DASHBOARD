@@ -13,6 +13,11 @@ export interface Major {
   runnerUp?: string;
   /** Liquipedia Premier/Tier-1 events are supermajors; everything else "major". */
   tier: MajorTier;
+  /**
+   * Netplay event (Liquipedia lists the venue as "Online"). Kept on the record
+   * but excluded from every total on the tab — see OFFLINE_MAJORS.
+   */
+  online?: boolean;
   note?: string;
 }
 

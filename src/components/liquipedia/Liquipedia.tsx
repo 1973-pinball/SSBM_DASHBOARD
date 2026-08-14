@@ -18,19 +18,26 @@ const TIER_COLOR = { major: "#5d51b8", supermajor: "#8f7ff7" } as const;
  * global filter bar deliberately does not apply.
  */
 export function Liquipedia() {
-  const years = useMemo(() => majorsPerYear(MAJORS), []);
+  // Netplay-era events are excluded from every total on this tab: a week of an
+  // online league isn't the same achievement as winning Genesis, and leaving
+  // them in inflated the 2020–21 champions. They stay in the dataset flagged,
+  // so the choice is visible and reversible rather than a silent omission.
+  const majors = useMemo(() => MAJORS.filter((m) => !m.online), []);
+  const onlineCount = MAJORS.length - majors.length;
+
+  const years = useMemo(() => majorsPerYear(majors), [majors]);
   const comps = useMemo(() => compositionByEdition(RANKING_EDITIONS), []);
-  const leaderboard = useMemo(() => careerLeaderboard(MAJORS, PLAYERS), []);
+  const leaderboard = useMemo(() => careerLeaderboard(majors, PLAYERS), [majors]);
   const majorsByYear = useMemo(() => {
     const m = new Map<number, Major[]>();
-    for (const major of sortedMajors(MAJORS)) {
+    for (const major of sortedMajors(majors)) {
       const list = m.get(major.year) ?? [];
       list.push(major);
       m.set(major.year, list);
     }
     return m;
-  }, []);
-  const supermajorCount = useMemo(() => MAJORS.filter((m) => m.tier === "supermajor").length, []);
+  }, [majors]);
+  const supermajorCount = useMemo(() => majors.filter((m) => m.tier === "supermajor").length, [majors]);
 
   const latest = comps[comps.length - 1];
   const topChar = latest?.chars[0];
@@ -38,15 +45,18 @@ export function Liquipedia() {
   const firstYear = comps[0]?.edition.year ?? "";
   const lastYear = latest?.edition.year ?? "";
 
-  if (MAJORS.length === 0 && RANKING_EDITIONS.length === 0) {
+  if (majors.length === 0 && RANKING_EDITIONS.length === 0) {
     return <div className="empty-note">The bundled Liquipedia dataset is empty — regenerate src/lib/liquipedia/data.ts.</div>;
   }
 
   return (
     <>
-      <div className="lq-scope-note">Scene-wide Melee history — the filter bar doesn't apply to this tab.</div>
+      <div className="lq-scope-note">
+        Scene-wide Melee history — the filter bar doesn't apply to this tab. Offline majors only:{" "}
+        {onlineCount} online events from the 2020–21 netplay era are excluded from every count below.
+      </div>
       <div className="kpi-strip">
-        <Kpi label="Majors held" value={String(MAJORS.length)} delta={`${supermajorCount} supermajors`} />
+        <Kpi label="Offline majors" value={String(majors.length)} delta={`${supermajorCount} supermajors`} />
         <Kpi label="Distinct champions" value={String(leaderboard.length)} />
         {topPlayer && <Kpi label="Most majors" value={topPlayer.player} delta={`${topPlayer.majors} titles`} />}
         {topChar && latest && (
@@ -108,13 +118,14 @@ export function Liquipedia() {
         </ResponsiveContainer>
         <div className="hint">
           Tournaments Liquipedia classifies as Melee majors; supermajors are its Premier/Tier-1 events. Hover a year for
-          the full card and each winner. 2021 is thin and 2020 leans online — the pandemic moved the circuit to Slippi.
+          the full card and each winner. 2020–21 look thin because the pandemic moved the circuit onto Slippi, and those
+          online events aren't counted here.
         </div>
       </div>
 
       <div className="panel">
         <h2>The major titles race</h2>
-        <MajorsRace majors={MAJORS} players={PLAYERS} />
+        <MajorsRace majors={majors} players={PLAYERS} />
       </div>
 
       <div className="panel">
