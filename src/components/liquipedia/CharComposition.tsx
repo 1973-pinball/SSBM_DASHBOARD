@@ -100,7 +100,8 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
   const ticks = useMemo(() => comps.map((c) => String(c.edition.year)), [comps]);
   const share = useShareGif();
 
-  const onShare = () =>
+  const onShare = () => {
+    if (share.state.status === "ready") return share.send(share.state.file);
     void share.run(async () => {
       const { drawCharFrame } = await import("../../../scripts/lib/gif-draw.mjs");
       const names = [...new Set(comps.flatMap((c) => c.chars.map((s) => s.char)))];
@@ -134,6 +135,7 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
         },
       };
     });
+  };
 
   if (comps.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
 
@@ -148,6 +150,7 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
         max={comps.length - 1}
         onShare={onShare}
         shareState={share.state}
+        onSpeedChange={share.reset}
         sliderLabel="Ranking edition"
         ticks={ticks}
         valueText={`${comp.edition.title}, ${comp.edition.entries.length} players ranked`}

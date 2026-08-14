@@ -4,11 +4,18 @@
  * painters live in scripts/lib so the weekly asset render in CI produces the
  * same artwork from the same code.
  *
+ * Building and sending are deliberately separate calls. `navigator.share()`
+ * only works while a user gesture is still live (a few seconds), and encoding
+ * a couple of hundred frames takes far longer than that — sharing at the end
+ * of the render is rejected, and the browser falls back to a download, which
+ * on iOS means a blob preview page instead of the share sheet. So the caller
+ * builds on one tap and sends on the next.
+ *
  * Everything is local: no upload, no network beyond the stock icons the app
  * already serves.
  */
 
-export interface ShareGifOptions {
+export interface BuildGifOptions {
   frameCount: number;
   /** Paint frame `i`. Called more than once per frame — keep it pure. */
   draw: (ctx: CanvasRenderingContext2D, i: number) => void;
@@ -20,9 +27,7 @@ export interface ShareGifOptions {
   onProgress?: (fraction: number) => void;
 }
 
-export type ShareOutcome = "shared" | "downloaded";
-
-/** Long animations are sampled so the file stays sendable; see shareGif. */
+/** Long animations are sampled so the file stays sendable; see buildGifFile. */
 const MAX_FRAMES = 150;
 
 /** Load the bundled stock sprites, keyed however the caller wants them. */
@@ -48,7 +53,7 @@ export async function loadIcons(entries: [key: string, charId: number][]): Promi
   return out;
 }
 
-export async function shareGif(opts: ShareGifOptions): Promise<{ bytes: number; outcome: ShareOutcome }> {
+export async function buildGifFile(opts: BuildGifOptions): Promise<File> {
   const { frameCount, draw, stepMs, finalHoldMs = 3000, filename, onProgress } = opts;
   // Both pulled in on demand so the encoder never lands in the tab's chunk.
   const [{ encodeGifStreamed }, { CANVAS }] = await Promise.all([
@@ -62,10 +67,10 @@ export async function shareGif(opts: ShareGifOptions): Promise<{ bytes: number; 
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   if (!ctx) throw new Error("canvas 2d context unavailable");
 
-  // A long race is ~225 steps; at one frame each that's a 4.5 MB GIF, which is
-  // slow to build on a phone and awkward to send. Taking every other step and
-  // doubling the hold keeps the running time and the pacing identical at half
-  // the size, and matches what the committed asset does.
+  // A long race is ~225 steps; at one frame each that's a 4.5 MB GIF, slow to
+  // build on a phone and awkward to send. Taking every other step and doubling
+  // the hold keeps the running time and pacing identical at half the size, and
+  // matches what the committed asset does.
   const stride = frameCount > MAX_FRAMES ? Math.ceil(frameCount / MAX_FRAMES) : 1;
   const indexOf = (n: number) => Math.min(frameCount - 1, n * stride);
   const count = Math.ceil(frameCount / stride);
@@ -85,31 +90,40 @@ export async function shareGif(opts: ShareGifOptions): Promise<{ bytes: number; 
     onProgress,
   });
 
-  const blob = new Blob([gif as BlobPart], { type: "image/gif" });
-  const file = new File([blob], filename, { type: "image/gif" });
+  return new File([gif as BlobPart], filename, { type: "image/gif" });
+}
 
-  // On a phone the useful destination is the share sheet — Messages, AirDrop,
-  // Discord — not the downloads folder. canShare({files}) is the only reliable
-  // test; Safari in particular will reject a share it can't service.
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file] });
-      return { bytes: gif.length, outcome: "shared" };
-    } catch (err) {
-      // Dismissing the sheet throws AbortError — that's a choice, not a fault.
-      if (err instanceof DOMException && err.name === "AbortError") return { bytes: gif.length, outcome: "shared" };
-      // Anything else: fall through and save it instead.
-    }
+/**
+ * Whether this browser will hand the file to the OS share sheet. False on
+ * desktop browsers, which is why they download instead — canShare is the only
+ * reliable test, since Safari rejects shares it can't service.
+ */
+export const canShareFile = (file: File): boolean => navigator.canShare?.({ files: [file] }) ?? false;
+
+/**
+ * Open the share sheet. MUST be called straight from a click handler with no
+ * awaits before it, or the user activation will have lapsed and iOS will
+ * reject it. Returns false if the sheet couldn't open at all.
+ */
+export async function shareFile(file: File): Promise<boolean> {
+  try {
+    await navigator.share({ files: [file] });
+    return true;
+  } catch (err) {
+    // Dismissing the sheet throws AbortError — that's a choice, not a fault.
+    if (err instanceof DOMException && err.name === "AbortError") return true;
+    return false;
   }
+}
 
-  const url = URL.createObjectURL(blob);
+export function downloadFile(file: File): void {
+  const url = URL.createObjectURL(file);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = file.name;
   document.body.appendChild(a);
   a.click();
   a.remove();
   // Revoke late: Safari cancels an in-flight download if the URL dies too soon.
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
-  return { bytes: gif.length, outcome: "downloaded" };
 }

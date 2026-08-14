@@ -559,6 +559,14 @@ button.linky:hover { color: #a094ff; }
 }
 .lq-share:hover:not(:disabled) { border-color: var(--accent); background: var(--panel-2); }
 .lq-share:disabled { opacity: 0.6; cursor: progress; }
+/* Built and waiting for the tap that actually opens the share sheet. */
+.lq-share.ready {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14102a;
+  font-weight: 600;
+}
+.lq-share.ready:hover { background: #a094ff; }
 .lq-share-error { font-size: 12px; color: var(--loss); }
 
 /* Phone layout: the caption is the only part that may take a whole line, and

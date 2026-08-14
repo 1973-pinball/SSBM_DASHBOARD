@@ -161,6 +161,7 @@ export async function encodeGifStreamed({
   // ---- pass 1: palette ----
   const hist = new Map();
   const stride = sampleStride ?? Math.max(1, Math.floor(count / 12));
+  let sampled = 0;
   for (let i = 0; i < count; i += stride) {
     const d = frameRgba(i);
     for (let p = 0; p < d.length; p += 4) {
@@ -168,7 +169,9 @@ export async function encodeGifStreamed({
       hist.set(k, (hist.get(k) ?? 0) + 1);
     }
     onProgress?.(0.12 * ((i + stride) / count));
-    await tick();
+    // Yield in batches, not per sample: a short animation samples every frame,
+    // and one yield each would be a dozen event-loop round trips for nothing.
+    if (++sampled % 4 === 0) await tick();
   }
   const palette = paletteFromHistogram(hist);
 

@@ -28,7 +28,8 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
 
   // Frame 0 is the empty "before any major" state; the GIF starts at the first
   // actual result so it opens on something rather than a blank board.
-  const onShare = () =>
+  const onShare = () => {
+    if (share.state.status === "ready") return share.send(share.state.file);
     void share.run(async () => {
       const { drawRaceFrame } = await import("../../../scripts/lib/gif-draw.mjs");
       const icons = await loadIcons(
@@ -47,6 +48,7 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
         },
       };
     });
+  };
 
   if (frames.length <= 1) return <div className="empty-note">No majors data bundled.</div>;
 
@@ -61,6 +63,7 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
         max={frames.length - 1}
         onShare={onShare}
         shareState={share.state}
+        onSpeedChange={share.reset}
         sliderLabel="Timeline position (one step per major)"
         valueText={
           current.major ? `${current.major.name}, ${shortDate(current.major.date)}, won by ${current.major.winner}` : "Before the first major"

@@ -12,6 +12,7 @@ export function Playbar({
   valueText,
   onShare,
   shareState,
+  onSpeedChange,
 }: {
   playback: Playback;
   max: number;
@@ -24,6 +25,8 @@ export function Playbar({
   /** Renders the animation to a GIF at the selected speed. */
   onShare?: () => void;
   shareState?: ShareState;
+  /** Called when the speed changes, so a stale built GIF can be dropped. */
+  onSpeedChange?: () => void;
 }) {
   const { idx, playing, speed, setSpeed, atEnd, toggle, scrub } = playback;
   const ticksId = ticks ? `${sliderLabel.replace(/\W+/g, "-")}-ticks` : undefined;
@@ -46,7 +49,10 @@ export function Playbar({
             key={s}
             className={`lq-speed${s === speed ? " on" : ""}`}
             aria-pressed={s === speed}
-            onClick={() => setSpeed(s)}
+            onClick={() => {
+              setSpeed(s);
+              onSpeedChange?.();
+            }}
           >
             {s}×
           </button>
@@ -58,10 +64,14 @@ export function Playbar({
           caption is several lines down and easy to miss. */}
       {onShare && (
         <button
-          className="ghost lq-share"
+          className={`ghost lq-share${shareState?.status === "ready" ? " ready" : ""}`}
           onClick={onShare}
           disabled={shareState?.status === "working"}
-          title="Save or send an animated GIF of this chart, timed to the speed selected here"
+          title={
+            shareState?.status === "ready"
+              ? "Tap to open the share sheet"
+              : "Save or send an animated GIF of this chart, timed to the speed selected here"
+          }
         >
           {shareLabel(shareState ?? { status: "idle" })}
         </button>
