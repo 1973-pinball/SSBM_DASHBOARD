@@ -3,7 +3,7 @@
 //
 // Runs headlessly (@napi-rs/canvas) using the SAME painters and encoder as the
 // in-app Share buttons, so a committed asset and a user-generated one are the
-// same artwork. The monthly workflow runs this straight after the data
+// same artwork. The weekly workflow runs this straight after the data
 // refresh, which is what keeps the assets in step with the dataset.
 //
 // Output: public/share/*.gif (animated) and *.png (first-frame posters, handy
@@ -13,7 +13,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
-import { encodeGif } from "./lib/gif-encode.mjs";
+import { encodeGifStreamed } from "./lib/gif-encode.mjs";
 import { CANVAS, drawCharFrame, drawRaceFrame } from "./lib/gif-draw.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -128,19 +128,22 @@ const ctxOf = () => {
   return { canvas, ctx: canvas.getContext("2d") };
 };
 
-function renderGif({ frames, draw, stepMs, opts }) {
+async function renderGif({ frames, draw, stepMs, opts }) {
   const { canvas, ctx } = ctxOf();
   const stepCs = Math.max(2, Math.round(stepMs / 10));
-  const encoded = frames.map((frame, i) => {
-    draw(ctx, frame, opts);
-    return {
-      data: ctx.getImageData(0, 0, CANVAS.w, CANVAS.h).data,
-      delayCs: i === frames.length - 1 ? Math.round(FINAL_HOLD_MS / 10) : stepCs,
-    };
+  const gif = await encodeGifStreamed({
+    width: CANVAS.w,
+    height: CANVAS.h,
+    count: frames.length,
+    frameRgba: (i) => {
+      draw(ctx, frames[i], opts);
+      return ctx.getImageData(0, 0, CANVAS.w, CANVAS.h).data;
+    },
+    delayCs: (i) => (i === frames.length - 1 ? Math.round(FINAL_HOLD_MS / 10) : stepCs),
   });
-  // Poster = the final frame, i.e. where things stand today.
+  // The canvas is left holding the final frame, which is where things stand today.
   const poster = canvas.toBuffer("image/png");
-  return { gif: encodeGif(encoded, CANVAS.w, CANVAS.h), poster };
+  return { gif, poster };
 }
 
 const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
@@ -159,10 +162,10 @@ async function main() {
   // data changes — that is a lot of permanent git history for one animation.
   // Sampling every other tournament and doubling the hold keeps the artwork
   // and the running time identical at half the bytes. The in-app Share button
-  // still exports every frame.
+  // applies the same rule, so the two stay identical.
   const raceStride = race.length > 150 ? 2 : 1;
   const raceSampled = race.filter((_, i) => i % raceStride === 0 || i === race.length - 1);
-  const raceOut = renderGif({
+  const raceOut = await renderGif({
     frames: raceSampled,
     draw: drawRaceFrame,
     stepMs: RACE_STEP_MS * raceStride,
@@ -181,7 +184,7 @@ async function main() {
       .filter(([, id]) => id !== undefined),
   );
   const charMax = Math.max(1, ...chars.flatMap((f) => f.chars.map((c) => c.count)));
-  const charOut = renderGif({
+  const charOut = await renderGif({
     frames: chars,
     draw: drawCharFrame,
     stepMs: CHAR_STEP_MS,

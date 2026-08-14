@@ -549,9 +549,28 @@ button.linky:hover { color: #a094ff; }
 .lq-speed:hover { color: var(--text); background: var(--panel-2); }
 .lq-speed.on { background: var(--accent-dim); color: var(--text); }
 
-.lq-share { font-size: 12px; padding: 6px 12px; white-space: nowrap; }
+/* Reads as an action next to Play, without competing with it. */
+.lq-share {
+  font-size: 12px;
+  padding: 6px 12px;
+  white-space: nowrap;
+  border-color: var(--accent-dim);
+  color: var(--accent);
+}
+.lq-share:hover:not(:disabled) { border-color: var(--accent); background: var(--panel-2); }
 .lq-share:disabled { opacity: 0.6; cursor: progress; }
 .lq-share-error { font-size: 12px; color: var(--loss); }
+
+/* Phone layout: the caption is the only part that may take a whole line, and
+   it goes last so the controls stay together at the top of the panel. */
+@media (max-width: 640px) {
+  .lq-controls { gap: 8px; }
+  .lq-controls input[type="range"] { flex: 1 1 100%; order: 3; min-width: 0; }
+  .lq-frame-label { order: 4; flex: 1 1 100%; min-width: 0; }
+  .lq-play { min-width: 0; padding: 8px 12px; }
+  .lq-share { padding: 8px 12px; }
+  .lq-speed { padding: 8px 7px; }
+}
 .lq-frame-label {
   font-family: var(--font-data);
   font-size: 12px;

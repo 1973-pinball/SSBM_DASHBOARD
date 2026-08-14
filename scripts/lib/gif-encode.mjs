@@ -118,21 +118,8 @@ function lzw(indices, minCodeSize, out) {
   out.byte(0); // end of image data
 }
 
-/**
- * Popularity palette over a sample of frames. These charts are flat colour
- * plus antialiased text, so the 256 most common 15-bit buckets cover the
- * image without visible banding — much cheaper than median cut.
- */
-function buildPalette(frames) {
-  const hist = new Map();
-  const step = Math.max(1, Math.floor(frames.length / 12));
-  for (let f = 0; f < frames.length; f += step) {
-    const d = frames[f];
-    for (let i = 0; i < d.length; i += 4) {
-      const k = ((d[i] >> 3) << 10) | ((d[i + 1] >> 3) << 5) | (d[i + 2] >> 3);
-      hist.set(k, (hist.get(k) ?? 0) + 1);
-    }
-  }
+/** Top-256 colours of a 15-bit histogram, as [r,g,b] triples. */
+function paletteFromHistogram(hist) {
   const palette = [...hist.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 256)
@@ -141,16 +128,52 @@ function buildPalette(frames) {
   return palette;
 }
 
-/**
- * Encode frames ({data: RGBA bytes, delayCs}) into a looping GIF89a. One
- * global palette, every frame written whole — these charts change too much
- * between steps for inter-frame diffing to pay off.
- */
-export function encodeGif(frames, width, height) {
-  if (frames.length === 0) throw new Error("no frames to encode");
-  const palette = buildPalette(frames.map((f) => f.data));
-  const out = new ByteSink();
+const tick = () => new Promise((r) => setTimeout(r, 0));
 
+/**
+ * Encode a looping GIF89a one frame at a time.
+ *
+ * Frames are pulled from `frameRgba(i)` and LZW-encoded straight into the
+ * output, so peak memory is one frame plus the growing file rather than the
+ * whole animation — holding 200+ frames of 900x600 RGBA is ~490 MB, which is
+ * fine on a desktop and fatal on a phone.
+ *
+ * Two passes: the first samples frames to build one global palette (it has to
+ * be written in the header, before any frame data), the second encodes
+ * everything. Sampled frames are therefore drawn twice, which is cheap next to
+ * the per-pixel work.
+ *
+ * These charts change too much between steps for inter-frame diffing to pay
+ * off, so every frame is written whole.
+ */
+export async function encodeGifStreamed({
+  width,
+  height,
+  count,
+  frameRgba,
+  delayCs,
+  sampleStride,
+  onProgress,
+  yieldEvery = 8,
+}) {
+  if (!count || count < 1) throw new Error("no frames to encode");
+
+  // ---- pass 1: palette ----
+  const hist = new Map();
+  const stride = sampleStride ?? Math.max(1, Math.floor(count / 12));
+  for (let i = 0; i < count; i += stride) {
+    const d = frameRgba(i);
+    for (let p = 0; p < d.length; p += 4) {
+      const k = ((d[p] >> 3) << 10) | ((d[p + 1] >> 3) << 5) | (d[p + 2] >> 3);
+      hist.set(k, (hist.get(k) ?? 0) + 1);
+    }
+    onProgress?.(0.12 * ((i + stride) / count));
+    await tick();
+  }
+  const palette = paletteFromHistogram(hist);
+
+  // ---- header ----
+  const out = new ByteSink();
   out.ascii("GIF89a");
   out.word(width);
   out.word(height);
@@ -162,7 +185,6 @@ export function encodeGif(frames, width, height) {
     out.byte(g);
     out.byte(b);
   }
-
   // Netscape extension: loop forever.
   out.byte(0x21);
   out.byte(0xff);
@@ -198,16 +220,17 @@ export function encodeGif(frames, width, height) {
     return best;
   };
 
+  // ---- pass 2: frames ----
   const indices = new Uint8Array(width * height);
-  for (const frame of frames) {
-    const d = frame.data;
-    for (let i = 0, p = 0; i < d.length; i += 4, p++) indices[p] = nearest(d[i], d[i + 1], d[i + 2]);
+  for (let i = 0; i < count; i++) {
+    const d = frameRgba(i);
+    for (let p = 0, q = 0; p < d.length; p += 4, q++) indices[q] = nearest(d[p], d[p + 1], d[p + 2]);
 
     out.byte(0x21); // graphic control extension
     out.byte(0xf9);
     out.byte(4);
     out.byte(0); // no disposal, no transparency
-    out.word(frame.delayCs);
+    out.word(delayCs(i));
     out.byte(0);
     out.byte(0);
 
@@ -220,8 +243,14 @@ export function encodeGif(frames, width, height) {
 
     out.byte(8); // LZW minimum code size
     lzw(indices, 8, out);
+
+    if (i % yieldEvery === 0) {
+      onProgress?.(0.12 + 0.88 * (i / count));
+      await tick();
+    }
   }
 
   out.byte(0x3b); // trailer
+  onProgress?.(1);
   return out.take();
 }

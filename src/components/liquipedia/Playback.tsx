@@ -53,6 +53,20 @@ export function Playbar({
         ))}
       </div>
 
+      {/* Sits with the transport rather than after the caption: it shares at
+          whatever speed is selected, and on a narrow screen anything below the
+          caption is several lines down and easy to miss. */}
+      {onShare && (
+        <button
+          className="ghost lq-share"
+          onClick={onShare}
+          disabled={shareState?.status === "working"}
+          title="Save or send an animated GIF of this chart, timed to the speed selected here"
+        >
+          {shareLabel(shareState ?? { status: "idle" })}
+        </button>
+      )}
+
       {/* aria-valuetext so the position is spoken as the event or season it
           represents; the raw frame index means nothing on its own. */}
       <input
@@ -78,21 +92,12 @@ export function Playbar({
         {caption}
       </span>
 
-      {onShare && (
-        <button
-          className="ghost lq-share"
-          onClick={onShare}
-          disabled={shareState?.status === "working"}
-          title="Download an animated GIF of this chart, timed to the speed selected here"
-        >
-          {shareLabel(shareState ?? { status: "idle" })}
-        </button>
-      )}
       {shareState?.status === "error" && (
         <span className="lq-share-error" role="alert">
           {shareState.message}
         </span>
       )}
+
     </div>
   );
 }
