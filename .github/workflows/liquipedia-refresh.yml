@@ -10,11 +10,6 @@ on:
   schedule:
     - cron: "0 9 * * 1" # 09:00 UTC every Monday
   workflow_dispatch: # manual run from the Actions tab
-    inputs:
-      render_assets:
-        description: "Re-render public/share even if the data didn't change"
-        type: boolean
-        default: false
 
 permissions:
   contents: write
@@ -55,18 +50,13 @@ jobs:
         env:
           LIQUIPEDIA_CONTACT: ${{ vars.LIQUIPEDIA_CONTACT || 'info.studio.pinball@gmail.com' }}
 
-      # Assets are derived from the snapshot, so they regenerate with it — same
-      # painters and encoder the in-app Share buttons use, run headlessly.
-      # render_assets forces this on a manual run: the step is otherwise only
-      # reachable when the data happens to change, which is no way to find out
-      # that a runner can't load a font.
-      - name: Render shareable assets
-        if: steps.refresh.outputs.changed == 'true' || inputs.render_assets
-        run: node scripts/render-liquipedia-assets.mjs
+      # No asset render here on purpose: the share images are rendered during
+      # the Vercel deploy instead. Committing them put ~2.5 MB of GIF into
+      # history on every data change, and binaries never delta-compress.
 
       # A broken dataset must never reach main.
       - name: Type-check and build
-        if: steps.refresh.outputs.changed == 'true' || inputs.render_assets
+        if: steps.refresh.outputs.changed == 'true'
         run: npm run build
 
       # SUMMARY is built from wiki-derived text (event and edition names), so it
@@ -74,19 +64,17 @@ jobs:
       # script — a ${{ }} expansion would let a wiki edit run commands in a job
       # that holds contents:write.
       - name: Commit the updated snapshot
-        if: steps.refresh.outputs.changed == 'true' || inputs.render_assets
+        if: steps.refresh.outputs.changed == 'true'
         env:
           SUMMARY: ${{ steps.refresh.outputs.summary }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/lib/liquipedia/data.ts public/share
-          # A forced render usually produces identical bytes; committing is
-          # then a no-op, and `git commit` would fail the job rather than
-          # shrug, so ask first.
+          git add src/lib/liquipedia/data.ts
+          # `git commit` fails the job on an empty commit rather than shrug.
           if git diff --cached --quiet; then
             echo "nothing changed on disk — nothing to commit"
             exit 0
           fi
-          git commit -m "Liquipedia snapshot: ${SUMMARY:-re-rendered share images}"
+          git commit -m "Liquipedia snapshot: $SUMMARY"
           git push

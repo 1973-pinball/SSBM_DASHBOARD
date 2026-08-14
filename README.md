@@ -39,7 +39,9 @@ It ships in the bundle rather than being fetched at runtime: the app has no back
 node scripts/refresh-liquipedia.mjs
 ```
 
-Both animated charts also have a **Share GIF** button that exports the animation at whatever playback speed is selected, rendered entirely in your browser. The same painters run headlessly to produce the committed images in [`public/share/`](public/share) (served at `/share/…`), so those links always show the current data:
+Both animated charts have a **Share GIF** button that exports the animation at whatever playback speed is selected, rendered entirely in your browser — on a phone it hands the GIF and a still to the share sheet.
+
+The same painters also run headlessly to produce the images served at `/share/…`. Those are **built during the deploy, not committed**: a GIF is a couple of megabytes, binaries don't delta-compress, and re-committing them on every data change would bury the repo in animation history. Vercel runs `npm run build:deploy`, which renders them into `public/` before the Vite build; if that render fails the deploy still succeeds, just without the share images. To have them locally (they're gitignored):
 
 ```bash
 node scripts/render-liquipedia-assets.mjs
@@ -47,7 +49,7 @@ node scripts/render-liquipedia-assets.mjs
 
 Link previews (Open Graph / Twitter cards) point at `/share/melee-majors-race.png`, so a pasted link shows the current standings rather than a screenshot that ages.
 
-A weekly GitHub Action runs the refresh and the asset render and commits anything that changed, so new majors and each newly published year-end ranking edition arrive on their own (SSBMRank's mid-season lists are skipped deliberately, so a season isn't counted twice). The refresh is append-only — it adds majors and editions that aren't already present and never rewrites existing rows — and it rate-limits itself hard; if Liquipedia throttles a run it exits 2, leaves the file untouched, and the next run tries again. It also revisits any player whose winnings are still unknown, so a page that was unreachable one week gets filled in later.
+A weekly GitHub Action runs the refresh and commits any data change, so new majors and each newly published year-end ranking edition arrive on their own (SSBMRank's mid-season lists are skipped deliberately, so a season isn't counted twice). The refresh is append-only — it adds majors and editions that aren't already present and never rewrites existing rows — and it rate-limits itself hard; if Liquipedia throttles a run it exits 2, leaves the file untouched, and the next run tries again. It also revisits any player whose winnings are still unknown, so a page that was unreachable one week gets filled in later.
 
 Two things the tab counts deliberately:
 

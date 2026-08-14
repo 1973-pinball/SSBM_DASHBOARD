@@ -32,3 +32,7 @@ supabase/.temp/
 
 # Machine-local dev-server launch config (see .claude/launch.example.json)
 .claude/launch.json
+
+# Share images are rendered at deploy time (npm run assets) — committing them
+# would put a couple of megabytes of GIF into history on every data change.
+public/share/
