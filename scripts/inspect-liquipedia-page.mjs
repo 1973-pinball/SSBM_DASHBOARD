@@ -28,6 +28,14 @@ if (!body.trimStart().startsWith("{")) {
 const html = JSON.parse(body).parse.text["*"];
 console.log(`page=${page} htmlBytes=${html.length}`);
 
+// Prize totals: the quickest way to tell whether a results page covers one
+// game or a player's whole career is to add up what's on it.
+const amounts = [...html.matchAll(/\$\s?([\d,]+)(?!\d)/g)].map((m) => Number(m[1].replace(/,/g, "")));
+if (amounts.length) {
+  const sum = amounts.reduce((a, b) => a + b, 0);
+  console.log(`dollar amounts: ${amounts.length}, sum $${sum.toLocaleString("en-US")}, max $${Math.max(...amounts).toLocaleString("en-US")}`);
+}
+
 const re = new RegExp(needle, "gi");
 let hit;
 let n = 0;
