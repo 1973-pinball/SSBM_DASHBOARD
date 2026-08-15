@@ -1,6 +1,8 @@
 # SSBM Dashboard
 
-Point it at your Slippi replay folder and get a full statistical readout of your Melee play: win rates by opponent, matchup, and stage; kill stats; and execution trends. **Everything is parsed in your browser — no uploads, no accounts, no server.** An optional Google sign-in (see [Cloud sync](#cloud-sync-optional)) can mirror your parsed stats — never raw replays — so they follow you across devices; without it the app remains fully local.
+Point it at your Slippi replay folder and get a full statistical readout of your Melee play: win rates by opponent, matchup, and stage; kill stats; and execution trends. **Everything is parsed in your browser — no uploads, no accounts, no server.** An optional Google sign-in ([Cloud sync](#cloud-sync-optional)) mirrors your parsed stats — never raw replays — across devices; without it the app stays fully local.
+
+No replays handy? The landing page has a demo mode: a deterministic synthetic year of a Falco player's netplay.
 
 ## How it works
 
@@ -11,75 +13,68 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
                           React dashboard ◄── aggregation ◄── IndexedDB (Dexie)
 ```
 
-- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one web worker per core, capped at 8. Each game is reduced to a ~1–2 KB `GameRecord`; frame data is discarded.
+- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one worker per core, capped at 8. Each game is reduced to a ~1–2 KB `GameRecord`; frame data is discarded.
 - **Cache** (`src/lib/db.ts`): records persist in IndexedDB keyed on `path|size|mtime`, so repeat visits only parse new files. Corrupt files get tombstones so they aren't retried every visit.
 - **Identity** (`src/lib/stats.ts`): games store both players neutrally; "you" is inferred as the connect code appearing in the most games, confirmed once, and changeable without a re-parse. Multiple codes (alts) are supported.
-- **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates (still visible in the game log).
-- **Views**: Overview (KPIs, rolling win rate, by-character table, weekly volume, plus an exportable share-card PNG), Matchups (character × character matrix), Stages, Opponents, Sessions (per-session W/L, fatigue and tilt tables), Execution (L-cancel %, openings/kill, damage/opening, inputs/min), Insights (logistic-regression win-factor model + coaching hints), Records (personal bests: streaks, fastest win, nemesis), and a Game log with CSV export. 2v2 games get their own consolidated Teams view (team-level W/L, teammate breakdowns) via the singles/teams filter switch.
-- **Liquipedia**: one view steps outside your own replays to cover competitive Melee history — majors per year by tier, an animated race of major titles ending in the all-time champions table, and top-100 character composition over every SSBMRank edition, including which player first put each character on the board. It needs no replays, so it's reachable straight from the landing page as well as from a dashboard tab. The dataset is a bundled snapshot (see [Scene data](#scene-data-the-liquipedia-tab)), so it works offline like the rest of the app.
-- **Installable PWA**: the full app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
+- **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates, but still listed in the game log.
+- **Installable PWA**: the whole app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
+
+## Views
+
+Filters (date range, mode, character, stage, opponent) are global, and clicking a row or cell scopes the whole dashboard to it. Every metric is defined in the in-app **Metrics guide**.
+
+- **Overview** — KPIs, rolling win rate, weekly volume, a per-character table (win rate, kills, L-cancel), and an exportable share-card PNG.
+- **Matchups / Stages / Opponents** — character × character matrix, per-stage and stage × opponent-character counterpick tables, per-opponent records with recent sets.
+- **Sessions** — a session is games separated by gaps under 30 minutes: per-session W/L plus fatigue and tilt tables.
+- **Execution** — L-cancel %, openings per kill, damage per opening, inputs per minute, with per-move effectiveness, opening moves, and kill-move impact.
+- **Insights / Records / Game log** — a logistic-regression win-factor model with coaching hints, personal bests (streaks, fastest win, nemesis), and a game log with CSV export.
+- **Teams** — 2v2 replays get one consolidated view (team-level W/L, teammate breakdowns) behind the singles/teams switch; they never mix into the singles aggregates.
+- **Liquipedia** — competitive Melee history rather than your own play: majors per year by tier, an animated race of major titles ending in the all-time champions table, and top-100 character composition across every SSBMRank edition. It needs no replays, so it's reachable from the landing page as well as from a tab. See [Scene data](#scene-data-the-liquipedia-tab).
 
 ## Development
 
 ```bash
 npm install
 npm run dev      # dev server
-npm run build    # type-check + production build
+npm run build    # type-check + production build (CI gate)
+npm run lint     # oxlint
 npm run assets   # render the share images into public/share (gitignored)
 ```
 
-No replays handy? The landing page has a demo-data mode (deterministic synthetic year of a Falco player's netplay).
-
 ## Scene data (the Liquipedia tab)
 
-The Liquipedia tab reads from `src/lib/liquipedia/data.ts`, a snapshot compiled from [Liquipedia's Smash wiki](https://liquipedia.net/smash) (content licensed [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)) — primarily [Major Tournaments/Melee](https://liquipedia.net/smash/Major_Tournaments/Melee), the [SSBMRank](https://liquipedia.net/smash/SSBMRank) editions, and individual player pages for career winnings. Every source is listed in-app at the bottom of the tab.
+The tab reads `src/lib/liquipedia/data.ts`, a snapshot compiled from [Liquipedia's Smash wiki](https://liquipedia.net/smash) (content licensed [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)) — [Major Tournaments/Melee](https://liquipedia.net/smash/Major_Tournaments/Melee), the [SSBMRank](https://liquipedia.net/smash/SSBMRank) editions, and player pages for career winnings. Every source is listed at the bottom of the tab.
 
-It ships in the bundle rather than being fetched at runtime: the app has no backend, its CSP allows only itself and Supabase, and the tab has to work offline. Refreshing it is therefore a commit:
-
-```bash
-node scripts/refresh-liquipedia.mjs
-```
-
-Both animated charts have a **Share GIF** button that exports the animation at whatever playback speed is selected, rendered entirely in your browser — on a phone it hands the GIF and a still to the share sheet.
-
-The same painters also run headlessly to produce the images served at `/share/…`. Those are **built during the deploy, not committed**: a GIF is a couple of megabytes, binaries don't delta-compress, and re-committing them on every data change would bury the repo in animation history. Vercel runs `npm run build:deploy`, which renders them into `public/` before the Vite build; if that render fails the deploy still succeeds, just without the share images. To have them locally (they're gitignored):
+It ships in the bundle rather than being fetched at runtime: the app has no backend, its CSP allows only itself and Supabase, and the tab has to work offline. A weekly GitHub Action refreshes it and commits any change, so new majors and each newly published year-end ranking arrive on their own (mid-season lists are skipped so a season isn't double-counted). The refresh is append-only and rate-limits itself hard; if Liquipedia throttles a run it exits 2 and leaves the file untouched.
 
 ```bash
-node scripts/render-liquipedia-assets.mjs
+node scripts/refresh-liquipedia.mjs                            # top up (what the Action runs)
+node scripts/rebuild-liquipedia.mjs                            # re-derive everything, reusing known winnings
+node scripts/rebuild-liquipedia.mjs --force                    # ...refetching player pages too (~30 min)
+node scripts/inspect-liquipedia-page.mjs Hungrybox 'winnings'  # print the real markup when a parser misses
 ```
 
-Link previews (Open Graph / Twitter cards) point at `/share/melee-majors-race.png`, so a pasted link shows the current standings rather than a screenshot that ages.
+Rebuilding is manual on purpose — append-only means a parser fix can't reach existing rows, but a `--force` run makes two requests per champion spaced 30 seconds apart. When a parser stops matching, the figures have usually moved into rendered HTML; the inspect script prints the markup, and the **Inspect Liquipedia page** workflow runs it from a GitHub runner, which matters because Liquipedia blocks a development IP for hours after any burst.
 
-A weekly GitHub Action runs the refresh and commits any data change, so new majors and each newly published year-end ranking edition arrive on their own (SSBMRank's mid-season lists are skipped deliberately, so a season isn't counted twice). The refresh is append-only — it adds majors and editions that aren't already present and never rewrites existing rows — and it rate-limits itself hard; if Liquipedia throttles a run it exits 2, leaves the file untouched, and the next run tries again. It also revisits any player whose winnings are still unknown, so a page that was unreachable one week gets filled in later.
+Two counting decisions the tab states in-app:
 
-Two things the tab counts deliberately:
+- **Offline majors only.** The 2020–21 netplay era put 16 online events on the majors list, including individual weeks of online leagues sitting beside Genesis as equal titles. They're excluded from every total and kept in the dataset flagged `online: true` so the choice stays auditable.
+- **Winnings are all-Smash.** Liquipedia's "approx. total winnings" spans every Smash title a player entered with no per-game breakdown to quote, so the column says *All-Smash career winnings* rather than implying Melee prize money.
 
-- **Offline majors only.** Liquipedia lists a venue per event, and the 2020–21 netplay era put 16 online events on the majors list — including individual weeks of online leagues, which sat beside Genesis as equal titles and inflated that era's champions. They're excluded from every total, the tab says so at the top, and the rows stay in the dataset flagged `online: true` so the choice stays auditable.
-- **Winnings are all-Smash.** Liquipedia's "approx. total winnings" spans every Smash title a player competed in, and there's no per-game breakdown to quote, so the column is labelled *All-Smash career winnings* rather than implying Melee prize money.
-
-The refresh is append-only, so a parser fix never reaches rows already in the file. To re-derive the whole dataset from the source pages:
-
-```bash
-node scripts/rebuild-liquipedia.mjs           # keep known winnings
-node scripts/rebuild-liquipedia.mjs --force   # re-fetch player pages too
-```
-
-It's manual on purpose. Without `--force` it reuses every player whose winnings are already known, so it fetches only the two index pages and finishes in under a minute. With `--force` it makes two requests per champion — winnings from the rendered page, mains from the source — and every request is spaced 30 seconds apart, so about half an hour for the current 25 champions.
-
-When a parser stops finding something, the figures usually moved into rendered HTML rather than the page source. `scripts/inspect-liquipedia-page.mjs` prints the real markup around a match; the **Inspect Liquipedia page** workflow runs it from a GitHub runner, which matters because Liquipedia rate-limits a development machine for hours after any burst of requests.
+Both animated charts have a **Share GIF** button that exports the animation at the selected playback speed, rendered entirely in your browser — on a phone it hands the GIF and a still to the share sheet. The same painters run headlessly during the Vercel deploy (`npm run build:deploy`) to produce the images served at `/share/…`, which back the Open Graph link previews. Those are built, never committed — a couple of megabytes of binary that can't delta-compress has no business in the history — and a failed render doesn't fail the deploy.
 
 ## Cloud sync (optional)
 
-With no configuration the app is 100% local. When enabled, the cloud is a **mirror, not a backend**: the dashboard always renders from the local IndexedDB cache, and sync keeps that cache converged with the union of games from every device you've signed in on. That's why the app stays instant, works fully offline, and keeps working even if the cloud is unreachable — a failed sync only means the mirror is stale, never a broken dashboard.
+With no configuration the app is 100% local. When enabled, the cloud is a **mirror, not a backend**: the dashboard always renders from the local IndexedDB cache, and sync keeps that cache converged with the union of games from every device you've signed in on. So the app stays instant, works offline, and a failed sync means a stale mirror, never a broken dashboard.
 
-To enable accounts + cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
+To enable accounts and cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
 
 1. **Create a Supabase project** (free tier is fine) at [database.new](https://database.new).
-2. **Create the tables**: open SQL Editor in the Supabase dashboard, paste [`supabase/schema.sql`](supabase/schema.sql), run it. This creates `game_records` and `user_settings` with row-level security so each user can only read/write their own rows.
-3. **Enable Google sign-in**: in Google Cloud Console, create an OAuth 2.0 Client ID (type "Web application") with authorized redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`; then in Supabase → Authentication → Providers → Google, paste the client ID and secret. Add your app's URL (and `http://localhost:5173` for dev) under Authentication → URL Configuration → Redirect URLs.
-4. **Set the env vars**: copy `.env.example` to `.env.local` (and set the same two variables in Vercel → Project → Settings → Environment Variables): `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, both from Supabase → Settings → API.
+2. **Create the tables**: paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL Editor and run it. It creates `game_records` and `user_settings` with row-level security, so each user can only read and write their own rows.
+3. **Enable Google sign-in**: in Google Cloud Console create an OAuth 2.0 Client ID (type "Web application") with redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`; paste the client ID and secret into Supabase → Authentication → Providers → Google. Add your app's URL (and `http://localhost:5173`) under Authentication → URL Configuration → Redirect URLs.
+4. **Set the env vars**: copy `.env.example` to `.env.local`, and set the same `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in Vercel → Settings → Environment Variables. Both come from Supabase → Settings → API.
 
-When the vars are present, a "Sign in with Google" button appears in the dashboard header. Sync is two-way, idempotent (records are keyed `path|size|mtime`, so re-parsing the same files on another machine converges instead of duplicating), and automatic: it runs on sign-in, again a moment after new replays finish parsing, and when you return to an open tab — so every signed-in device converges to the union of all your games without pressing anything. If an auto-sync fails (say, offline), the header button turns gold ("Sync N new games") as the manual fallback. On a new device — including a phone — the landing page offers **"Sign in with Google to restore"**, which pulls your synced stats and saved connect codes with no replay folder needed.
+With the vars present, a "Sign in with Google" button appears in the header. Sync is two-way and idempotent — records are keyed `path|size|mtime`, so re-parsing the same files on another machine converges instead of duplicating — and automatic: on sign-in, shortly after new replays finish parsing, and when you return to an open tab. If an auto-sync fails (offline, say), the header button turns gold ("Sync N new games") as the manual fallback. On a new device the landing page offers **"Sign in with Google to restore"**, which pulls your synced stats and saved connect codes with no replay folder needed.
 
 ## Stack
 
