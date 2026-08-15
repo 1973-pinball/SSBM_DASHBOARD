@@ -686,9 +686,15 @@ button.linky:hover { color: #a094ff; }
 /* Storylines carries eight columns — tighten the gutters so it fits a laptop
    viewport without a horizontal scroll. */
 .lq-storylines th,
-.lq-storylines td { padding-left: 6px; padding-right: 6px; }
+.lq-storylines td { padding-left: 5px; padding-right: 5px; }
 .lq-storylines th.lq-sortable { padding-left: 0; padding-right: 0; }
-.lq-storylines th.lq-sortable button { padding-left: 6px; padding-right: 6px; }
+.lq-storylines th.lq-sortable button { padding-left: 5px; padding-right: 5px; }
+/* Every column reads left-edge-first here, numbers included: the counts are
+   one or two digits, so right-aligning them only stranded each header away
+   from its own data. */
+.lq-storylines th.data,
+.lq-storylines td.data { text-align: left; }
+.lq-storylines th.lq-sortable.data button { justify-content: flex-start; }
 
 /* Coverage footnote — repeated under every ranking-derived panel, so it sits
    quieter than the hint it follows. */

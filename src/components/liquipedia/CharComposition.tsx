@@ -393,8 +393,8 @@ export function CharStorylinesTable({
             <th className="data">Peak</th>
             {sortable("majors", "Majors", "data")}
             {sortable("lastMajor", "Last major")}
-            <th>Best ever</th>
-            {sortable("current", "In top 100", "data")}
+            <th>Highest rank ever</th>
+            {sortable("current", "# in top 100", "data")}
             <th>Torchbearer</th>
           </tr>
         </thead>
@@ -458,8 +458,8 @@ export function CharStorylinesTable({
         "Entered" is the first edition where anyone ranked with the character as primary main — NEW marks characters
         that arrived after the first edition, e.g. a scene newcomer putting a character on the map; "≤" marks the ones
         already there in the first edition, which were around for however long before it. "Majors" and "Last major"
-        count offline majors won by players whose primary main is that character — "—" means none on record. "Best
-        ever" is the character's highest rank in any edition, "In top 100" how many rank in the latest one. Dimmed
+        count offline majors won by players whose primary main is that character — "—" means none on record. "Highest
+        rank ever" is the character's best rank in any edition, "# in top 100" how many rank in the latest one. Dimmed
         text is the player behind each figure. Click a column header to sort.
       </div>
       <RankingEraNote comps={comps} />
