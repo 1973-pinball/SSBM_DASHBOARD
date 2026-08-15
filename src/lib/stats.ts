@@ -316,6 +316,9 @@ export interface CharacterRow extends WL {
   characterId: number;
   killsPerGame: number | null;
   deathsPerGame: number | null;
+  /** My L-cancel attempts on this character over every game in the filter — no recency window. */
+  lCancelAttempts: number;
+  lCancelPct: number | null;
 }
 
 export function byMyCharacter(games: ResolvedGame[]): CharacterRow[] {
@@ -338,11 +341,25 @@ function groupRows(games: ResolvedGame[], key: (g: ResolvedGame) => number): Cha
       const t = tally(gs);
       let kills = 0;
       let deaths = 0;
+      let lcS = 0;
+      let lcF = 0;
       for (const g of gs) {
         kills += g.me.kills;
         deaths += g.opp.kills;
+        // Attempt-weighted, never a mean of per-game rates: a 3-aerial game
+        // must not swing the row as hard as a 40-aerial one.
+        lcS += g.me.lCancelSuccess;
+        lcF += g.me.lCancelFail;
       }
-      return { characterId, ...t, killsPerGame: gs.length ? kills / gs.length : null, deathsPerGame: gs.length ? deaths / gs.length : null };
+      const lcAtt = lcS + lcF;
+      return {
+        characterId,
+        ...t,
+        killsPerGame: gs.length ? kills / gs.length : null,
+        deathsPerGame: gs.length ? deaths / gs.length : null,
+        lCancelAttempts: lcAtt,
+        lCancelPct: lcAtt > 0 ? lcS / lcAtt : null,
+      };
     })
     .sort((a, b) => b.games - a.games);
 }

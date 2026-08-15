@@ -184,6 +184,7 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
               <th className="data">Win rate</th>
               <th className="data">Kills / game</th>
               <th className="data">Deaths / game</th>
+              <th className="data">L-cancel</th>
             </tr>
           </thead>
           <tbody>
@@ -199,11 +200,23 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
                 <td className="data">{pct(row.winRate)}</td>
                 <td className="data">{num(row.killsPerGame, 2)}</td>
                 <td className="data">{num(row.deathsPerGame, 2)}</td>
+                <td
+                  className="data"
+                  style={row.lCancelAttempts < 100 ? { opacity: 0.55 } : undefined}
+                  title={row.lCancelAttempts ? `${row.lCancelAttempts.toLocaleString()} attempts` : undefined}
+                >
+                  {pct(row.lCancelPct)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
-        <div className="hint">Click a row to filter the whole dashboard to that character.</div>
+        <div className="hint">
+          Click a row to filter the whole dashboard to that character. L-cancel here is your whole history in the
+          current filter — no recency window — so it compares like for like across characters, unlike the player card
+          and Execution tab, which both cover only your most recent games. Hover for attempt counts; rows under 100
+          attempts are faded.
+        </div>
       </div>
     </>
   );

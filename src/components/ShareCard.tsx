@@ -107,7 +107,11 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
                 : undefined,
             )}
             {cell(
-              "The hands (past 100 games)",
+              // The 100-game window is applied *after* the dashboard filters, so under a
+              // character filter this covers that character's last 100 — often the whole
+              // history for a secondary. Report the real count or the cell reads as a
+              // like-for-like comparison it isn't.
+              `The hands (past ${hands.games.toLocaleString()} games)`,
               hands.lCancel !== null ? `${num(hands.lCancel, 1)}% L-cancel` : "—",
               hands.ipm !== null ? `${int(hands.ipm)} inputs/min` : undefined,
             )}
