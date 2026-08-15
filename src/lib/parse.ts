@@ -99,7 +99,9 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStat
 /**
  * Parse a single replay into a GameRecord. Stats-only: frame data is used
  * transiently by slippi-js to compute stats, then everything is discarded
- * except the ~1-2 KB summary row.
+ * except the summary row — ~5 KB for a singles game (p50 4.7, p90 5.6 over a
+ * real library), of which the per-move table is the bulk; the headline stats
+ * alone are ~1 KB, and teams records carry no move table at all.
  */
 export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRecord {
   const game = new SlippiGame(buf);

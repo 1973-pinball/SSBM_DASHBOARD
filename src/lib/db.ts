@@ -3,7 +3,7 @@ import type { GameRecord } from "./types";
 
 /**
  * Records live packed ~250 to a row: reading tens of thousands of individual
- * ~1-2 KB rows on startup is dominated by per-row IndexedDB overhead, and
+ * few-KB rows on startup is dominated by per-row IndexedDB overhead, and
  * packing makes the full-cache restore several times faster. Dedup stays
  * per-game via the id-only `seen` table (primary-key reads are cheap).
  */

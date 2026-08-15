@@ -13,7 +13,7 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
                           React dashboard ◄── aggregation ◄── IndexedDB (Dexie)
 ```
 
-- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one worker per core, capped at 8. Each game is reduced to a ~1–2 KB `GameRecord`; frame data is discarded.
+- **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one worker per core, capped at 8. Each game is reduced to a ~5 KB `GameRecord` (headline stats plus a per-move breakdown); frame data is discarded.
 - **Cache** (`src/lib/db.ts`): records persist in IndexedDB keyed on `path|size|mtime`, so repeat visits only parse new files. Corrupt files get tombstones so they aren't retried every visit.
 - **Identity** (`src/lib/stats.ts`): games store both players neutrally; "you" is inferred as the connect code appearing in the most games, confirmed once, and changeable without a re-parse. Multiple codes (alts) are supported.
 - **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates, but still listed in the game log.
