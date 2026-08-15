@@ -90,6 +90,9 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
               <th className="data">Games</th>
               <th className="data">W–L</th>
               <th className="data">Win rate</th>
+              {/* "My" is load-bearing: the row is keyed by the opponent's character,
+                  so an unqualified "L-cancel" reads as theirs. This is mine. */}
+              <th className="data">My L-cancel</th>
             </tr>
           </thead>
           <tbody>
@@ -101,10 +104,22 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
                   <span className="up">{r.wins}</span>–<span className="down">{r.losses}</span>
                 </td>
                 <td className="data" style={{ color: winRateColor(r.winRate) }}>{pct(r.winRate)}</td>
+                <td
+                  className="data"
+                  style={r.lCancelAttempts < 100 ? { opacity: 0.55 } : undefined}
+                  title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}
+                >
+                  {pct(r.lCancelPct)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
+        <div className="hint">
+          My L-cancel is your own rate in games against that character — whether a matchup's pressure costs you tech
+          skill — not the opponent's. Whole history in the current filter, no recency window. Hover for attempt counts;
+          rows under 100 attempts are faded.
+        </div>
       </div>
     </>
   );
