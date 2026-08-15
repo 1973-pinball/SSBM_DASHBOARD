@@ -683,6 +683,13 @@ button.linky:hover { color: #a094ff; }
 }
 .lq-dim { color: var(--faint); }
 
+/* Storylines carries eight columns — tighten the gutters so it fits a laptop
+   viewport without a horizontal scroll. */
+.lq-storylines th,
+.lq-storylines td { padding-left: 6px; padding-right: 6px; }
+.lq-storylines th.lq-sortable { padding-left: 0; padding-right: 0; }
+.lq-storylines th.lq-sortable button { padding-left: 6px; padding-right: 6px; }
+
 /* Coverage footnote — repeated under every ranking-derived panel, so it sits
    quieter than the hint it follows. */
 .lq-era-note {

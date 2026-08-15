@@ -385,17 +385,17 @@ export function CharStorylinesTable({
   if (stories.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
   return (
     <>
-      <table>
+      <table className="lq-storylines">
         <thead>
           <tr>
             {sortable("char", "Character")}
-            <th>Entered top 100</th>
+            <th>Entered</th>
             <th className="data">Peak</th>
             {sortable("majors", "Majors", "data")}
             {sortable("lastMajor", "Last major")}
-            <th>Best-ever rank</th>
-            {sortable("current", "# of Top 100", "data")}
-            <th>Current torchbearer</th>
+            <th>Best ever</th>
+            {sortable("current", "In top 100", "data")}
+            <th>Torchbearer</th>
           </tr>
         </thead>
         <tbody>
@@ -413,31 +413,43 @@ export function CharStorylinesTable({
                     bound, not a date — the rep is who carried them that year. */}
                 {eraYear(s.arrival.year)}
                 {s.newcomer && <span className="lq-new">NEW</span>}{" "}
-                via {s.arrival.rep.player} (#{s.arrival.rep.rank})
+                <span className="lq-dim">
+                  {s.arrival.rep.player} #{s.arrival.rep.rank}
+                </span>
               </td>
               <td className="data">
-                {s.peak.count} <span className="lq-dim">in {eraYear(s.peak.year)}</span>
+                {s.peak.count} <span className="lq-dim">· {eraYear(s.peak.year)}</span>
               </td>
               <td className="data">{charMajors.get(s.char)?.count ?? "—"}</td>
               <td>
                 {(() => {
                   const win = charMajors.get(s.char)?.last;
                   if (!win) return "—";
+                  // Most event names already carry their year ("Supernova
+                  // 2026") — only spell it out for the ones that don't.
+                  const year = win.name.includes(String(win.year)) ? "" : ` ${win.year}`;
                   return (
                     <>
-                      {win.name}{" "}
-                      <span className="lq-dim">
-                        ({win.year}, {win.player})
-                      </span>
+                      {win.name}
+                      {year} <span className="lq-dim">{win.player}</span>
                     </>
                   );
                 })()}
               </td>
               <td>
-                #{s.bestEver.rep.rank} — {s.bestEver.rep.player} <span className="lq-dim">({eraYear(s.bestEver.year)})</span>
+                #{s.bestEver.rep.rank} {s.bestEver.rep.player}{" "}
+                <span className="lq-dim">{eraYear(s.bestEver.year)}</span>
               </td>
               <td className="data">{s.current > 0 ? s.current : "—"}</td>
-              <td>{s.currentTop ? `${s.currentTop.player} (#${s.currentTop.rank})` : <span className="lq-dim">out of top 100</span>}</td>
+              <td>
+                {s.currentTop ? (
+                  <>
+                    {s.currentTop.player} <span className="lq-dim">#{s.currentTop.rank}</span>
+                  </>
+                ) : (
+                  <span className="lq-dim">out of top 100</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>
@@ -445,9 +457,10 @@ export function CharStorylinesTable({
       <div className="hint">
         "Entered" is the first edition where anyone ranked with the character as primary main — NEW marks characters
         that arrived after the first edition, e.g. a scene newcomer putting a character on the map; "≤" marks the ones
-        already there in the first edition, which were around for however long before it. "Majors" and "Last
-        major" count offline majors won by players whose primary main is that character — "—" means none on record.
-        "# of Top 100" is how many rank in the latest edition. Click a column header to sort.
+        already there in the first edition, which were around for however long before it. "Majors" and "Last major"
+        count offline majors won by players whose primary main is that character — "—" means none on record. "Best
+        ever" is the character's highest rank in any edition, "In top 100" how many rank in the latest one. Dimmed
+        text is the player behind each figure. Click a column header to sort.
       </div>
       <RankingEraNote comps={comps} />
     </>
