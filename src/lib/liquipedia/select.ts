@@ -193,6 +193,38 @@ export const editionLabel = (e: RankingEdition): string => String(e.year);
 
 // ---------------- Character storylines ----------------
 
+export interface CharMajors {
+  /** Majors won by players whose primary main is this character. */
+  count: number;
+  /** `date` is the sortable "YYYY-MM(-DD)" end date, `year` the display year. */
+  last: { name: string; year: number; date: string; player: string };
+}
+
+/**
+ * Major titles per character — the total and the most recent — attributed
+ * through the winner's PRIMARY main in the player table (same rule the
+ * composition uses for the top 100). Winners with no player entry — or no
+ * listed main — are skipped rather than guessed at, so a character reads
+ * blank instead of inheriting someone else's title.
+ */
+export function majorsByChar(majors: Major[], players: Record<string, PlayerMeta>): Map<string, CharMajors> {
+  const out = new Map<string, CharMajors>();
+  // Oldest → newest, so the last write per character is the most recent win.
+  for (const m of sortedMajors(majors)) {
+    const main = players[m.winner]?.mains[0];
+    if (!main) continue;
+    const last = { name: m.name, year: m.year, date: m.date, player: m.winner };
+    const row = out.get(main);
+    if (row) {
+      row.count++;
+      row.last = last;
+    } else {
+      out.set(main, { count: 1, last });
+    }
+  }
+  return out;
+}
+
 export interface CharStoryline {
   char: string;
   /** Edition where the character first cracked the top 100, and who carried it. */

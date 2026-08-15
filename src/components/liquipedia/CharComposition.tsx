@@ -1,8 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHAR_STACK_ORDER, OTHER_CHAR, charColor, charId } from "../../lib/liquipedia/chars";
-import type { EditionComposition } from "../../lib/liquipedia/select";
-import { breakthroughLabel, breakthroughs, charStorylines, compositionSeries } from "../../lib/liquipedia/select";
+import type { Major, PlayerMeta } from "../../lib/liquipedia/types";
+import type { CharStoryline, EditionComposition } from "../../lib/liquipedia/select";
+import {
+  breakthroughLabel,
+  breakthroughs,
+  charStorylines,
+  compositionSeries,
+  majorsByChar,
+} from "../../lib/liquipedia/select";
 import { axisStyle, gridStyle, tooltipStyle } from "../chartStyle";
 import { Playbar } from "./Playback";
 import { usePlayback } from "./usePlayback";
@@ -11,6 +18,25 @@ import { useShareGif } from "./useShareGif";
 import { Stock } from "./Stock";
 
 const ROW_H = 30;
+
+/**
+ * Every "arrived"/"entered" claim on this tab is bounded by the ranking era:
+ * SSBMRank's first edition is 2013, while the majors list reaches back to
+ * 2003. A character whose era predates the rankings (Ken's Marth, Azen's
+ * Sheik) therefore reads as arriving in the first edition — say so rather
+ * than let the table imply the character wasn't around.
+ */
+function RankingEraNote({ comps }: { comps: EditionComposition[] }) {
+  const firstYear = comps[0]?.edition.year;
+  if (!firstYear) return null;
+  return (
+    <div className="hint lq-era-note">
+      Ranked data starts at {firstYear} — SSBMRank's first edition. Earlier eras (Ken's Marth, Azen's Sheik) have no
+      top-100 list to draw on, so "entered"/"arrived" here means the first ranking, not the first time anyone played
+      the character. The majors data above goes back to 2003.
+    </div>
+  );
+}
 const PLAY_MS = 750; // editions are sparse, so each one holds longer than a major
 
 // ---------------- Clustered bars: composition over time ----------------
@@ -83,6 +109,7 @@ export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
         players (ties), so counts are near-enough comparable across years — hover for the exact list size. Clusters are
         evenly spaced: there were no rankings in 2020–21.
       </div>
+      <RankingEraNote comps={comps} />
     </>
   );
 }
@@ -191,6 +218,7 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
         Bars count primary mains among that edition's {comp.edition.entries.length} ranked players; the name after each bar is the
         character's highest-ranked player that year. NEW marks a character absent from the previous edition.
       </div>
+      <RankingEraNote comps={comps} />
     </>
   );
 }
@@ -236,8 +264,9 @@ export function Trailblazers({ comps }: { comps: EditionComposition[] }) {
       <div className="hint">
         Each chip is the first time a character reached that bar in a top-100 list, and the player who got it there —
         aMSa dragging Yoshi into the top 10, Junebug ranking Donkey Kong at all. Where a character already stood in the
-        2013 list is the baseline, so only later moves appear.
+        first list is the baseline, so only later moves appear.
       </div>
+      <RankingEraNote comps={comps} />
     </>
   );
 }
@@ -270,31 +299,107 @@ export function PodiumTimeline({ comps }: { comps: EditionComposition[] }) {
         ))}
       </ol>
       <div className="hint">Top three of each SSBMRank/MPGR edition — the seasons with no edition (2020–21) are simply absent.</div>
+      <RankingEraNote comps={comps} />
     </>
   );
 }
 
 // ---------------- Storylines ----------------
 
+type StorySort = "char" | "majors" | "lastMajor" | "current";
+
+const STORY_SORT_DIR: Record<StorySort, "asc" | "desc"> = {
+  // The default direction each column takes on first click: names read A→Z,
+  // counts and recency read biggest/newest first.
+  char: "asc",
+  majors: "desc",
+  lastMajor: "desc",
+  current: "desc",
+};
+
 /** Per-character arc: arrival (and who drove it), peak era, best rank, today. */
-export function CharStorylinesTable({ comps }: { comps: EditionComposition[] }) {
+export function CharStorylinesTable({
+  comps,
+  majors,
+  players,
+}: {
+  comps: EditionComposition[];
+  majors: Major[];
+  players: Record<string, PlayerMeta>;
+}) {
   const stories = useMemo(() => charStorylines(comps), [comps]);
+  const charMajors = useMemo(() => majorsByChar(majors, players), [majors, players]);
+  const [sort, setSort] = useState<{ key: StorySort; dir: "asc" | "desc" }>({ key: "current", dir: "desc" });
+  // Anything that lands on the first edition is an upper bound, not a date:
+  // the rankings start there, so a peak or a best rank sitting in that year
+  // may well have been reached before anyone was keeping a list.
+  const firstYear = comps[0]?.edition.year;
+  const eraYear = (year: number): string => (year === firstYear ? `≤${year}` : String(year));
+  const sorted = useMemo(() => {
+    const sign = sort.dir === "asc" ? 1 : -1;
+    const rank = (s: CharStoryline): number | string => {
+      switch (sort.key) {
+        case "char":
+          return s.char;
+        case "majors":
+          return charMajors.get(s.char)?.count ?? 0;
+        case "lastMajor":
+          // No title at all sorts below every dated one in either direction's
+          // "least recent" end, so the blanks stay together.
+          return charMajors.get(s.char)?.last.date ?? "";
+        case "current":
+          return s.current;
+      }
+    };
+    return [...stories].sort((a, b) => {
+      const av = rank(a);
+      const bv = rank(b);
+      const cmp = typeof av === "string" ? av.localeCompare(bv as string) : av - (bv as number);
+      // Peak count is the table's underlying order — keep it as the tiebreak.
+      return cmp !== 0 ? sign * cmp : b.peak.count - a.peak.count || a.char.localeCompare(b.char);
+    });
+  }, [stories, charMajors, sort]);
+  const sortable = (key: StorySort, label: string, cls?: string) => {
+    const active = sort.key === key;
+    return (
+      <th
+        className={`lq-sortable${cls ? ` ${cls}` : ""}${active ? " lq-sorted" : ""}`}
+        aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}
+      >
+        <button
+          type="button"
+          onClick={() =>
+            setSort((prev) =>
+              prev.key === key
+                ? { key, dir: prev.dir === "asc" ? "desc" : "asc" }
+                : { key, dir: STORY_SORT_DIR[key] },
+            )
+          }
+        >
+          {label}
+          <span className="lq-sort-caret">{active ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span>
+        </button>
+      </th>
+    );
+  };
   if (stories.length === 0) return <div className="empty-note">No ranking data bundled.</div>;
   return (
     <>
       <table>
         <thead>
           <tr>
-            <th>Character</th>
+            {sortable("char", "Character")}
             <th>Entered top 100</th>
             <th className="data">Peak</th>
+            {sortable("majors", "Majors", "data")}
+            {sortable("lastMajor", "Last major")}
             <th>Best-ever rank</th>
-            <th className="data">Now</th>
+            {sortable("current", "# of Top 100", "data")}
             <th>Current torchbearer</th>
           </tr>
         </thead>
         <tbody>
-          {stories.map((s) => (
+          {sorted.map((s) => (
             <tr key={s.char}>
               <td>
                 <span className="lq-race-who">
@@ -303,14 +408,33 @@ export function CharStorylinesTable({ comps }: { comps: EditionComposition[] }) 
                 </span>
               </td>
               <td>
-                {s.arrival.year}
-                {s.newcomer && <span className="lq-new">NEW</span>} via {s.arrival.rep.player} (#{s.arrival.rep.rank})
+                {/* Characters already in the first edition were around before
+                    any ranking existed, so their arrival year is an upper
+                    bound, not a date — the rep is who carried them that year. */}
+                {eraYear(s.arrival.year)}
+                {s.newcomer && <span className="lq-new">NEW</span>}{" "}
+                via {s.arrival.rep.player} (#{s.arrival.rep.rank})
               </td>
               <td className="data">
-                {s.peak.count} <span className="lq-dim">in {s.peak.year}</span>
+                {s.peak.count} <span className="lq-dim">in {eraYear(s.peak.year)}</span>
+              </td>
+              <td className="data">{charMajors.get(s.char)?.count ?? "—"}</td>
+              <td>
+                {(() => {
+                  const win = charMajors.get(s.char)?.last;
+                  if (!win) return "—";
+                  return (
+                    <>
+                      {win.name}{" "}
+                      <span className="lq-dim">
+                        ({win.year}, {win.player})
+                      </span>
+                    </>
+                  );
+                })()}
               </td>
               <td>
-                #{s.bestEver.rep.rank} — {s.bestEver.rep.player} <span className="lq-dim">({s.bestEver.year})</span>
+                #{s.bestEver.rep.rank} — {s.bestEver.rep.player} <span className="lq-dim">({eraYear(s.bestEver.year)})</span>
               </td>
               <td className="data">{s.current > 0 ? s.current : "—"}</td>
               <td>{s.currentTop ? `${s.currentTop.player} (#${s.currentTop.rank})` : <span className="lq-dim">out of top 100</span>}</td>
@@ -320,8 +444,12 @@ export function CharStorylinesTable({ comps }: { comps: EditionComposition[] }) 
       </table>
       <div className="hint">
         "Entered" is the first edition where anyone ranked with the character as primary main — NEW marks characters
-        that arrived after the first edition (2013), e.g. a scene newcomer putting a character on the map.
+        that arrived after the first edition, e.g. a scene newcomer putting a character on the map; "≤" marks the ones
+        already there in the first edition, which were around for however long before it. "Majors" and "Last
+        major" count offline majors won by players whose primary main is that character — "—" means none on record.
+        "# of Top 100" is how many rank in the latest edition. Click a column header to sort.
       </div>
+      <RankingEraNote comps={comps} />
     </>
   );
 }

@@ -54,6 +54,13 @@ export function Liquipedia() {
       <div className="lq-scope-note">
         Scene-wide Melee history — the filter bar doesn't apply to this tab. Offline majors only:{" "}
         {onlineCount} online events from the 2020–21 netplay era are excluded from every count below.
+        {firstYear !== "" && (
+          <>
+            {" "}
+            Two datasets, two spans: majors run from {years[0]?.year ?? ""} on, while the ranking panels start at{" "}
+            {firstYear} — SSBMRank's first edition — so no character "arrives" before then.
+          </>
+        )}
       </div>
       <div className="kpi-strip">
         <Kpi label="Offline majors" value={String(majors.length)} delta={`${supermajorCount} supermajors`} />
@@ -150,7 +157,7 @@ export function Liquipedia() {
 
       <div className="panel">
         <h2>Character storylines</h2>
-        <CharStorylinesTable comps={comps} />
+        <CharStorylinesTable comps={comps} majors={majors} players={PLAYERS} />
       </div>
 
       <div className="panel">

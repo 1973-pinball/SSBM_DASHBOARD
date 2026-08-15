@@ -683,6 +683,35 @@ button.linky:hover { color: #a094ff; }
 }
 .lq-dim { color: var(--faint); }
 
+/* Coverage footnote — repeated under every ranking-derived panel, so it sits
+   quieter than the hint it follows. */
+.lq-era-note {
+  margin-top: 6px;
+  padding-left: 8px;
+  border-left: 2px solid var(--line);
+  font-style: italic;
+}
+
+/* Sortable table headers — the button carries the whole cell so the hit area
+   matches the label, and inherits th's type styling. */
+th.lq-sortable { padding: 0; }
+th.lq-sortable button {
+  all: unset;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 10px;
+  box-sizing: border-box;
+}
+th.lq-sortable.data button { justify-content: flex-end; }
+th.lq-sortable button:hover { color: var(--text); }
+th.lq-sortable button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
+th.lq-sorted { color: var(--text); }
+.lq-sort-caret { font-size: 9px; color: var(--faint); }
+th.lq-sorted .lq-sort-caret { color: var(--accent); }
+
 /* Legend + custom tooltips for the composition charts */
 .lq-legend {
   display: flex;
