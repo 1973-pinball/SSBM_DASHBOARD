@@ -1,5 +1,6 @@
-import type { GameRecord } from "./types";
+import type { Account, GameRecord } from "./types";
 import { putRecords } from "./db";
+import { gameKey } from "./dedupe";
 import { supabase } from "./supabase";
 
 /**
@@ -22,29 +23,75 @@ export interface SyncResult {
   pulled: GameRecord[];
 }
 
-async function remoteIds(): Promise<Set<string>> {
-  if (!supabase) return new Set();
+/**
+ * Whether a record may leave the machine: a game one of the user's own accounts
+ * actually played, and not a parse-failure tombstone (those carry no stats and
+ * can't be re-derived elsewhere).
+ *
+ * A shared replay folder holds other people's games — a housemate's, a friend's
+ * on the same setup. Those still parse and cache locally, because identity is a
+ * query-time concept and adding an account later has to be able to reach back
+ * and claim them (decision 1). But uploading someone else's stats to the user's
+ * private project isn't the user's call to make, so the network boundary is
+ * where participation starts to matter.
+ *
+ * The same predicate has to gate CloudSync's pending count. Filtering the push
+ * alone would leave every foreign game permanently unsynced, pinning the button
+ * gold and re-arming the auto-push on each change.
+ */
+export function isSyncable(rec: GameRecord, myCodes: Set<string>): boolean {
+  if (rec.parseError) return false;
+  return rec.players.some((p) => p.connectCode !== null && myCodes.has(p.connectCode));
+}
+
+interface RemoteIndex {
+  ids: Set<string>;
+  /** Content keys of what's up there. Rows pushed before game_key existed have
+   *  none and simply don't participate — correctness lives in the client-side
+   *  dedup, this only stops copies from bloating storage. */
+  keys: Set<string>;
+}
+
+async function remoteIndex(): Promise<RemoteIndex> {
   const ids = new Set<string>();
+  const keys = new Set<string>();
+  if (!supabase) return { ids, keys };
   for (let from = 0; ; from += ID_PAGE) {
     const { data, error } = await supabase
       .from("game_records")
-      .select("id")
+      .select("id, game_key")
       .range(from, from + ID_PAGE - 1);
     if (error) throw error;
-    for (const row of data) ids.add(row.id as string);
-    if (data.length < ID_PAGE) return ids;
+    for (const row of data) {
+      ids.add(row.id as string);
+      const key = row.game_key as string | null;
+      if (key) keys.add(key);
+    }
+    if (data.length < ID_PAGE) return { ids, keys };
   }
 }
 
-async function pushMissing(local: GameRecord[], remote: Set<string>): Promise<number> {
+async function pushMissing(local: GameRecord[], remote: RemoteIndex, myCodes: Set<string>): Promise<number> {
   if (!supabase) return 0;
-  // parseError rows carry no stats and can't be re-derived elsewhere — skip them.
-  const toPush = local.filter((r) => !remote.has(r.id) && !r.parseError);
+  // isSyncable drops tombstones and anyone else's games (see above).
+  // A record whose *game* is already up there under a different file key is a
+  // folder copy rather than a new game: pushing it would double the library in
+  // the cloud every time the folder moves.
+  const claimed = new Set(remote.keys);
+  const toPush: { rec: GameRecord; key: string }[] = [];
+  for (const rec of local) {
+    if (!isSyncable(rec, myCodes) || remote.ids.has(rec.id)) continue;
+    const key = gameKey(rec);
+    if (claimed.has(key)) continue;
+    claimed.add(key); // two local copies must not push each other up either
+    toPush.push({ rec, key });
+  }
   for (let i = 0; i < toPush.length; i += PUSH_CHUNK) {
-    const chunk = toPush.slice(i, i + PUSH_CHUNK).map((r) => ({
-      id: r.id,
-      data: r,
-      played_at: r.playedAt,
+    const chunk = toPush.slice(i, i + PUSH_CHUNK).map(({ rec, key }) => ({
+      id: rec.id,
+      data: rec,
+      played_at: rec.playedAt,
+      game_key: key,
     }));
     const { error } = await supabase.from("game_records").upsert(chunk, { onConflict: "user_id,id" });
     if (error) throw error;
@@ -52,9 +99,14 @@ async function pushMissing(local: GameRecord[], remote: Set<string>): Promise<nu
   return toPush.length;
 }
 
-async function pullMissing(localIdSet: Set<string>, remote: Set<string>): Promise<GameRecord[]> {
+async function pullMissing(local: GameRecord[], remote: RemoteIndex): Promise<GameRecord[]> {
   if (!supabase) return [];
-  const missing = [...remote].filter((id) => !localIdSet.has(id));
+  const haveIds = new Set(local.map((r) => r.id));
+  // Content keys, not just ids: a device that parsed the same replays from its
+  // own copy of the folder holds every game already, under different ids.
+  // Pulling those would plant duplicates straight into the local cache.
+  const haveKeys = new Set(local.map(gameKey));
+  const missing = [...remote.ids].filter((id) => !haveIds.has(id));
   const pulled: GameRecord[] = [];
   for (let i = 0; i < missing.length; i += PULL_CHUNK) {
     const { data, error } = await supabase
@@ -62,7 +114,13 @@ async function pullMissing(localIdSet: Set<string>, remote: Set<string>): Promis
       .select("data")
       .in("id", missing.slice(i, i + PULL_CHUNK));
     if (error) throw error;
-    pulled.push(...data.map((row) => row.data as GameRecord));
+    for (const row of data) {
+      const rec = row.data as GameRecord;
+      const key = gameKey(rec);
+      if (haveKeys.has(key)) continue;
+      haveKeys.add(key);
+      pulled.push(rec);
+    }
   }
   if (pulled.length) await putRecords(pulled); // also lands them in the local cache
   return pulled;
@@ -73,25 +131,61 @@ async function pullMissing(localIdSet: Set<string>, remote: Set<string>): Promis
  * it in memory) and gets back what was pushed/pulled; pulled records are
  * already persisted locally, so the caller only needs to update React state.
  */
-export async function syncRecords(local: GameRecord[]): Promise<SyncResult> {
+export async function syncRecords(local: GameRecord[], myCodes: Set<string>): Promise<SyncResult> {
   if (!supabase) return { pushed: 0, pulled: [] };
-  const remote = await remoteIds();
-  const localIdSet = new Set(local.map((r) => r.id));
-  const pushed = await pushMissing(local, remote);
-  const pulled = await pullMissing(localIdSet, remote);
+  const remote = await remoteIndex();
+  const pushed = await pushMissing(local, remote, myCodes);
+  // The pull stays unfiltered: RLS means everything up there is already this
+  // user's, and anything a pre-participation-filter release left behind is
+  // dropped at resolve time anyway. Filtering here would also break the
+  // fresh-device restore, which syncs before it knows what the accounts are.
+  const pulled = await pullMissing(local, remote);
   return { pushed, pulled };
 }
 
-/** Cloud copy of the identity codes; last write wins, which matches the UX. */
-export async function pushMyCodes(codes: string[]): Promise<void> {
+/**
+ * Cloud copy of the user's accounts; last write wins, which matches the UX.
+ * Array position becomes sort_order, so the editor's ordering survives a
+ * restore — the first account is the one that titles the player card.
+ */
+export async function pushMyAccounts(accounts: Account[]): Promise<void> {
   if (!supabase) return;
-  const { error } = await supabase.from("user_settings").upsert({ my_codes: codes });
+  if (accounts.length) {
+    // user_id comes from the column default (auth.uid()), same as game_records.
+    const rows = accounts.map((a, i) => ({ code: a.code, label: a.label, sort_order: i }));
+    const { error } = await supabase.from("user_codes").upsert(rows, { onConflict: "user_id,code" });
+    if (error) throw error;
+  }
+  // An account removed in the editor has to actually disappear — upsert alone
+  // would leave it behind. Diffing against what's up there beats deleting the
+  // lot first, which would strand the user with no identity if the write failed.
+  const { data, error } = await supabase.from("user_codes").select("code");
   if (error) throw error;
+  const keep = new Set(accounts.map((a) => a.code));
+  const stale = data.map((r) => r.code as string).filter((c) => !keep.has(c));
+  if (stale.length) {
+    const { error: delError } = await supabase.from("user_codes").delete().in("code", stale);
+    if (delError) throw delError;
+  }
+  // Mirror to the legacy column for one release (see supabase/schema.sql).
+  await supabase.from("user_settings").upsert({ my_codes: accounts.map((a) => a.code) });
 }
 
-export async function pullMyCodes(): Promise<string[] | null> {
+export async function pullMyAccounts(): Promise<Account[] | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.from("user_settings").select("my_codes").maybeSingle();
+  const { data, error } = await supabase
+    .from("user_codes")
+    .select("code, label, sort_order")
+    .order("sort_order", { ascending: true });
   if (error) throw error;
-  return (data?.my_codes as string[] | undefined) ?? null;
+  if (data.length) {
+    return data.map((r) => ({ code: r.code as string, label: (r.label as string | null) ?? null }));
+  }
+  // Empty user_codes means this account last synced before the table existed.
+  // Fall back to the legacy array so a fresh-device restore still finds an
+  // identity; the next save writes it back in the new shape.
+  const legacy = await supabase.from("user_settings").select("my_codes").maybeSingle();
+  if (legacy.error) throw legacy.error;
+  const codes = (legacy.data?.my_codes as string[] | undefined) ?? [];
+  return codes.length ? codes.map((code) => ({ code, label: null })) : null;
 }

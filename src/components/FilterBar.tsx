@@ -1,7 +1,7 @@
-import type { Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
+import type { Account, Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { charName, stageName } from "../lib/melee";
 import { useMemo } from "react";
-import { DEFAULT_FILTERS } from "../lib/types";
+import { DEFAULT_FILTERS, accountLabel } from "../lib/types";
 import { localDay } from "../lib/stats";
 import { shortDate } from "../lib/format";
 
@@ -11,11 +11,12 @@ interface Props {
   games: ResolvedGame[]; // unfiltered, for option lists
   teamGames: ResolvedTeamGame[];
   hasTeamGames: boolean;
+  accounts: Account[];
 }
 
 const GAME_TYPES: GameType[] = ["ranked", "unranked", "direct", "offline"];
 
-export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames }: Props) {
+export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames, accounts }: Props) {
   const isTeams = filters.format === "teams";
 
   // Option lists come from whichever format is active — offering "vs Fox" when no
@@ -27,6 +28,10 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
     const oppCodes = new Map<string, number>();
     const mateCodes = new Map<string, number>();
     const dayCounts = new Map<string, number>();
+    const myCodes = new Map<string, number>();
+    const bumpMine = (code: string | null) => {
+      if (code) myCodes.set(code, (myCodes.get(code) ?? 0) + 1);
+    };
     const bump = (code: string | null) => {
       if (code) oppCodes.set(code, (oppCodes.get(code) ?? 0) + 1);
     };
@@ -41,6 +46,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
         myChars.add(g.me.characterId);
         stages.add(g.rec.stageId);
         bumpDay(g.date);
+        bumpMine(g.me.connectCode);
         if (g.teammate.connectCode) {
           mateCodes.set(g.teammate.connectCode, (mateCodes.get(g.teammate.connectCode) ?? 0) + 1);
         }
@@ -56,6 +62,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
         stages.add(g.rec.stageId);
         bump(g.opp.connectCode);
         bumpDay(g.date);
+        bumpMine(g.me.connectCode);
       }
     }
     const topCodes = (m: Map<string, number>) =>
@@ -69,6 +76,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
       stages: Array.from(stages).sort((a, b) => a - b),
       codes: topCodes(oppCodes),
       mateCodes: topCodes(mateCodes),
+      myCodes,
       // Most recent session first — that's almost always the one being looked up.
       days: Array.from(dayCounts.entries())
         .sort((a, b) => b[0].localeCompare(a[0]))
@@ -82,6 +90,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
   const isDefault =
     filters.range === "all" &&
     filters.day === null &&
+    filters.accountCode === null &&
     filters.myCharacter === null &&
     filters.oppCharacter === null &&
     filters.stageId === null &&
@@ -102,6 +111,24 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames 
           >
             <option value="singles">Singles (1v1)</option>
             <option value="teams">Teams (2v2)</option>
+          </select>
+        </label>
+      )}
+      {/* Only worth a control once there's more than one account to split. */}
+      {accounts.length > 1 && (
+        <label>
+          Account
+          <select value={filters.accountCode ?? ""} onChange={(e) => set({ accountCode: e.target.value || null })}>
+            <option value="">All accounts</option>
+            {accounts.map((a) => {
+              const n = opts.myCodes.get(a.code) ?? 0;
+              return (
+                <option key={a.code} value={a.code}>
+                  {accountLabel(a)}
+                  {n > 0 ? ` — ${n.toLocaleString()}` : " — none here"}
+                </option>
+              );
+            })}
           </select>
         </label>
       )}

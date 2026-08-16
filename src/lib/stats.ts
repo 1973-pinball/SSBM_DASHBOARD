@@ -1,4 +1,4 @@
-import type { ActionCounts, Filters, GameRecord, GameType, ResolvedGame, ResolvedTeamGame } from "./types";
+import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame } from "./types";
 import { ACTION_LABELS } from "./types";
 import { INCLUDED_STAGE_ID_SET } from "./config";
 import { moveGroup } from "./melee";
@@ -21,34 +21,28 @@ function localWeekStart(date: Date): string {
 
 // ---------- Identity ----------
 
-export interface CodeCandidate {
-  code: string;
-  displayName: string | null;
-  games: number;
-  share: number;
-}
-
-/** Rank connect codes by how many games they appear in; "you" is almost always #1. */
-export function inferIdentity(records: GameRecord[]): CodeCandidate[] {
-  const counts = new Map<string, { games: number; displayName: string | null }>();
-  let withCodes = 0;
+/**
+ * How many games each connect code appears in.
+ *
+ * This is not identity inference — the user states which accounts are theirs.
+ * Guessing doesn't work anyway: in a library where the alt played 40 games, two
+ * regular opponents sat above it at 42 and 41, so ranking by frequency would
+ * confidently pick the wrong codes. All this does is confirm that a code the
+ * user typed actually occurs in the folder, so a typo reads as "no games found"
+ * rather than silently producing an empty dashboard.
+ *
+ * Teams games count too — a doubles-only player still needs an identity.
+ */
+export function codeGameCounts(records: GameRecord[]): Map<string, number> {
+  const counts = new Map<string, number>();
   for (const rec of records) {
-    // Teams games count too — a doubles-only player still needs an identity.
     if (rec.parseError || rec.players.length < 2) continue;
-    let counted = false;
     for (const p of rec.players) {
       if (!p.connectCode) continue;
-      counted = true;
-      const cur = counts.get(p.connectCode) ?? { games: 0, displayName: null };
-      cur.games++;
-      cur.displayName = p.displayName ?? cur.displayName;
-      counts.set(p.connectCode, cur);
+      counts.set(p.connectCode, (counts.get(p.connectCode) ?? 0) + 1);
     }
-    if (counted) withCodes++;
   }
-  return Array.from(counts.entries())
-    .map(([code, v]) => ({ code, displayName: v.displayName, games: v.games, share: withCodes ? v.games / withCodes : 0 }))
-    .sort((a, b) => b.games - a.games);
+  return counts;
 }
 
 // ---------- Resolution & filtering ----------
@@ -63,8 +57,12 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
     // meIdx is 0 or 1 (players.length === 2 checked above), so both are in bounds.
     const me = rec.players[meIdx]!;
     const opp = rec.players[1 - meIdx]!;
-    const isWin = rec.winnerIndex === null ? null : rec.winnerIndex === meIdx;
-    out.push({ rec, me, opp, isWin, date: rec.playedAt ? new Date(rec.playedAt) : null });
+    // Both sides are the user's own accounts. Whichever we called "me" won,
+    // so a real result here would be a coin flip credited to the lower port —
+    // treat it as indeterminate, exactly like a sub-30s game (decision 2).
+    const selfMatch = opp.connectCode !== null && myCodes.has(opp.connectCode);
+    const isWin = selfMatch || rec.winnerIndex === null ? null : rec.winnerIndex === meIdx;
+    out.push({ rec, me, opp, isWin, date: rec.playedAt ? new Date(rec.playedAt) : null, selfMatch });
   }
   return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
 }
@@ -84,7 +82,12 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
     const allies = rec.players.filter((p) => p !== me && p.teamId === me.teamId);
     const opps = rec.players.filter((p) => p.teamId !== null && p.teamId !== me.teamId);
     if (allies.length !== 1 || opps.length !== 2) continue;
-    const isWin = rec.winnerTeamId === null ? null : rec.winnerTeamId === me.teamId;
+    // A second account of the user's on either side — teammate or opponent —
+    // means an account was lent out, so who "me" refers to is ambiguous. Same
+    // treatment as singles: no result, and kept out of the per-partner splits.
+    const mine = (p: PlayerSide) => p.connectCode !== null && myCodes.has(p.connectCode);
+    const selfMatch = mine(allies[0]!) || opps.some(mine);
+    const isWin = selfMatch || rec.winnerTeamId === null ? null : rec.winnerTeamId === me.teamId;
     out.push({
       rec,
       me,
@@ -92,6 +95,7 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
       opps: [opps[0]!, opps[1]!], // opps.length === 2 checked above
       isWin,
       date: rec.playedAt ? new Date(rec.playedAt) : null,
+      selfMatch,
     });
   }
   return out.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
@@ -107,6 +111,7 @@ export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] 
   return games.filter((g) => {
     if (f.day !== null && (!g.date || localDay(g.date) !== f.day)) return false;
     if (cutoff !== null && (!g.date || g.date.getTime() < cutoff)) return false;
+    if (f.accountCode !== null && g.me.connectCode !== f.accountCode) return false;
     if (f.myCharacter !== null && g.me.characterId !== f.myCharacter) return false;
     if (f.oppCharacter !== null && g.opp.characterId !== f.oppCharacter) return false;
     if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
@@ -123,6 +128,7 @@ export function applyTeamFilters(games: ResolvedTeamGame[], f: Filters): Resolve
   return games.filter((g) => {
     if (f.day !== null && (!g.date || localDay(g.date) !== f.day)) return false;
     if (cutoff !== null && (!g.date || g.date.getTime() < cutoff)) return false;
+    if (f.accountCode !== null && g.me.connectCode !== f.accountCode) return false;
     if (f.myCharacter !== null && g.me.characterId !== f.myCharacter) return false;
     if (f.oppCharacter !== null && !g.opps.some((o) => o.characterId === f.oppCharacter)) return false;
     if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
@@ -662,7 +668,7 @@ export function teamsRecords(games: ResolvedTeamGame[]): TeamsRecords {
     }
     const dm = g.rec.dmgMatrix;
     const code = g.teammate.connectCode;
-    if (!dm || !code) continue;
+    if (!dm || !code || g.selfMatch) continue;
     const ps = g.rec.players;
     const me = ps.indexOf(g.me);
     const mate = ps.indexOf(g.teammate);
@@ -988,8 +994,11 @@ export function setsSummary(sets: GameSet[]): SetsSummary {
 // ---------- Share card ----------
 
 export interface StatCardData {
+  /** The dominant account in view — the only one when the account filter is set. */
   code: string | null;
   name: string | null;
+  /** Every account of the user's present in these games, most-played first. */
+  codes: string[];
   games: number;
   wins: number;
   losses: number;
@@ -1012,7 +1021,11 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
   const base = tally(games);
   let frames = 0;
   let first: Date | null = null, last: Date | null = null;
-  let code: string | null = null, name: string | null = null;
+  // Identity is per-account, not per-latest-game: with a main and an alt in one
+  // folder, "whichever played most recently" would flip the card's name and
+  // code around at random. Count each account instead and let the dominant one
+  // title the card — which, under the account filter, is the only one present.
+  const mine = new Map<string, { games: number; name: string | null }>();
   const myChars = new Map<number, number>();
   const oppChars = new Map<number, number>();
   const stages = new Map<number, { games: number; wins: number; losses: number }>();
@@ -1028,9 +1041,12 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
       const day = localDay(g.date);
       days.set(day, (days.get(day) ?? 0) + 1);
     }
-    // Latest game wins the identity fields — tags change over time.
-    if (g.me.connectCode) code = g.me.connectCode;
-    if (g.me.displayName) name = g.me.displayName;
+    if (g.me.connectCode) {
+      const m = mine.get(g.me.connectCode) ?? { games: 0, name: null };
+      m.games++;
+      m.name = g.me.displayName ?? m.name; // latest tag wins; they change over time
+      mine.set(g.me.connectCode, m);
+    }
     myChars.set(g.me.characterId, (myChars.get(g.me.characterId) ?? 0) + 1);
     oppChars.set(g.opp.characterId, (oppChars.get(g.opp.characterId) ?? 0) + 1);
     const st = stages.get(g.rec.stageId) ?? { games: 0, wins: 0, losses: 0 };
@@ -1038,7 +1054,7 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
     if (g.isWin === true) st.wins++;
     else if (g.isWin === false) st.losses++;
     stages.set(g.rec.stageId, st);
-    if (g.opp.connectCode) {
+    if (g.opp.connectCode && !g.selfMatch) {
       const o = opps.get(g.opp.connectCode) ?? { name: null, games: 0, wins: 0, losses: 0 };
       o.games++;
       o.name = g.opp.displayName ?? o.name;
@@ -1074,9 +1090,13 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
     if (!busiestDay || n > busiestDay.games) busiestDay = { day, games: n };
   }
 
+  const codes = [...mine.entries()].sort((a, b) => b[1].games - a[1].games).map(([c]) => c);
+  const primary = codes[0] ?? null;
+
   return {
-    code,
-    name,
+    code: primary,
+    name: primary ? (mine.get(primary)?.name ?? null) : null,
+    codes,
     games: base.games,
     wins: base.wins,
     losses: base.losses,
@@ -1119,6 +1139,7 @@ export interface OpponentRow extends WL {
 export function byOpponent(games: ResolvedGame[]): OpponentRow[] {
   const map = new Map<string, ResolvedGame[]>();
   for (const g of games) {
+    if (g.selfMatch) continue; // your own alt is not an opponent
     const code = g.opp.connectCode;
     if (!code) continue;
     if (!map.has(code)) map.set(code, []);
@@ -1358,6 +1379,60 @@ export function byMode(games: ResolvedGame[]): ModeRow[] {
   return rows;
 }
 
+export interface AccountRow extends WL {
+  code: string;
+  killsPerGame: number | null;
+  deathsPerGame: number | null;
+  topCharacter: number | null;
+  lastPlayed: Date | null;
+}
+
+/**
+ * One row per account of the user's that appears in the filtered set. Sorted by
+ * games descending, so the main floats to the top without depending on the
+ * configured order — which is about display, not volume.
+ */
+export function byAccount(games: ResolvedGame[]): AccountRow[] {
+  const map = new Map<
+    string,
+    { gs: ResolvedGame[]; kills: number; deaths: number; chars: Map<number, number>; last: Date | null }
+  >();
+  for (const g of games) {
+    const code = g.me.connectCode;
+    if (!code) continue; // offline games carry no code to attribute to an account
+    let e = map.get(code);
+    if (!e) {
+      e = { gs: [], kills: 0, deaths: 0, chars: new Map(), last: null };
+      map.set(code, e);
+    }
+    e.gs.push(g);
+    e.kills += g.me.kills;
+    e.deaths += g.opp.kills;
+    e.chars.set(g.me.characterId, (e.chars.get(g.me.characterId) ?? 0) + 1);
+    if (g.date && (!e.last || g.date > e.last)) e.last = g.date;
+  }
+  return Array.from(map.entries())
+    .map(([code, e]) => {
+      let topCharacter: number | null = null;
+      let topCount = 0;
+      for (const [id, n] of e.chars) {
+        if (n > topCount) {
+          topCharacter = id;
+          topCount = n;
+        }
+      }
+      return {
+        code,
+        ...tally(e.gs),
+        killsPerGame: e.gs.length ? e.kills / e.gs.length : null,
+        deathsPerGame: e.gs.length ? e.deaths / e.gs.length : null,
+        topCharacter,
+        lastPlayed: e.last,
+      };
+    })
+    .sort((a, b) => b.games - a.games);
+}
+
 // ---------- Teams (2v2) ----------
 
 export interface TeamOverviewStats extends WL {
@@ -1414,6 +1489,7 @@ export function byTeammate(games: ResolvedTeamGame[]): TeammateRow[] {
     { gs: ResolvedTeamGame[]; chars: Map<number, number>; name: string | null; last: Date | null; taken: number; stockGames: number }
   >();
   for (const g of games) {
+    if (g.selfMatch) continue; // your own alt is not a partner
     const code = g.teammate.connectCode;
     if (!code) continue;
     let e = map.get(code);
@@ -1601,6 +1677,7 @@ export interface TeammateDamageRow extends TeamsDamageOverview {
 export function byTeammateDamage(games: ResolvedTeamGame[]): TeammateDamageRow[] {
   const map = new Map<string, { t: DmgTotals; name: string | null }>();
   for (const g of games) {
+    if (g.selfMatch) continue; // your own alt is not a partner
     const code = g.teammate.connectCode;
     if (!code) continue;
     let e = map.get(code);

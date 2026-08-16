@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
-import type { ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
-import { ACTION_LABELS } from "../lib/types";
+import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
+import { ACTION_LABELS, codeShort } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
@@ -1044,9 +1044,11 @@ function GameDetail({ g }: { g: ResolvedGame }) {
   );
 }
 
-export function GameLog({ games }: { games: ResolvedGame[] }) {
+export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: Account[] }) {
   const recent = useMemo(() => [...games].reverse().slice(0, 300), [games]);
   const [openId, setOpenId] = useState<string | null>(null);
+  // One account needs no column — every row would say the same thing.
+  const showAccount = accounts.length > 1;
 
   // Connect codes and dates come from the .slp file, i.e. from strangers online:
   // quote every field and defuse leading =+-@ so a crafted tag can't inject a
@@ -1058,12 +1060,15 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
   };
 
   const exportCsv = () => {
-    const header = "date,my_character,opp_character,opponent_code,stage,mode,result,my_kills,opp_kills,duration_s\n";
+    const header =
+      "date,my_code,my_account,my_character,opp_character,opponent_code,stage,mode,result,my_kills,opp_kills,duration_s\n";
     const body = [...games]
       .reverse()
       .map((g) =>
         [
           g.rec.playedAt ?? "",
+          g.me.connectCode ?? "",
+          g.me.connectCode ? codeShort(accounts, g.me.connectCode) : "",
           charName(g.me.characterId),
           charName(g.opp.characterId),
           g.opp.connectCode ?? "",
@@ -1100,6 +1105,7 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
         <thead>
           <tr>
             <th>Date</th>
+            {showAccount && <th>Account</th>}
             <th>Matchup</th>
             <th>Opponent</th>
             <th>Stage</th>
@@ -1114,6 +1120,11 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
             <Fragment key={g.rec.id}>
               <tr className="clickable" onClick={() => setOpenId(openId === g.rec.id ? null : g.rec.id)}>
                 <td className="data">{shortDate(g.date)}</td>
+                {showAccount && (
+                  <td title={g.me.connectCode ?? undefined}>
+                    {g.me.connectCode ? codeShort(accounts, g.me.connectCode) : "—"}
+                  </td>
+                )}
                 <td>
                   {charName(g.me.characterId)} <span style={{ color: "var(--faint)" }}>vs</span> {charName(g.opp.characterId)}
                 </td>
@@ -1124,8 +1135,15 @@ export function GameLog({ games }: { games: ResolvedGame[] }) {
                 </td>
                 <td className="data">
                   {g.isWin === null ? (
-                    <span className="badge" title="Indeterminate result (quit-out or very short game)">
-                      n/a
+                    <span
+                      className="badge"
+                      title={
+                        g.selfMatch
+                          ? "Both sides are your own accounts — no result to credit either way"
+                          : "Indeterminate result (quit-out or very short game)"
+                      }
+                    >
+                      {g.selfMatch ? "self" : "n/a"}
                     </span>
                   ) : g.isWin ? (
                     <span className="wl-pill up">W</span>

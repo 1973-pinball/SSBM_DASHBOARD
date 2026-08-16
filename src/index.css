@@ -811,6 +811,44 @@ th.lq-sorted .lq-sort-caret { color: var(--accent); }
 .lq-sources a { color: var(--accent); text-decoration: none; }
 .lq-sources a:hover { text-decoration: underline; }
 
+/* ---- Accounts (identity picker + editor) ---- */
+input[type="text"] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-family: var(--font-body);
+  font-size: 13px;
+}
+input[type="text"]::placeholder { color: var(--faint); }
+input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.acct-fields { margin-top: 12px; }
+.acct-list { display: flex; flex-direction: column; gap: 6px; }
+.acct-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel-2);
+}
+.acct-code-input { flex: 1 1 160px; min-width: 130px; font-family: var(--font-data); text-transform: uppercase; }
+.acct-code-input::placeholder { text-transform: none; }
+.acct-label { flex: 1 1 150px; min-width: 120px; }
+.acct-status { font-size: 12px; color: var(--faint); white-space: nowrap; flex: 0 0 auto; margin-left: auto; }
+.acct-status.ok { color: var(--muted); }
+.acct-status.warn { color: var(--gold); }
+.acct-status.bad { color: var(--loss); }
+.acct-remove { padding: 4px 9px; line-height: 1; color: var(--faint); flex: 0 0 auto; }
+.acct-remove:hover { color: var(--loss); border-color: var(--loss); }
+.acct-add-btn { margin-top: 10px; }
+.acct-error { color: var(--loss); font-size: 12px; }
+.acct-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 16px; }
+
 /* ---- Site footer ---- */
 .site-footer {
   display: flex;

@@ -1,4 +1,4 @@
-import type { ActionCounts, GameRecord, MoveAgg, PlayerSide } from "./types";
+import type { Account, ActionCounts, GameRecord, MoveAgg, PlayerSide } from "./types";
 import { INCLUDED_STAGE_IDS } from "./config";
 
 /**
@@ -97,6 +97,21 @@ function mulberry32(seed: number) {
 }
 
 export const DEMO_CODE = "DEMO#420";
+/** A second account, so demo mode exercises the multi-account views too. */
+export const DEMO_ALT_CODE = "SMURF#7";
+
+export const DEMO_ACCOUNTS: Account[] = [
+  { code: DEMO_CODE, label: "Main" },
+  { code: DEMO_ALT_CODE, label: "Alt" },
+];
+
+/**
+ * Which account played game `i`. Derived from the index rather than the PRNG so
+ * adding this didn't shift every downstream random draw, and blocked rather
+ * than sprinkled because people play a stretch on one account, not alternate
+ * game to game — which is what makes the Sessions view look right.
+ */
+const onAltAccount = (i: number): boolean => Math.floor(i / 40) % 4 === 3;
 
 interface Rival {
   code: string;
@@ -186,14 +201,16 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const lcAttempts = Math.floor(minutes * (26 + rand() * 14));
     const lcRate = Math.min(0.98, 0.68 + t * 0.16 + (rand() - 0.5) * 0.1);
 
+    const myCode = onAltAccount(i) ? DEMO_ALT_CODE : DEMO_CODE;
+
     const mkSide = (kills: number, taken: number, isMe: boolean): PlayerSide => {
       const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
       const totalDamage = kills * (95 + rand() * 40);
       return {
       moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin, isMe ? lcRate : 0.6 + rand() * 0.3),
       port: isMe ? 1 : 2,
-      connectCode: isMe ? DEMO_CODE : rival.code,
-      displayName: isMe ? "demo" : rival.name,
+      connectCode: isMe ? myCode : rival.code,
+      displayName: isMe ? (myCode === DEMO_CODE ? "demo" : "demo alt") : rival.name,
       characterId: isMe ? mine.id : oppChar,
       colorId: 0,
       teamId: null,

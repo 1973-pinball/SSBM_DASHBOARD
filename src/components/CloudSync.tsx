@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { GameRecord } from "../lib/types";
+import type { Account, GameRecord } from "../lib/types";
 import { cloudEnabled, currentSession, onAuthChange, signInWithGoogle, signOut, type Session } from "../lib/supabase";
-import { pushMyCodes, syncRecords } from "../lib/cloudSync";
+import { isSyncable, pushMyAccounts, syncRecords } from "../lib/cloudSync";
 import { GoogleG } from "./GoogleG";
 
 interface Props {
   records: GameRecord[];
-  myCodes: string[];
+  accounts: Account[];
   isDemo: boolean;
   /** App's reset generation when this mounted — stale syncs identify themselves with it. */
   generation: number;
@@ -21,7 +21,7 @@ type SyncState = { kind: "idle" } | { kind: "busy" } | { kind: "done"; pushed: n
  * to Supabase (flattened stats only — never .slp files). Renders nothing when
  * the Supabase env vars are absent, keeping the app local-only by default.
  */
-export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Props) {
+export function CloudSync({ records, accounts, isDemo, generation, onPulled }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [sync, setSync] = useState<SyncState>({ kind: "idle" });
   // Ids known to be in the cloud as of the last successful sync. After a sync
@@ -32,8 +32,8 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
   const autoSynced = useRef(false);
 
   // Latest props for the auto-sync effect without re-triggering it per change.
-  const latest = useRef({ records, myCodes, generation });
-  latest.current = { records, myCodes, generation };
+  const latest = useRef({ records, accounts, generation });
+  latest.current = { records, accounts, generation };
 
   useEffect(() => {
     if (!cloudEnabled) return;
@@ -49,15 +49,17 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     busyRef.current = true;
     setSync({ kind: "busy" });
     try {
-      const { records: recs, myCodes: codes, generation: gen } = latest.current;
-      const result = await syncRecords(recs);
+      const { records: recs, accounts: accts, generation: gen } = latest.current;
+      const codes = new Set(accts.map((a) => a.code));
+      const result = await syncRecords(recs, codes);
       if (result.pulled.length) onPulled(result.pulled, gen);
-      // The dashboard always has codes (identity is confirmed before entry);
-      // fresh-device adoption of cloud codes happens in App's landing restore.
-      if (codes.length) await pushMyCodes(codes);
-      // parseError tombstones are never pushed, so they never count as pending.
+      // The dashboard always has accounts (identity is confirmed before entry);
+      // fresh-device adoption of cloud accounts happens in App's landing restore.
+      if (accts.length) await pushMyAccounts(accts);
+      // Only syncable records can ever reach the cloud, so only they can be
+      // pending. Counting the rest would leave the button permanently gold.
       const ids = new Set<string>();
-      for (const r of recs) if (!r.parseError) ids.add(r.id);
+      for (const r of recs) if (isSyncable(r, codes)) ids.add(r.id);
       for (const r of result.pulled) ids.add(r.id);
       setSyncedIds(ids);
       setSync({ kind: "done", pushed: result.pushed, pulled: result.pulled.length });
@@ -77,13 +79,16 @@ export function CloudSync({ records, myCodes, isDemo, generation, onPulled }: Pr
     void runSync();
   }, [session, isDemo, runSync]);
 
-  // Games parsed since the last sync (e.g. a folder Refresh mid-session).
+  // Games of the user's own parsed since the last sync (e.g. a folder Refresh
+  // mid-session). Adding an account makes its games newly syncable, so they
+  // show up here and the auto-push picks them up without a rescan.
   const pending = useMemo(() => {
     if (!syncedIds) return 0;
+    const codes = new Set(accounts.map((a) => a.code));
     let n = 0;
-    for (const r of records) if (!r.parseError && !syncedIds.has(r.id)) n++;
+    for (const r of records) if (isSyncable(r, codes) && !syncedIds.has(r.id)) n++;
     return n;
-  }, [records, syncedIds]);
+  }, [records, syncedIds, accounts]);
 
   // Auto-push: newly parsed games sync on their own once the parse stream goes
   // quiet (record appends arrive ~1/s, so 2.5s of quiet ≈ done). One attempt

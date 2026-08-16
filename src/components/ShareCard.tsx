@@ -61,7 +61,10 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
           <div className="sc-head">
             <div>
               <div className="sc-tag">{d.name ?? d.code ?? "Melee player"}</div>
-              {d.code && <div className="sc-code">{d.code}</div>}
+              {/* Every account these numbers cover, not just the main: the card
+                  pools them, so naming one would misrepresent the totals. Under
+                  the account filter there is only one to list. */}
+              {d.codes.length > 0 && <div className="sc-code">{d.codes.join(" · ")}</div>}
             </div>
             <div className="sc-head-right">
               <div className="sc-title">PLAYER CARD</div>

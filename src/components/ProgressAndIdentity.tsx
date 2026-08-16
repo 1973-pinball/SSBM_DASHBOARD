@@ -1,5 +1,7 @@
-import type { ParseProgress } from "../lib/types";
-import type { CodeCandidate } from "../lib/stats";
+import { useState } from "react";
+import type { Account, ParseProgress } from "../lib/types";
+import { accountsError, blankAccount, cleanAccounts } from "../lib/types";
+import { AccountFields } from "./AccountFields";
 
 export function ProgressBar({ p }: { p: ParseProgress }) {
   const fraction = p.total ? p.done / p.total : 0;
@@ -18,41 +20,41 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
 }
 
 interface IdentityProps {
-  candidates: CodeCandidate[];
-  onConfirm: (codes: string[]) => void;
+  gameCounts: Map<string, number>;
+  onConfirm: (accounts: Account[]) => void;
 }
 
-export function IdentityPicker({ candidates, onConfirm }: IdentityProps) {
-  const top = candidates[0];
-  if (!top) {
-    return (
-      <div className="panel">
-        <h2>Who are you?</h2>
-        <p>
-          No connect codes were found in these replays (offline games?). Identity resolution for offline replays is
-          on the roadmap; for now the dashboard needs netplay replays.
-        </p>
-      </div>
-    );
-  }
+export function IdentityPicker({ gameCounts, onConfirm }: IdentityProps) {
+  const [accounts, setAccounts] = useState<Account[]>([blankAccount(0)]);
+
+  const error = accountsError(accounts);
+  const filled = accounts.filter((a) => a.code.trim() !== "").length;
+  // Don't scold an untouched form: "enter at least one" is only worth showing
+  // once the user has actually started typing.
+  const showError = error !== null && filled > 0;
+
   return (
     <div className="panel">
-      <h2>Confirm your identity</h2>
+      <h2>What are your connect codes?</h2>
       <p>
-        You appear to be <b style={{ fontFamily: "var(--font-data)" }}>{top.code}</b>
-        {top.displayName ? ` (“${top.displayName}”)` : ""} — found in {(top.share * 100).toFixed(0)}% of games.
+        Enter every Slippi account you play on. A main and an alt in the same replay folder is normal — the dashboard
+        pools them, and the Account filter splits them apart again. Labels are optional and show up as{" "}
+        <b style={{ fontFamily: "var(--font-data)" }}>Main (ABCD#123)</b> in filters and tables.
       </p>
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 10 }}>
-        <button className="primary" onClick={() => onConfirm([top.code])}>
-          Yes, that&rsquo;s me
+
+      <AccountFields accounts={accounts} onChange={setAccounts} gameCounts={gameCounts} />
+
+      <div className="acct-actions">
+        <button className="primary" disabled={error !== null} onClick={() => onConfirm(cleanAccounts(accounts))}>
+          {filled > 1 ? `Continue with ${filled} accounts` : "Continue"}
         </button>
-        {candidates.slice(1, 5).map((c) => (
-          <button key={c.code} onClick={() => onConfirm([c.code])}>
-            I&rsquo;m {c.code} ({c.games})
-          </button>
-        ))}
+        {showError && (
+          <span className="acct-error" role="alert">
+            {error}
+          </span>
+        )}
       </div>
-      <p className="hint">Playing on multiple accounts? Pick your main — the dashboard tracks one code at a time for now.</p>
+      <p className="hint">You can add, rename, or remove accounts later without re-scanning your replays.</p>
     </div>
   );
 }

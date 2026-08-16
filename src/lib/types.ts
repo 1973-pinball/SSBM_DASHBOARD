@@ -92,10 +92,90 @@ export interface GameRecord {
   parseError?: string;
 }
 
+/**
+ * One Slippi account belonging to the user. Several are normal — the same
+ * person routinely keeps a main and an alt, and both sets of replays land in
+ * the same folder. Identity stays a query-time concept (see decision 1 in
+ * CLAUDE.md): these codes are matched against the neutrally-stored
+ * `GameRecord.players[]`, never baked into a record.
+ */
+export interface Account {
+  code: string; // normalized upper-case, e.g. ABCD#123
+  label: string | null; // "Main", "Alt" — user-supplied, may be absent
+}
+
+/** How an account is named in dropdowns and tables: `Main (ABCD#123)`. */
+export function accountLabel(a: Account): string {
+  return a.label ? `${a.label} (${a.code})` : a.code;
+}
+
+/** Same, given only a code — falls back to the bare code for an unknown one. */
+export function codeLabel(accounts: Account[], code: string): string {
+  const hit = accounts.find((a) => a.code === code);
+  return hit ? accountLabel(hit) : code;
+}
+
+/**
+ * Compact form for dense tables, where a column header already says "Account"
+ * and the full `Main (ABCD#123)` would blow the column out: the label alone,
+ * or the bare code when there isn't one.
+ */
+export function codeShort(accounts: Account[], code: string): string {
+  return accounts.find((a) => a.code === code)?.label ?? code;
+}
+
+/**
+ * Slippi codes look like ABCD#123. Deliberately permissive on length: turning
+ * away a code the user actually owns is a worse failure than accepting a typo,
+ * which simply never matches a replay and shows up as "no games yet".
+ */
+const CODE_PATTERN = /^[A-Z0-9]{1,8}#\d{1,4}$/;
+
+export const normalizeCode = (raw: string): string => raw.trim().toUpperCase();
+export const isValidCode = (code: string): boolean => CODE_PATTERN.test(code);
+
+/** First two rows get named for you — main/alt is the case by a mile. */
+const DEFAULT_LABELS = ["Main", "Alt"];
+
+/** An empty row for the account entry form, pre-labelled by position. */
+export const blankAccount = (index: number): Account => ({
+  code: "",
+  label: DEFAULT_LABELS[index] ?? null,
+});
+
+/**
+ * Normalize codes, trim labels, drop rows left blank — what the picker and the
+ * editor both save. Blank rows are dropped rather than rejected: an empty row
+ * is someone who clicked "add another" and changed their mind.
+ */
+export function cleanAccounts(accounts: Account[]): Account[] {
+  return accounts
+    .filter((a) => a.code.trim() !== "")
+    .map((a) => ({ code: normalizeCode(a.code), label: a.label?.trim() ? a.label.trim() : null }));
+}
+
+/**
+ * The first problem with a draft account list, or null when it can be saved.
+ * Codes compare normalized, so `abcd#1` and `ABCD#1` collide as they should.
+ */
+export function accountsError(accounts: Account[]): string | null {
+  const filled = accounts.filter((a) => a.code.trim() !== "");
+  if (filled.length === 0) return "Enter at least one connect code.";
+  const seen = new Set<string>();
+  for (const a of filled) {
+    const code = normalizeCode(a.code);
+    if (!isValidCode(code)) return `“${a.code.trim()}” doesn’t look like a connect code — they’re like ABCD#123.`;
+    if (seen.has(code)) return `${code} is listed twice.`;
+    seen.add(code);
+  }
+  return null;
+}
+
 export interface Filters {
   format: Format;
   range: "all" | "7d" | "14d" | "30d" | "90d" | "1y";
   day: string | null; // local YYYY-MM-DD; overrides range when set
+  accountCode: string | null; // which of my accounts; null = all of them
   myCharacter: number | null;
   oppCharacter: number | null;
   stageId: number | null;
@@ -108,6 +188,7 @@ export const DEFAULT_FILTERS: Filters = {
   format: "singles",
   range: "all",
   day: null,
+  accountCode: null,
   myCharacter: null,
   oppCharacter: null,
   stageId: null,
@@ -123,6 +204,13 @@ export interface ResolvedGame {
   opp: PlayerSide;
   isWin: boolean | null;
   date: Date | null;
+  /**
+   * Two of the user's own accounts met in this game — rare, but possible once
+   * an alt exists and gets lent out. "You" won and lost it simultaneously, so
+   * it carries no result: `isWin` is forced null and the game is kept out of
+   * opponent breakdowns. It still appears in the game log.
+   */
+  selfMatch: boolean;
 }
 
 /** A 2v2 game resolved against the chosen identity. Win/loss is team-level. */
@@ -133,6 +221,8 @@ export interface ResolvedTeamGame {
   opps: [PlayerSide, PlayerSide];
   isWin: boolean | null;
   date: Date | null;
+  /** See ResolvedGame.selfMatch — here it also covers an alt as the teammate. */
+  selfMatch: boolean;
 }
 
 export interface ParseProgress {

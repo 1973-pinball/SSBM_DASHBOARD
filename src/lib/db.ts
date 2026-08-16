@@ -1,5 +1,6 @@
 import Dexie, { type Table } from "dexie";
-import type { GameRecord } from "./types";
+import type { Account, GameRecord } from "./types";
+import { dedupeRecords } from "./dedupe";
 
 /**
  * Records live packed ~250 to a row: reading tens of thousands of individual
@@ -196,13 +197,45 @@ export async function clearAll(): Promise<void> {
   await db.kv.clear();
 }
 
-export async function getMyCodes(): Promise<string[]> {
-  const row = await db.kv.get("myCodes");
-  return (row?.value as string[]) ?? [];
+/**
+ * Drop cached records duplicating a game already held under a different file
+ * key — the residue of a copied, moved, or cloud-synced replay folder (see
+ * dedupe.ts). Takes the records the caller already read and hands back the
+ * survivors, repacking only when there is something to remove, so a clean
+ * cache pays one length comparison at startup and no write at all.
+ */
+export async function pruneDuplicates(all: GameRecord[]): Promise<GameRecord[]> {
+  const kept = dedupeRecords(all);
+  if (kept.length === all.length) return all;
+  await db.transaction("rw", db.packs, async () => {
+    await db.packs.clear();
+    const rows: RecordPack[] = [];
+    for (let i = 0; i < kept.length; i += PACK_SIZE) rows.push({ records: kept.slice(i, i + PACK_SIZE) });
+    if (rows.length) await db.packs.bulkAdd(rows);
+  });
+  // `seen` deliberately keeps the dropped ids. Those files are still on disk,
+  // and it is a "have I read this file" index, not a record index — forgetting
+  // them would re-parse the copies on the next scan and recreate exactly the
+  // duplicates just removed. The cost is that deleting the surviving copy from
+  // disk strands the game until "Change folder" resets the cache.
+  return kept;
 }
 
-export async function setMyCodes(codes: string[]): Promise<void> {
-  await db.kv.put({ key: "myCodes", value: codes });
+export async function getMyAccounts(): Promise<Account[]> {
+  const row = await db.kv.get("myAccounts");
+  const stored = row?.value as Account[] | undefined;
+  if (stored?.length) return stored;
+  // Cache written before multi-account: a bare string[] under the old key.
+  const legacy = await db.kv.get("myCodes");
+  const codes = (legacy?.value as string[] | undefined) ?? [];
+  return codes.map((code) => ({ code, label: null }));
+}
+
+export async function setMyAccounts(accounts: Account[]): Promise<void> {
+  await db.kv.put({ key: "myAccounts", value: accounts });
+  // Mirror the bare codes for one release: a tab still running the previous
+  // bundle reads this key, and would otherwise drop back to the identity picker.
+  await db.kv.put({ key: "myCodes", value: accounts.map((a) => a.code) });
 }
 
 /**

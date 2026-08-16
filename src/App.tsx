@@ -1,16 +1,17 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { Filters, GameRecord, ParseProgress } from "./lib/types";
+import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline, RecordSaveError } from "./lib/pool";
-import { allRecords, clearAll, getMyCodes, setMyCodes, getDirHandle, setDirHandle } from "./lib/db";
-import { inferIdentity, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
-import { generateDemoRecords, DEMO_CODE } from "./lib/demo";
+import { allRecords, clearAll, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
+import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
+import { dedupeRecords } from "./lib/dedupe";
+import { generateDemoRecords, DEMO_ACCOUNTS } from "./lib/demo";
 import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
 import { CloudSync } from "./components/CloudSync";
 import { cloudEnabled, currentSession, signInWithGoogle } from "./lib/supabase";
-import { syncRecords, pullMyCodes } from "./lib/cloudSync";
+import { syncRecords, pullMyAccounts } from "./lib/cloudSync";
 
 // Dashboard views are lazy so the landing/parsing path doesn't pay for
 // recharts — it's the biggest dependency in the app and none of it renders
@@ -27,6 +28,7 @@ const Insights = lazy(() => import("./components/Insights").then((m) => ({ defau
 const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
 const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
 const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
+const AccountsEditor = lazy(() => import("./components/AccountsEditor").then((m) => ({ default: m.AccountsEditor })));
 
 /**
  * Last line of defense for lazy-chunk failures: main.tsx auto-reloads once on
@@ -72,10 +74,11 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("overview");
   const [records, setRecords] = useState<GameRecord[]>([]);
   const [progress, setProgress] = useState<ParseProgress | null>(null);
-  const [myCodes, setMyCodesState] = useState<string[]>([]);
+  const [accounts, setAccountsState] = useState<Account[]>([]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [isDemo, setIsDemo] = useState(false);
   const [showGuide, setShowGuide] = useState(false);
+  const [showAccounts, setShowAccounts] = useState(false);
   // Scene history stands alone: it reads no replays, so it must be reachable
   // straight from the landing page rather than only as a dashboard tab.
   const [browsingHistory, setBrowsingHistory] = useState(false);
@@ -113,12 +116,16 @@ export default function App() {
   useEffect(() => {
     void (async () => {
       try {
-        const [cached, codes, handle] = await Promise.all([allRecords(), getMyCodes(), getDirHandle()]);
+        const [raw, accts, handle] = await Promise.all([allRecords(), getMyAccounts(), getDirHandle()]);
         if (handle) setDirHandleState(handle);
+        // A copied or re-organized replay folder leaves the same game cached
+        // under several file keys; collapse them once here so the cache doesn't
+        // carry the duplicates forward (see lib/dedupe.ts).
+        const cached = await pruneDuplicates(raw);
         if (cached.length > 0) {
           setRecords(cached);
-          if (codes.length > 0) {
-            setMyCodesState(codes);
+          if (accts.length > 0) {
+            setAccountsState(accts);
             setPhase("dashboard");
           } else {
             setPhase("identity");
@@ -127,13 +134,16 @@ export default function App() {
           const gen = generation.current;
           setCloudRestoring(true);
           try {
-            const { pulled } = await syncRecords([]); // local is empty: pure pull, already cached
-            const cloudCodes = (await pullMyCodes()) ?? [];
+            // Local is empty, so this is a pure pull and the code set only
+            // gates the push half — nothing to filter. Accounts aren't known
+            // until pullMyAccounts below, which is why it can't be passed here.
+            const { pulled } = await syncRecords([], new Set<string>());
+            const cloudAccounts = (await pullMyAccounts()) ?? [];
             if (generation.current !== gen || pulled.length === 0) return;
             setRecords(pulled);
-            if (cloudCodes.length > 0) {
-              setMyCodesState(cloudCodes);
-              void setMyCodes(cloudCodes);
+            if (cloudAccounts.length > 0) {
+              setAccountsState(cloudAccounts);
+              void setMyAccounts(cloudAccounts);
               setPhase("dashboard");
             } else {
               setPhase("identity");
@@ -174,9 +184,9 @@ export default function App() {
         if (generation.current !== gen) return;
         const all = await allRecords();
         setRecords(all);
-        const codes = await getMyCodes();
-        if (codes.length > 0) {
-          setMyCodesState(codes);
+        const accts = await getMyAccounts();
+        if (accts.length > 0) {
+          setAccountsState(accts);
           setPhase("dashboard");
         } else {
           setPhase("identity");
@@ -248,6 +258,7 @@ export default function App() {
       void import("./components/Sessions");
       void import("./components/Records");
       void import("./components/MetricsGuide");
+      void import("./components/AccountsEditor");
       void import("./components/liquipedia/Liquipedia");
     };
     // Optional-chained: Safari didn't ship requestIdleCallback until late.
@@ -318,15 +329,28 @@ export default function App() {
   const onDemo = useCallback(() => {
     setIsDemo(true);
     setRecords(generateDemoRecords());
-    setMyCodesState([DEMO_CODE]);
+    setAccountsState(DEMO_ACCOUNTS);
     setPhase("dashboard");
   }, []);
 
-  const confirmIdentity = useCallback((codes: string[]) => {
-    setMyCodesState(codes);
-    void setMyCodes(codes);
+  const confirmIdentity = useCallback((accts: Account[]) => {
+    setAccountsState(accts);
+    void setMyAccounts(accts);
     setPhase("dashboard");
   }, []);
+
+  /**
+   * Identity is resolved at query time, so changing accounts costs a recompute
+   * and nothing else — no re-parse, no cache clear. Filters are reset because
+   * an accountCode (or an opponent) scoped to a removed account would leave the
+   * dashboard empty with no visible cause.
+   */
+  const saveAccounts = useCallback((accts: Account[]) => {
+    setAccountsState(accts);
+    if (!isDemo) void setMyAccounts(accts);
+    setFilters((f) => ({ ...DEFAULT_FILTERS, format: f.format, range: f.range }));
+    setShowAccounts(false);
+  }, [isDemo]);
 
   // Cloud pulls land in the Dexie cache before this fires; state just catches
   // up. `gen` is captured by the sync when it starts — a pull that raced a
@@ -345,7 +369,7 @@ export default function App() {
     abortRef.current = null;
     if (!isDemo) void clearAll(); // also drops the stored dirHandle
     setRecords([]);
-    setMyCodesState([]);
+    setAccountsState([]);
     setFilters(DEFAULT_FILTERS);
     setIsDemo(false);
     setDirHandleState(null);
@@ -362,11 +386,22 @@ export default function App() {
     });
   }, []);
 
-  const resolved = useMemo(() => resolveGames(records, new Set(myCodes)), [records, myCodes]);
-  const resolvedTeams = useMemo(() => resolveTeamGames(records, new Set(myCodes)), [records, myCodes]);
+  // Records reach state from three racing sources — the cache restore, the
+  // folder scan and a cloud pull — and a shared or copied replay folder means
+  // the same game can arrive under different file keys. Collapse before
+  // resolving so no aggregate ever counts a game twice.
+  const deduped = useMemo(() => dedupeRecords(records), [records]);
+  const myCodes = useMemo(() => new Set(accounts.map((a) => a.code)), [accounts]);
+  const resolved = useMemo(() => resolveGames(deduped, myCodes), [deduped, myCodes]);
+  const resolvedTeams = useMemo(() => resolveTeamGames(deduped, myCodes), [deduped, myCodes]);
   const filtered = useMemo(() => applyFilters(resolved, filters), [resolved, filters]);
   const filteredTeams = useMemo(() => applyTeamFilters(resolvedTeams, filters), [resolvedTeams, filters]);
-  const candidates = useMemo(() => (phase === "identity" ? inferIdentity(records) : []), [phase, records]);
+  // Confirms a typed code actually occurs in the library — the identity step
+  // and the editor both show it next to the code. Nothing is inferred from it.
+  const gameCounts = useMemo(
+    () => (phase === "identity" || showAccounts ? codeGameCounts(deduped) : new Map<string, number>()),
+    [phase, showAccounts, deduped],
+  );
 
   // Never strand the user in a teams view they have no games for.
   const hasTeamGames = resolvedTeams.length > 0;
@@ -389,7 +424,8 @@ export default function App() {
           )}
           {!browsingHistory && phase === "dashboard" && (
             <div className="identity">
-              <b>{myCodes.join(", ") || "—"}</b> ·{" "}
+              <b>{accounts.map((a) => a.code).join(", ") || "—"}</b>
+              {accounts.length > 1 && <span className="tag" style={{ marginLeft: 6 }}>{accounts.length} accounts</span>} ·{" "}
               {(showTeams ? resolvedTeams.length : resolved.length).toLocaleString()} {showTeams ? "2v2 games" : "games"}
               {!isDemo && dirHandle && (
                 <button className="ghost" style={{ marginLeft: 10 }} onClick={onRefresh} disabled={syncing !== null}>
@@ -402,11 +438,14 @@ export default function App() {
               )}
               <CloudSync
                 records={records}
-                myCodes={myCodes}
+                accounts={accounts}
                 isDemo={isDemo}
                 generation={generation.current}
                 onPulled={onCloudPulled}
               />
+              <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowAccounts(true)}>
+                {accounts.length > 1 ? "Accounts" : "My account"}
+              </button>
               <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowGuide(true)}>
                 Metrics guide
               </button>
@@ -449,7 +488,7 @@ export default function App() {
 
       {!browsingHistory && phase === "parsing" && progress && <ProgressBar p={progress} />}
 
-      {!browsingHistory && phase === "identity" && <IdentityPicker candidates={candidates} onConfirm={confirmIdentity} />}
+      {!browsingHistory && phase === "identity" && <IdentityPicker gameCounts={gameCounts} onConfirm={confirmIdentity} />}
 
       {!browsingHistory && phase === "dashboard" && (
         <>
@@ -459,6 +498,7 @@ export default function App() {
             games={resolved}
             teamGames={resolvedTeams}
             hasTeamGames={hasTeamGames}
+            accounts={accounts}
           />
           {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
               consolidated view rather than the singles tab set. */}
@@ -482,8 +522,10 @@ export default function App() {
               allGames={resolved}
               teamGames={filteredTeams}
               filters={filters}
+              accounts={accounts}
               onSelectMyCharacter={(id) => setFilters({ ...filters, myCharacter: id })}
               onSelectMode={(mode) => setFilters({ ...filters, gameType: mode })}
+              onSelectAccount={(code) => setFilters({ ...filters, accountCode: code })}
             />
           )}
           {tab === "matchups" && (
@@ -517,7 +559,7 @@ export default function App() {
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "insights" && <Insights games={filtered} />}
           {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
-          {tab === "log" && <GameLog games={filtered} />}
+          {tab === "log" && <GameLog games={filtered} accounts={accounts} />}
           {tab === "liquipedia" && <Liquipedia />}
         </>
           )}
@@ -529,6 +571,17 @@ export default function App() {
       {showGuide && (
         <Suspense fallback={null}>
           <MetricsGuide onClose={() => setShowGuide(false)} />
+        </Suspense>
+      )}
+
+      {showAccounts && (
+        <Suspense fallback={null}>
+          <AccountsEditor
+            accounts={accounts}
+            gameCounts={gameCounts}
+            onSave={saveAccounts}
+            onClose={() => setShowAccounts(false)}
+          />
         </Suspense>
       )}
 

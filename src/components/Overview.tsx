@@ -2,9 +2,10 @@ import { useMemo } from "react";
 import {
   AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, BarChart, Bar, ReferenceLine, CartesianGrid,
 } from "recharts";
-import type { Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
-import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, applyFilters } from "../lib/stats";
-import { pct, num, int, duration, winRateColor } from "../lib/format";
+import type { Account, Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
+import { codeLabel } from "../lib/types";
+import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, byAccount, applyFilters } from "../lib/stats";
+import { pct, num, int, duration, winRateColor, shortDate } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { ShareCard } from "./ShareCard";
@@ -15,11 +16,15 @@ interface Props {
   allGames: ResolvedGame[]; // unfiltered (for prior-window delta)
   teamGames: ResolvedTeamGame[]; // filtered 2v2s — hours played spans both formats
   filters: Filters;
+  accounts: Account[];
   onSelectMyCharacter: (id: number) => void;
   onSelectMode: (mode: GameType | null) => void;
+  onSelectAccount: (code: string | null) => void;
 }
 
-export function Overview({ games, allGames, teamGames, filters, onSelectMyCharacter, onSelectMode }: Props) {
+export function Overview({
+  games, allGames, teamGames, filters, accounts, onSelectMyCharacter, onSelectMode, onSelectAccount,
+}: Props) {
   const stats = useMemo(() => overview(games, allGames, filters), [games, allGames, filters]);
   const rolling = useMemo(() => rollingWinRate(games), [games]);
   const chars = useMemo(() => byMyCharacter(games), [games]);
@@ -27,6 +32,12 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
   // Mode breakdown ignores the mode filter itself so all sections stay visible.
   const modes = useMemo(
     () => byMode(applyFilters(allGames, { ...filters, gameType: null })),
+    [allGames, filters],
+  );
+  // Same reasoning for accounts: the point of the panel is comparing them, so
+  // it applies every filter except the account one.
+  const accountRows = useMemo(
+    () => byAccount(applyFilters(allGames, { ...filters, accountCode: null })),
     [allGames, filters],
   );
 
@@ -66,6 +77,54 @@ export function Overview({ games, allGames, teamGames, filters, onSelectMyCharac
       </div>
 
       <ShareCard games={games} />
+
+      {/* Only meaningful with more than one account, and only once the filtered
+          window actually contains two — a 30-day view of a dormant alt would
+          otherwise render a one-row table that explains nothing. */}
+      {accounts.length > 1 && accountRows.length > 1 && (
+        <div className="panel">
+          <h2>By account</h2>
+          <table>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th className="data">Games</th>
+                <th className="data">W–L</th>
+                <th className="data">Win rate</th>
+                <th className="data">Kills / game</th>
+                <th className="data">Deaths / game</th>
+                <th>Most played</th>
+                <th className="data">Last played</th>
+              </tr>
+            </thead>
+            <tbody>
+              {accountRows.map((row) => (
+                <tr
+                  key={row.code}
+                  className="clickable"
+                  style={filters.accountCode === row.code ? { background: "var(--panel-2)" } : undefined}
+                  onClick={() => onSelectAccount(filters.accountCode === row.code ? null : row.code)}
+                >
+                  <td>{codeLabel(accounts, row.code)}</td>
+                  <td className="data">{row.games.toLocaleString()}</td>
+                  <td className="data">
+                    <span className="up">{row.wins}</span>–<span className="down">{row.losses}</span>
+                  </td>
+                  <td className="data" style={{ color: winRateColor(row.winRate) }}>{pct(row.winRate)}</td>
+                  <td className="data">{num(row.killsPerGame, 2)}</td>
+                  <td className="data">{num(row.deathsPerGame, 2)}</td>
+                  <td>{row.topCharacter === null ? "—" : charName(row.topCharacter)}</td>
+                  <td className="data">{shortDate(row.lastPlayed)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="hint">
+            Every other panel pools these accounts together. Click a row to scope the dashboard to one; click it
+            again to go back to all.
+          </div>
+        </div>
+      )}
 
       <div className="panel">
         <h2>By mode</h2>
