@@ -13,6 +13,10 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
         def: "Wins ÷ decided games. Games under 30 seconds or with no determinable result (some quit-outs) don't count toward the denominator — they show as “n/a” in the game log.",
       },
       {
+        term: "Your accounts",
+        def: "Every connect code you've entered counts as you, and all of them are pooled into the numbers here by default. Use the Account filter to see one on its own, or the “By account” table on Overview to compare them side by side. A game where two of your own accounts met carries no result either way — it's badged “self” in the game log and left out of win rates and opponent tables.",
+      },
+      {
         term: "Kills / deaths per game",
         def: "Stocks you took (or lost) per game, averaged over the filtered set. 4–0 sweeps and last-stock nail-biters weigh the same.",
       },
@@ -165,7 +169,7 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Session",
-        def: "A run of consecutive games where each game starts within 30 minutes of the previous game ending. A gap longer than 30 minutes starts a new session. So a night of ranked with drink breaks is one session; morning and evening play on the same day are two.",
+        def: "A run of consecutive games where each game starts within 30 minutes of the previous game ending. A gap longer than 30 minutes starts a new session. So a night of ranked with drink breaks is one session; morning and evening play on the same day are two. Sessions are about time at the setup, not about which account you were on — swapping between your accounts mid-evening keeps it one session, which is what you want for the fatigue and tilt tables.",
       },
       {
         term: "Win rate by position in session",

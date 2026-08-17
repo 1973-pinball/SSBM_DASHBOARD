@@ -15,15 +15,16 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
 
 - **Parse pipeline** (`src/lib/pool.ts`, `src/worker/parser.worker.ts`): recursively discovers `.slp` files via the File System Access API (Chromium) or a `webkitdirectory` input (Firefox/Safari), then parses them across one worker per core, capped at 8. Each game is reduced to a ~5 KB `GameRecord` (headline stats plus a per-move breakdown); frame data is discarded.
 - **Cache** (`src/lib/db.ts`): records persist in IndexedDB keyed on `path|size|mtime`, so repeat visits only parse new files. Corrupt files get tombstones so they aren't retried every visit.
-- **Identity** (`src/lib/stats.ts`): games store both players neutrally; "you" is inferred as the connect code appearing in the most games, confirmed once, and changeable without a re-parse. Multiple codes (alts) are supported.
+- **Game identity** (`src/lib/dedupe.ts`): that cache key identifies a *file*, not a game — copying the replay folder changes every path, a Dropbox or network share rewrites mtimes, and re-filing replays into subfolders changes both, each producing a second record for a game already held. `gameKey()` derives identity from the replay's own contents (start time, stage, players) so those duplicates collapse instead of inflating game counts and win-rate denominators.
+- **Identity** (`src/lib/stats.ts`): games store both players neutrally, and you enter your own connect code(s) — nothing is guessed, because frequency ranking can't tell an alt from a regular opponent. Several accounts are normal: they're pooled by default, split apart with the **Account** filter, and can be labelled ("Main", "Alt") so they read as `Main (ABCD#123)` throughout. Adding, renaming, or removing an account is a recompute, never a re-parse.
 - **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates, but still listed in the game log.
 - **Installable PWA**: the whole app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
 
 ## Views
 
-Filters (date range, mode, character, stage, opponent) are global, and clicking a row or cell scopes the whole dashboard to it. Every metric is defined in the in-app **Metrics guide**.
+Filters (date range, mode, character, stage, opponent, and account when you have more than one) are global, and clicking a row or cell scopes the whole dashboard to it. Every metric is defined in the in-app **Metrics guide**.
 
-- **Overview** — KPIs, rolling win rate, weekly volume, a per-character table (win rate, kills, L-cancel), and an exportable share-card PNG.
+- **Overview** — KPIs, rolling win rate, weekly volume, a per-character table (win rate, kills, L-cancel), and an exportable share-card PNG. With several accounts it also breaks results down per account, which — like the mode table — ignores the account filter so they stay comparable.
 - **Matchups / Stages / Opponents** — character × character matrix, per-stage and stage × opponent-character counterpick tables, per-opponent records with recent sets.
 - **Sessions** — a session is games separated by gaps under 30 minutes: per-session W/L plus fatigue and tilt tables.
 - **Execution** — L-cancel %, openings per kill, damage per opening, inputs per minute, with per-move effectiveness, opening moves, and kill-move impact.
@@ -70,11 +71,13 @@ With no configuration the app is 100% local. When enabled, the cloud is a **mirr
 To enable accounts and cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
 
 1. **Create a Supabase project** (free tier is fine) at [database.new](https://database.new).
-2. **Create the tables**: paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL Editor and run it. It creates `game_records` and `user_settings` with row-level security, so each user can only read and write their own rows.
+2. **Create the tables**: paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL Editor and run it. It creates `game_records` and `user_codes` with row-level security, so each user can only read and write their own rows. Every statement is idempotent, so re-run the same file when the schema changes.
 3. **Enable Google sign-in**: in Google Cloud Console create an OAuth 2.0 Client ID (type "Web application") with redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`; paste the client ID and secret into Supabase → Authentication → Providers → Google. Add your app's URL (and `http://localhost:5173`) under Authentication → URL Configuration → Redirect URLs.
 4. **Set the env vars**: copy `.env.example` to `.env.local`, and set the same `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in Vercel → Settings → Environment Variables. Both come from Supabase → Settings → API.
 
-With the vars present, a "Sign in with Google" button appears in the header. Sync is two-way and idempotent — records are keyed `path|size|mtime`, so re-parsing the same files on another machine converges instead of duplicating — and automatic: on sign-in, shortly after new replays finish parsing, and when you return to an open tab. If an auto-sync fails (offline, say), the header button turns gold ("Sync N new games") as the manual fallback. On a new device the landing page offers **"Sign in with Google to restore"**, which pulls your synced stats and saved connect codes with no replay folder needed.
+With the vars present, a "Sign in with Google" button appears in the header. Sync is two-way and idempotent — rows are keyed `path|size|mtime`, and carry a content-derived `game_key` besides, so a device that parsed the same games from its own copy of the folder converges instead of uploading a second copy of everything. It's automatic: on sign-in, shortly after new replays finish parsing, and when you return to an open tab. If an auto-sync fails (offline, say), the header button turns gold ("Sync N new games") as the manual fallback. On a new device the landing page offers **"Sign in with Google to restore"**, which pulls your synced stats and saved accounts with no replay folder needed.
+
+**Only games one of your own accounts played are uploaded.** A shared replay folder holds other people's games too; those are parsed and cached locally — identity is resolved at query time, so adding an account later still claims them — but they aren't yours to put in the cloud.
 
 ## Stack
 
