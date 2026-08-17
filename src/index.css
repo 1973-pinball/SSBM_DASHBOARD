@@ -63,9 +63,16 @@ button.primary {
 }
 button.primary:hover { background: #a094ff; }
 button.ghost { background: transparent; }
-/* Buttons carrying an icon beside their label. inline-flex keeps the two
-   centred on each other; the parent's align-items handles the button itself. */
-button.with-icon { display: inline-flex; align-items: center; gap: 8px; }
+/* An icon beside a label. Three things here are deliberate, and each was a
+   version of this button rendering taller than its neighbours:
+   - the flex is on a span inside the button, not the button, because Safari
+     has long-standing quirks laying out a flex <button>;
+   - that span is `flex`, not `inline-flex`, so it forms its own block instead
+     of sitting in the button's line box, where an inline icon perturbs the
+     line height (worth 1.4px in Chromium and visibly more in Safari);
+   - its height is pinned to the same 16px line-height the bar's buttons use,
+     so a 14px mark can never drive the content box. */
+.btn-icon { display: flex; align-items: center; gap: 8px; height: 16px; }
 /* Attention state: work is waiting on this button (e.g. unsynced games). */
 button.ghost.attn {
   border-color: var(--gold);
@@ -119,6 +126,11 @@ select:disabled { opacity: 0.45; }
   gap: 10px;
 }
 .identity b { color: var(--text); }
+/* Explicit line-height, so a button's content box is 16px in every engine
+   rather than whatever that engine derives from the font. It also has to clear
+   the 14px Google mark: left on `normal`, an icon taller than the computed line
+   box makes that one button grow, which is what pushed it out of line. */
+.identity button { line-height: 16px; }
 /* The code list, account tag and game count read as one phrase, so they stay a
    single flex item on their own tighter spacing instead of taking the 10px gap. */
 .identity-summary { display: inline-flex; align-items: center; gap: 6px; }

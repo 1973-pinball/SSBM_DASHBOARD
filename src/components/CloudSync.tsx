@@ -125,12 +125,11 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
 
   if (!session) {
     return (
-      <button
-        className="ghost with-icon"
-        onClick={() => void signInWithGoogle().catch(console.error)}
-      >
-        <GoogleG size={14} />
-        Sign in with Google
+      <button className="ghost" onClick={() => void signInWithGoogle().catch(console.error)}>
+        <span className="btn-icon">
+          <GoogleG size={14} />
+          Sign in with Google
+        </span>
       </button>
     );
   }
