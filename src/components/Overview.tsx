@@ -5,7 +5,7 @@ import {
 import type { Account, Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { codeLabel } from "../lib/types";
 import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, byAccount, applyFilters } from "../lib/stats";
-import { pct, num, int, duration, winRateColor, shortDate } from "../lib/format";
+import { pct, num, int, duration, winRateColor, shortDate, hoursLabel } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { ShareCard } from "./ShareCard";
@@ -73,7 +73,7 @@ export function Overview({
           value={stats.currentStreak ? `${stats.currentStreak.kind}${stats.currentStreak.length}` : "—"}
           accent={stats.currentStreak && stats.currentStreak.kind === "W" && stats.currentStreak.length >= 5 ? "gold" : undefined}
         />
-        <Kpi label="Hours played" value={hours >= 10 ? int(hours) : num(hours, 1)} />
+        <Kpi label="Hours played" value={hoursLabel(hours)} />
       </div>
 
       <ShareCard games={games} teamGames={teamGames} />

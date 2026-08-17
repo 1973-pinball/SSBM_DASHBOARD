@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { toBlob, toPng } from "html-to-image";
 import type { ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { executionSummary, statCardData } from "../lib/stats";
-import { int, num, pct, shortDate } from "../lib/format";
+import { hoursLabel, int, num, pct, shortDate } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
 /**
@@ -97,7 +97,7 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
             )}
             {cell(
               "Hours on the sticks",
-              `${num(hours, hours >= 100 ? 0 : 1)}h`,
+              `${hoursLabel(hours)}h`,
               teamGames.length > 0
                 ? `${int(d.games)} singles · ${int(teamGames.length)} doubles`
                 : `${int(d.games)} games, zero regrets`,

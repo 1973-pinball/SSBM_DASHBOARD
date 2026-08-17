@@ -6,6 +6,14 @@ export const num = (x: number | null, digits = 1): string =>
 
 export const int = (x: number | null): string => (x === null ? "—" : Math.round(x).toLocaleString());
 
+/**
+ * Hours played, formatted one way everywhere it appears — the Overview KPI and
+ * the player card show the same figure side by side, so two rounding rules read
+ * as a bug even when the underlying number is identical. A decimal only below
+ * 10, where it's the difference between "9h" and "9.4h".
+ */
+export const hoursLabel = (h: number): string => (h >= 10 ? int(h) : num(h, 1));
+
 export const duration = (seconds: number | null): string => {
   if (seconds === null) return "—";
   const m = Math.floor(seconds / 60);
