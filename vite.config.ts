@@ -4,6 +4,15 @@ import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
 export default defineConfig({
+  // Stamp the build with the commit it came from. Vercel sets this; locally it
+  // reads "dev". The footer renders it, which is the only reliable way to tell
+  // whether a browser is running the latest deploy — a precached shell can
+  // outlive several of them, and asset hashes aren't something you can eyeball.
+  define: {
+    __BUILD_ID__: JSON.stringify(
+      process.env.VERCEL_GIT_COMMIT_SHA?.slice(0, 7) ?? 'dev',
+    ),
+  },
   plugins: [
     react(),
     VitePWA({

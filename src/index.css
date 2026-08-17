@@ -883,6 +883,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 }
 .site-footer a { color: var(--muted); text-decoration: none; }
 .site-footer a:hover { color: var(--accent); text-decoration: underline; }
+.site-footer .build-id { font-family: var(--font-data); color: var(--faint); }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
