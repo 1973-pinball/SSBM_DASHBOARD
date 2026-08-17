@@ -226,6 +226,10 @@ export async function getMyAccounts(): Promise<Account[]> {
   const stored = row?.value as Account[] | undefined;
   if (stored?.length) return stored;
   // Cache written before multi-account: a bare string[] under the old key.
+  // This read stays — unlike the cloud, nothing backfilled anyone's IndexedDB,
+  // so it is what migrates an existing user on their first load of this bundle.
+  // Drop it only once every user has loaded a build that writes "myAccounts";
+  // without it they land back on the identity prompt with their cache intact.
   const legacy = await db.kv.get("myCodes");
   const codes = (legacy?.value as string[] | undefined) ?? [];
   return codes.map((code) => ({ code, label: null }));
@@ -233,9 +237,6 @@ export async function getMyAccounts(): Promise<Account[]> {
 
 export async function setMyAccounts(accounts: Account[]): Promise<void> {
   await db.kv.put({ key: "myAccounts", value: accounts });
-  // Mirror the bare codes for one release: a tab still running the previous
-  // bundle reads this key, and would otherwise drop back to the identity picker.
-  await db.kv.put({ key: "myCodes", value: accounts.map((a) => a.code) });
 }
 
 /**

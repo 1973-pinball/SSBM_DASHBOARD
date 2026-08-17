@@ -26,17 +26,19 @@ create index if not exists game_records_played_at_idx
 create index if not exists game_records_game_key_idx
   on public.game_records (user_id, game_key);
 
-create table if not exists public.user_settings (
-  user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
-  my_codes text[] not null default '{}',
-  updated_at timestamptz not null default now()
-);
-
--- One row per Slippi account the user plays on. Supersedes user_settings.my_codes,
--- which is still written for one release so an older tab doesn't lose its identity.
--- sort_order fixes the display order (the first account is the primary shown on
--- the player card); label is the human name — "Main", "Alt" — rendered as
--- "Main (ABCD#123)" wherever an account is offered.
+-- One row per Slippi account the user plays on. sort_order fixes the display
+-- order (the first account is the primary shown on the player card); label is
+-- the human name — "Main", "Alt" — rendered as "Main (ABCD#123)" wherever an
+-- account is offered.
+--
+-- This replaced an earlier public.user_settings (user_id, my_codes text[]),
+-- which held one bare array per user and had nowhere to put a label. The app no
+-- longer reads or writes it. If your project still has that table, the backfill
+-- below has already copied its contents here, and once every browser has picked
+-- up a build from 2026-08-17 or later you can retire it:
+--
+--   drop table if exists public.user_settings;
+--
 create table if not exists public.user_codes (
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
   code text not null,
@@ -46,16 +48,22 @@ create table if not exists public.user_codes (
   primary key (user_id, code)
 );
 
--- Backfill from the single-code era. Ordinality keeps the old array order.
-insert into public.user_codes (user_id, code, sort_order)
-  select s.user_id, c.code, c.ord - 1
-  from public.user_settings s,
-       lateral unnest(s.my_codes) with ordinality as c(code, ord)
-  on conflict (user_id, code) do nothing;
+-- Backfill from the single-code era, for a project that predates user_codes.
+-- Ordinality keeps the old array order. Guarded so this file still runs on a
+-- fresh project, where user_settings was never created in the first place.
+do $$
+begin
+  if to_regclass('public.user_settings') is not null then
+    insert into public.user_codes (user_id, code, sort_order)
+      select s.user_id, c.code, c.ord - 1
+      from public.user_settings s,
+           lateral unnest(s.my_codes) with ordinality as c(code, ord)
+      on conflict (user_id, code) do nothing;
+  end if;
+end $$;
 
 -- Row-level security: every user sees exactly their own rows.
 alter table public.game_records enable row level security;
-alter table public.user_settings enable row level security;
 alter table public.user_codes enable row level security;
 
 drop policy if exists "own records select" on public.game_records;
@@ -69,19 +77,6 @@ create policy "own records update" on public.game_records
   for update using (auth.uid() = user_id);
 drop policy if exists "own records delete" on public.game_records;
 create policy "own records delete" on public.game_records
-  for delete using (auth.uid() = user_id);
-
-drop policy if exists "own settings select" on public.user_settings;
-create policy "own settings select" on public.user_settings
-  for select using (auth.uid() = user_id);
-drop policy if exists "own settings insert" on public.user_settings;
-create policy "own settings insert" on public.user_settings
-  for insert with check (auth.uid() = user_id);
-drop policy if exists "own settings update" on public.user_settings;
-create policy "own settings update" on public.user_settings
-  for update using (auth.uid() = user_id);
-drop policy if exists "own settings delete" on public.user_settings;
-create policy "own settings delete" on public.user_settings
   for delete using (auth.uid() = user_id);
 
 drop policy if exists "own codes select" on public.user_codes;

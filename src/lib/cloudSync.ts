@@ -167,8 +167,6 @@ export async function pushMyAccounts(accounts: Account[]): Promise<void> {
     const { error: delError } = await supabase.from("user_codes").delete().in("code", stale);
     if (delError) throw delError;
   }
-  // Mirror to the legacy column for one release (see supabase/schema.sql).
-  await supabase.from("user_settings").upsert({ my_codes: accounts.map((a) => a.code) });
 }
 
 export async function pullMyAccounts(): Promise<Account[] | null> {
@@ -178,14 +176,10 @@ export async function pullMyAccounts(): Promise<Account[] | null> {
     .select("code, label, sort_order")
     .order("sort_order", { ascending: true });
   if (error) throw error;
-  if (data.length) {
-    return data.map((r) => ({ code: r.code as string, label: (r.label as string | null) ?? null }));
-  }
-  // Empty user_codes means this account last synced before the table existed.
-  // Fall back to the legacy array so a fresh-device restore still finds an
-  // identity; the next save writes it back in the new shape.
-  const legacy = await supabase.from("user_settings").select("my_codes").maybeSingle();
-  if (legacy.error) throw legacy.error;
-  const codes = (legacy.data?.my_codes as string[] | undefined) ?? [];
-  return codes.length ? codes.map((code) => ({ code, label: null })) : null;
+  // No user_settings fallback: the schema's backfill copied every pre-existing
+  // my_codes array into user_codes, so a user who had an identity before the
+  // migration already has rows here. Empty genuinely means "never set one".
+  return data.length
+    ? data.map((r) => ({ code: r.code as string, label: (r.label as string | null) ?? null }))
+    : null;
 }
