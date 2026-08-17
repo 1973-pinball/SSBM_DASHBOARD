@@ -2,7 +2,7 @@ import { Fragment, useMemo, useState } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -617,14 +617,15 @@ function PerGameMetricChart({
               minTickGap={48}
               tickFormatter={(v: number) => dayTick((data[v - data[0]!.index] as { date?: string })?.date)} // ticks only exist when data is non-empty
             />
-            <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
+            {/* Decimals allowed: these are rolling averages of counts, not counts. */}
+            <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
                 const d = payload?.[0]?.payload?.date;
                 return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
               }}
-              formatter={(v, name) => [int(Number(v)), name]}
+              formatter={(v, name) => [num(Number(v), 1), name]}
             />
             <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
             {series
@@ -651,7 +652,10 @@ function PerGameMetricChart({
           </LineChart>
         </ResponsiveContainer>
       )}
-      <div className="hint">Each point is one game{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()})` : ""}.</div>
+      <div className="hint">
+        Each point averages the previous {ROLLING_WINDOW} games
+        {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
+      </div>
     </div>
   );
 }
@@ -716,7 +720,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
       <RollingExecChart games={games} />
 
       <div className="panel">
-        <h2>L-cancel volume — per game</h2>
+        <h2>L-cancel volume — per game, {ROLLING_WINDOW}-game rolling average</h2>
         <ResponsiveContainer width="100%" height={220}>
           <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
             <CartesianGrid {...gridStyle} />
@@ -731,14 +735,15 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
               minTickGap={48}
               tickFormatter={(v: number) => dayTick(lcVolume[v - lcVolume[0]!.index]?.date)} // ticks only exist when data is non-empty
             />
-            <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
+            {/* Decimals allowed: these are rolling averages of counts, not counts. */}
+            <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
             <Tooltip
               {...tooltipStyle}
               labelFormatter={(v, payload) => {
                 const d = payload?.[0]?.payload?.date;
                 return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
               }}
-              formatter={(v, name) => [int(Number(v)), name]}
+              formatter={(v, name) => [num(Number(v), 1), name]}
             />
             <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
             <Line type="monotone" dataKey="attempts" name="Attempts" stroke="var(--accent)" strokeWidth={1.5} dot={false} />
@@ -746,20 +751,21 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
           </LineChart>
         </ResponsiveContainer>
         <div className="hint">
-          Each point is one game{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()})` : ""}. The gap
-          between the lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
+          Each point averages the previous {ROLLING_WINDOW} games
+          {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}. The gap between the
+          lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
         </div>
       </div>
 
       <PerGameMetricChart
-        title="Neutral exchanges — per game"
+        title={`Neutral exchanges — per game, ${ROLLING_WINDOW}-game rolling average`}
         games={games}
         series={NEUTRAL_SERIES}
         defaults={["beneficialTrades"]}
       />
 
       <PerGameMetricChart
-        title="Actions — per game"
+        title={`Actions — per game, ${ROLLING_WINDOW}-game rolling average`}
         games={games}
         series={ACTION_SERIES}
         defaults={["wavedashes"]}

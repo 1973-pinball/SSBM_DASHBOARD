@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { toBlob, toPng } from "html-to-image";
-import type { ResolvedGame } from "../lib/types";
+import type { ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { executionSummary, statCardData } from "../lib/stats";
 import { int, num, pct, shortDate } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -10,11 +10,20 @@ import { charName, stageName } from "../lib/melee";
  * fight, where, and how much. Exported as a PNG entirely client-side
  * (html-to-image) — sharing is the user's choice, nothing is uploaded.
  */
-export function ShareCard({ games }: { games: ResolvedGame[] }) {
+export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGames: ResolvedTeamGame[] }) {
   const cardRef = useRef<HTMLDivElement>(null);
   const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   const d = useMemo(() => statCardData(games), [games]);
   const hands = useMemo(() => executionSummary(games, 100), [games]);
+  // Time on the sticks spans both formats, matching the Overview "Hours played"
+  // KPI — every other figure on this card is singles-only, so the sub-line names
+  // the doubles games rather than folding them into the games count.
+  const teamHours = useMemo(() => {
+    let frames = 0;
+    for (const g of teamGames) frames += g.rec.durationFrames;
+    return frames / 60 / 3600;
+  }, [teamGames]);
+  const hours = d.hours + teamHours;
 
   if (d.games === 0) return null;
 
@@ -88,8 +97,10 @@ export function ShareCard({ games }: { games: ResolvedGame[] }) {
             )}
             {cell(
               "Hours on the sticks",
-              `${num(d.hours, d.hours >= 100 ? 0 : 1)}h`,
-              `${int(d.games)} games, zero regrets`,
+              `${num(hours, hours >= 100 ? 0 : 1)}h`,
+              teamGames.length > 0
+                ? `${int(d.games)} singles · ${int(teamGames.length)} doubles`
+                : `${int(d.games)} games, zero regrets`,
             )}
             {cell(
               "Sworn rival",

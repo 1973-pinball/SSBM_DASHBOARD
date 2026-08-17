@@ -76,7 +76,7 @@ export function Overview({
         <Kpi label="Hours played" value={hours >= 10 ? int(hours) : num(hours, 1)} />
       </div>
 
-      <ShareCard games={games} />
+      <ShareCard games={games} teamGames={teamGames} />
 
       {/* Only meaningful with more than one account, and only once the filtered
           window actually contains two — a 30-day view of a dormant alt would

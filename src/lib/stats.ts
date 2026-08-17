@@ -1249,6 +1249,9 @@ export function executionSummary(games: ResolvedGame[], window = 50): ExecutionS
   };
 }
 
+/** Smoothing window shared by every rolling per-game chart (and their titles). */
+export const ROLLING_WINDOW = 50;
+
 export interface RollingExecutionPoint {
   index: number;
   date: string;
@@ -1264,7 +1267,7 @@ export interface RollingExecutionPoint {
 export function rollingExecutionSeries(
   games: ResolvedGame[],
   metric: ExecMetricKey,
-  window = 50,
+  window = ROLLING_WINDOW,
   limit = 500,
 ): RollingExecutionPoint[] {
   const { num, den, scale } = EXEC_METRICS[metric];
@@ -1298,23 +1301,24 @@ export interface LCancelPoint {
 }
 
 /**
- * Raw L-cancel volume, one point per game (no rolling window — this chart is
- * about per-game counts, unlike executionTrend's smoothed rates). Capped to the
- * most recent `limit` games to keep the chart renderable on 30k-game libraries.
+ * L-cancel volume smoothed the same way as every other per-game count chart —
+ * see perGameSeries for the window/cap semantics.
  */
-export function lCancelSeries(games: ResolvedGame[], limit = 500): LCancelPoint[] {
-  const start = Math.max(0, games.length - limit);
-  const out: LCancelPoint[] = [];
-  for (let i = start; i < games.length; i++) {
-    const g = games[i]!;
-    out.push({
-      index: i + 1,
-      date: dayLabel(g.date),
-      attempts: g.me.lCancelSuccess + g.me.lCancelFail,
-      success: g.me.lCancelSuccess,
-    });
-  }
-  return out;
+export function lCancelSeries(games: ResolvedGame[], window = ROLLING_WINDOW, limit = 500): LCancelPoint[] {
+  return perGameSeries(
+    games,
+    [
+      { key: "attempts", value: (g) => g.me.lCancelSuccess + g.me.lCancelFail },
+      { key: "success", value: (g) => g.me.lCancelSuccess },
+    ],
+    window,
+    limit,
+  ).map((p) => ({
+    index: p.index,
+    date: p.date,
+    attempts: p.attempts as number,
+    success: p.success as number,
+  }));
 }
 
 export interface GameSeriesPoint {
@@ -1324,21 +1328,35 @@ export interface GameSeriesPoint {
 }
 
 /**
- * One point per game for arbitrary picked metrics — same shape and cap
- * rationale as lCancelSeries (recent `limit` games keep charts renderable
- * on 30k-game libraries).
+ * Trailing `window`-game mean of arbitrary picked metrics, one point per game.
+ * Raw per-game counts swing far too hard to read a trend off, so these are
+ * smoothed like executionTrend's rates — but as counts per game, not ratios.
+ * Sliding sums keep it single-pass; the window is computed over every game and
+ * only the emitted points are capped to the latest `limit` (which keeps charts
+ * renderable on 30k-game libraries), so the first emitted point still averages
+ * the games before the cap. The first `window` games of all average however
+ * many games exist, matching rollingExecutionSeries.
  */
 export function perGameSeries(
   games: ResolvedGame[],
   picks: { key: string; value: (g: ResolvedGame) => number }[],
+  window = ROLLING_WINDOW,
   limit = 500,
 ): GameSeriesPoint[] {
-  const start = Math.max(0, games.length - limit);
+  const emitStart = Math.max(0, games.length - limit);
+  const sums = new Float64Array(picks.length);
   const out: GameSeriesPoint[] = [];
-  for (let i = start; i < games.length; i++) {
+  for (let i = 0; i < games.length; i++) {
     const g = games[i]!;
+    const old = i >= window ? games[i - window]! : null;
+    for (let p = 0; p < picks.length; p++) {
+      const pick = picks[p]!;
+      sums[p] = sums[p]! + pick.value(g) - (old ? pick.value(old) : 0);
+    }
+    if (i < emitStart) continue;
+    const n = Math.min(i + 1, window);
     const point: GameSeriesPoint = { index: i + 1, date: dayLabel(g.date) };
-    for (const p of picks) point[p.key] = p.value(g);
+    for (let p = 0; p < picks.length; p++) point[picks[p]!.key] = sums[p]! / n;
     out.push(point);
   }
   return out;
