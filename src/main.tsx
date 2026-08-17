@@ -1,5 +1,6 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { registerSW } from 'virtual:pwa-register'
 // Self-hosted fonts (was Google Fonts): same-origin, hashed, immutable-cached.
 import '@fontsource/chakra-petch/500.css'
 import '@fontsource/chakra-petch/600.css'
@@ -21,6 +22,30 @@ window.addEventListener('vite:preloadError', (event) => {
   sessionStorage.setItem('chunk-reload-at', String(Date.now()))
   event.preventDefault()
   window.location.reload()
+})
+
+/**
+ * The service worker precaches the whole shell, so a tab that stays open never
+ * sees a new deploy: it keeps serving what it cached, however far behind that
+ * falls. registerType 'autoUpdate' fixes this on the *next* load, which is no
+ * help to a dashboard left open all evening — hence an explicit poll.
+ *
+ * Only while visible and online: a backgrounded tab has nobody to show the new
+ * build to, and an offline check just fails. Picking up a new worker triggers
+ * the reload autoUpdate already performs, so this changes when that happens,
+ * not what happens.
+ */
+const UPDATE_CHECK_MS = 60 * 60 * 1000
+
+registerSW({
+  immediate: true,
+  onRegisteredSW(_swUrl, registration) {
+    if (!registration) return
+    setInterval(() => {
+      if (document.visibilityState !== 'visible' || !navigator.onLine) return
+      void registration.update()
+    }, UPDATE_CHECK_MS)
+  },
 })
 
 createRoot(document.getElementById('root')!).render(

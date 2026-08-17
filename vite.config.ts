@@ -19,6 +19,10 @@ export default defineConfig({
       // New deploys activate on next load instead of serving a stale shell
       // forever; pairs with the vite:preloadError reload guard in main.tsx.
       registerType: 'autoUpdate',
+      // Registered by hand in main.tsx so it can poll for new deploys — a tab
+      // left open otherwise never re-checks, and keeps serving the precached
+      // shell no matter how many times it's released behind.
+      injectRegister: null,
       manifest: {
         name: 'SSBM Dashboard',
         short_name: 'SSBM Dash',
