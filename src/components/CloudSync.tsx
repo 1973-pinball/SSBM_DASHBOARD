@@ -126,8 +126,7 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
   if (!session) {
     return (
       <button
-        className="ghost"
-        style={{ marginLeft: 10, display: "inline-flex", alignItems: "center", gap: 8 }}
+        className="ghost with-icon"
         onClick={() => void signInWithGoogle().catch(console.error)}
       >
         <GoogleG size={14} />
@@ -154,7 +153,6 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
     <>
       <button
         className={hasPending ? "ghost attn" : "ghost"}
-        style={{ marginLeft: 10 }}
         title={
           sync.kind === "done"
             ? `Last sync: ${sync.pushed.toLocaleString()} pushed, ${sync.pulled.toLocaleString()} pulled`
@@ -167,7 +165,6 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
       </button>
       <button
         className="ghost"
-        style={{ marginLeft: 10 }}
         title={session.user.email ?? undefined}
         onClick={() =>
           void signOut().then(() => {

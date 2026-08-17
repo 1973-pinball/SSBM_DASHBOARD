@@ -63,6 +63,9 @@ button.primary {
 }
 button.primary:hover { background: #a094ff; }
 button.ghost { background: transparent; }
+/* Buttons carrying an icon beside their label. inline-flex keeps the two
+   centred on each other; the parent's align-items handles the button itself. */
+button.with-icon { display: inline-flex; align-items: center; gap: 8px; }
 /* Attention state: work is waiting on this button (e.g. unsynced games). */
 button.ghost.attn {
   border-color: var(--gold);
@@ -101,8 +104,24 @@ select:disabled { opacity: 0.45; }
   border-radius: 6px;
   padding: 1px 8px;
 }
-.identity { font-family: var(--font-data); font-size: 12px; color: var(--muted); }
+/* Flex rather than inline flow so every control lines up on its centre. On the
+   baseline these drift: a button containing an icon (Sign in with Google) is an
+   inline-flex box, and such a box takes its baseline from its first flex item —
+   the SVG, whose baseline is its bottom edge — so it sat a couple of pixels
+   above its plain-text neighbours. */
+.identity {
+  font-family: var(--font-data);
+  font-size: 12px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
 .identity b { color: var(--text); }
+/* The code list, account tag and game count read as one phrase, so they stay a
+   single flex item on their own tighter spacing instead of taking the 10px gap. */
+.identity-summary { display: inline-flex; align-items: center; gap: 6px; }
 
 /* ---- Landing ---- */
 .landing {

@@ -424,11 +424,16 @@ export default function App() {
           )}
           {!browsingHistory && phase === "dashboard" && (
             <div className="identity">
-              <b>{accounts.map((a) => a.code).join(", ") || "—"}</b>
-              {accounts.length > 1 && <span className="tag" style={{ marginLeft: 6 }}>{accounts.length} accounts</span>} ·{" "}
-              {(showTeams ? resolvedTeams.length : resolved.length).toLocaleString()} {showTeams ? "2v2 games" : "games"}
+              <span className="identity-summary">
+                <b>{accounts.map((a) => a.code).join(", ") || "—"}</b>
+                {accounts.length > 1 && <span className="tag">{accounts.length} accounts</span>}
+                <span>
+                  · {(showTeams ? resolvedTeams.length : resolved.length).toLocaleString()}{" "}
+                  {showTeams ? "2v2 games" : "games"}
+                </span>
+              </span>
               {!isDemo && dirHandle && (
-                <button className="ghost" style={{ marginLeft: 10 }} onClick={onRefresh} disabled={syncing !== null}>
+                <button className="ghost" onClick={onRefresh} disabled={syncing !== null}>
                   {syncing
                     ? syncing.total === 0
                       ? "Scanning…"
@@ -443,13 +448,13 @@ export default function App() {
                 generation={generation.current}
                 onPulled={onCloudPulled}
               />
-              <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowAccounts(true)}>
+              <button className="ghost" onClick={() => setShowAccounts(true)}>
                 {accounts.length > 1 ? "Accounts" : "My account"}
               </button>
-              <button className="ghost" style={{ marginLeft: 10 }} onClick={() => setShowGuide(true)}>
+              <button className="ghost" onClick={() => setShowGuide(true)}>
                 Metrics guide
               </button>
-              <button className="ghost" style={{ marginLeft: 10 }} onClick={reset}>
+              <button className="ghost" onClick={reset}>
                 {isDemo ? "Exit demo" : "Change folder"}
               </button>
             </div>
