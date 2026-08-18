@@ -18,7 +18,7 @@ Replay folder ──► discovery (*.slp) ──► dedup vs cache ──► web
 - **Game identity** (`src/lib/dedupe.ts`): that cache key identifies a *file*, not a game — copying the replay folder changes every path, a Dropbox or network share rewrites mtimes, and re-filing replays into subfolders changes both, each producing a second record for a game already held. `gameKey()` derives identity from the replay's own contents (start time, stage, players) so those duplicates collapse instead of inflating game counts and win-rate denominators.
 - **Identity** (`src/lib/stats.ts`): games store both players neutrally, and you enter your own connect code(s) — nothing is guessed, because frequency ranking can't tell an alt from a regular opponent. Several accounts are normal: they're pooled by default, split apart with the **Account** filter, and can be labelled ("Main", "Alt") so they read as `Main (ABCD#123)` throughout. Adding, renaming, or removing an account is a recompute, never a re-parse.
 - **Win/loss**: placements → stock-out survivor → LRAS initiator loses. Games under 30 seconds are indeterminate and excluded from win-rate aggregates, but still listed in the game log.
-- **Installable PWA**: the whole app shell is precached (`vite-plugin-pwa`, auto-updating service worker), so the dashboard installs like an app and loads offline against the local cache.
+- **Installable PWA**: the whole app shell is precached (`vite-plugin-pwa`), so the dashboard installs like an app and loads offline against the local cache. The service worker is registered manually in `src/main.tsx` and polls for new deploys hourly, so long-lived tabs pick up updates; the footer stamps the deployed build commit.
 
 ## Views
 
@@ -37,7 +37,8 @@ Filters (date range, mode, character, stage, opponent, and account when you have
 ```bash
 npm install
 npm run dev      # dev server
-npm run build    # type-check + production build (CI gate)
+npm run build    # type-check + production build — must pass before any push (nothing in CI gates it)
+npm run preview  # serve the production build locally
 npm run lint     # oxlint
 npm run assets   # render the share images into public/share (gitignored)
 ```
