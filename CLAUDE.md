@@ -65,7 +65,7 @@ Categorical series colors (the Liquipedia character charts) come from `CHAR_COLO
 
 ## Deployment
 
-Vercel, deploying `main`. Two things to know before touching config:
+Vercel, deploying `main`. Three things to know before touching config:
 
 - **PWA**: `vite-plugin-pwa` precaches the entire shell — all lazy chunks, fonts, icons — so the app works offline. If you add a new asset *type*, check `globPatterns` in `vite.config.ts` covers it. Registration is **manual** (`injectRegister: null` in `vite.config.ts`): `src/main.tsx` registers the SW itself and polls `registration.update()` hourly so a tab left open picks up new deploys — don't re-enable the plugin's auto-registration, which would silently drop that poll.
 - **Build identity**: `__BUILD_ID__` (defined in `vite.config.ts` from the git commit, declared in `src/global.d.ts`) is stamped into the footer in `App.tsx` — the deployed commit is user-visible, which is how you verify a deploy actually rolled.
