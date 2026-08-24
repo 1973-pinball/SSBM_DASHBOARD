@@ -7,6 +7,8 @@ interface Props {
   onDemo: () => void;
   /** Opens the scene-history tab, which needs no replays at all. */
   onBrowseHistory: () => void;
+  /** Opens aggregate Community Lab data without requiring a replay folder. */
+  onBrowseCommunity: () => void;
   supportsFsAccess: boolean;
   /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
   onCloudSignIn: (() => void) | null;
@@ -19,6 +21,7 @@ export function Landing({
   onPickFiles,
   onDemo,
   onBrowseHistory,
+  onBrowseCommunity,
   supportsFsAccess,
   onCloudSignIn,
   cloudRestoring,
@@ -69,11 +72,12 @@ export function Landing({
         {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => e.target.files && onPickFiles(e.target.files)}
       />
-      {/* Nothing on the history tab touches replays, so it shouldn't sit
-          behind the folder picker or demo mode. */}
+      {/* Neither public tab touches replays, so they should not sit behind the
+          folder picker or demo mode. */}
       <div className="landing-aside">
-        No replays to hand? <button className="linky" onClick={onBrowseHistory}>Browse Melee tournament history</button> —
-        every major since 2003 and the top 100 by character, no setup needed.
+        No replays to hand? <button className="linky" onClick={onBrowseCommunity}>Explore anonymous community benchmarks</button>
+        {" "}or <button className="linky" onClick={onBrowseHistory}>browse Melee tournament history</button>. Neither needs
+        access to your replay folder.
       </div>
       <div className="hint" style={{ marginTop: 10 }}>
         Slippi saves replays to <span style={{ fontFamily: "var(--font-data)" }}>Documents\Slippi</span> by default
@@ -81,10 +85,10 @@ export function Landing({
         to get you close.
       </div>
       <div className="privacy">
-        Your replays never leave your machine.
+        <b>Your replays never leave your machine.</b>{" "}
         {onCloudSignIn
-          ? " Signing in syncs only parsed stats — never replay files — to your own account."
-          : " No uploads, no accounts, no tracking."}
+          ? "Signing in syncs only parsed stats — never replay files — to your own account. Community contribution is separate, explicit, and off by default. Your email is used only for sign-in—never sold, published, shared, or used for marketing or outreach."
+          : "No uploads, no accounts, no tracking."}
       </div>
       {!online && <div className="badge gold">Offline mode · demo, cached stats, and Melee history still work.</div>}
     </div>

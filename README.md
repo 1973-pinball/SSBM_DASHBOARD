@@ -29,6 +29,7 @@ Filters (date range, mode, character, stage, opponent, and account when you have
 - **Sessions** — a session is games separated by gaps under 30 minutes: per-session W/L plus fatigue and tilt tables.
 - **Execution** — L-cancel %, openings per kill, damage per opening, inputs per minute, with per-move effectiveness, opening moves, and kill-move impact.
 - **Insights / Records / Game log** — a logistic-regression win-factor model with coaching hints, personal bests (streaks, fastest win, nemesis), and a game log with CSV export.
+- **Community** — thresholded, aggregate-only Matchup Atlas, personal-vs-community execution quartiles, Move Atlas, Stage Lab, and monthly Community Pulse. It is public from the landing page; contributing is a separate, default-off choice in My Account.
 - **Teams** — 2v2 replays get one consolidated view (team-level W/L, teammate breakdowns) behind the singles/teams switch; they never mix into the singles aggregates.
 - **Liquipedia** — competitive Melee history rather than your own play: majors per year by tier, an animated race of major titles ending in the all-time champions table, and top-100 character composition across every SSBMRank edition. It needs no replays, so it's reachable from the landing page as well as from a tab. See [Scene data](#scene-data-the-liquipedia-tab).
 
@@ -72,13 +73,25 @@ With no configuration the app is 100% local. When enabled, the cloud is a **mirr
 To enable accounts and cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
 
 1. **Create a Supabase project** (free tier is fine) at [database.new](https://database.new).
-2. **Create the tables**: paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL Editor and run it. It creates `game_records` and `user_codes` with row-level security, so each user can only read and write their own rows. Every statement is idempotent, so re-run the same file when the schema changes.
+2. **Create the tables**: paste [`supabase/schema.sql`](supabase/schema.sql) into the SQL Editor and run it. For Community Lab, run [`supabase/community.sql`](supabase/community.sql) afterwards and schedule `select public.refresh_community_snapshot();` with Supabase Cron. The private tables use row-level security; public clients can select only the precomputed aggregate snapshot.
 3. **Enable Google sign-in**: in Google Cloud Console create an OAuth 2.0 Client ID (type "Web application") with redirect URI `https://<project-ref>.supabase.co/auth/v1/callback`; paste the client ID and secret into Supabase → Authentication → Providers → Google. Add your app's URL (and `http://localhost:5173`) under Authentication → URL Configuration → Redirect URLs.
-4. **Set the env vars**: copy `.env.example` to `.env.local`, and set the same `VITE_SUPABASE_URL` / `VITE_SUPABASE_ANON_KEY` in Vercel → Settings → Environment Variables. Both come from Supabase → Settings → API.
+4. **Set the env vars**: copy `.env.example` to `.env.local`, and set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and the production `VITE_SITE_URL` in Vercel → Settings → Environment Variables. The Supabase values come from Supabase → Settings → API.
 
 With the vars present, a "Sign in with Google" button appears in the header. Sync is two-way and idempotent — rows are keyed `path|size|mtime`, and carry a content-derived `game_key` besides, so a device that parsed the same games from its own copy of the folder converges instead of uploading a second copy of everything. It's automatic: on sign-in, shortly after new replays finish parsing, and when you return to an open tab. If an auto-sync fails (offline, say), the header button turns gold ("Sync N new games") as the manual fallback. On a new device the landing page offers **"Sign in with Google to restore"**, which pulls your synced stats and saved accounts with no replay folder needed.
 
 **Only games one of your own accounts played are uploaded.** A shared replay folder holds other people's games too; those are parsed and cached locally — identity is resolved at query time, so adding an account later still claims them — but they aren't yours to put in the cloud.
+
+### Community contribution and privacy
+
+Private cloud sync is not permission to publish community statistics. The Community contribution switch in **My Account** is a separate consent, starts off, and can be switched off again. The scheduled refresh reads only currently consenting accounts and publishes one aggregate snapshot. It does not expose Google user IDs, emails, connect codes, display names, replay paths, file IDs, exact timestamps, or source rows. Cells require at least 25 distinct contributors and 100 player-games; rare move groups and time buckets remain absent even when a broader cohort qualifies.
+
+The public tab deliberately has no player search, leaderboards, opponent reports, geographic inference, exact activity timeline, rare-cohort explorer, or row-level download. Execution quartiles first average each contributor, so unusually large replay libraries do not dominate the benchmark. Turning contribution off removes that account from the next full snapshot rebuild.
+
+The in-app **Privacy promise** makes two commitments explicit: replay-derived data is never published or distributed beyond a user's private cloud account without this separate opt-in, and an email address is used only to operate authentication — never sold, published, used for marketing, or shared for outreach.
+
+### Professional Google OAuth
+
+`signInWithGoogle()` always returns through the exact `VITE_SITE_URL/?auth=return` URL and removes the temporary marker after the session is restored. To replace the random Supabase project reference on Google's handoff screen, configure a Supabase custom domain or vanity subdomain and Google consent-screen branding. The complete staged checklist is in [`supabase/AUTH_BRANDING.md`](supabase/AUTH_BRANDING.md); it includes DNS, both Google callback URLs, the public privacy URL, Vercel CSP, and rollback-safe activation order.
 
 ## Stack
 

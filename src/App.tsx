@@ -25,11 +25,13 @@ const Stages = lazy(() => import("./components/Views").then((m) => ({ default: m
 const Opponents = lazy(() => import("./components/Views").then((m) => ({ default: m.Opponents })));
 const Execution = lazy(() => import("./components/Views").then((m) => ({ default: m.Execution })));
 const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: m.GameLog })));
+const Community = lazy(() => import("./components/Community").then((m) => ({ default: m.Community })));
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
 const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
 const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
 const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
 const AccountsEditor = lazy(() => import("./components/AccountsEditor").then((m) => ({ default: m.AccountsEditor })));
+const PrivacyPromise = lazy(() => import("./components/PrivacyPromise").then((m) => ({ default: m.PrivacyPromise })));
 
 /**
  * Last line of defense for lazy-chunk failures: main.tsx auto-reloads once on
@@ -55,7 +57,7 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log" | "liquipedia";
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log" | "community" | "liquipedia";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -67,16 +69,24 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "insights", label: "Insights" },
   { id: "records", label: "Records" },
   { id: "log", label: "Game log" },
+  { id: "community", label: "Community" },
   { id: "liquipedia", label: "Liquipedia" },
 ];
 
-type Overlay = "guide" | "accounts" | null;
-interface AppHistoryState { ssbm: true; tab: Tab; overlay: Overlay; browsingHistory: boolean }
+type Overlay = "guide" | "accounts" | "privacy" | null;
+type PublicView = "community" | "liquipedia" | null;
+interface AppHistoryState { ssbm: true; tab: Tab; overlay: Overlay; publicView: PublicView }
 
 const tabFromUrl = (): Tab => {
   if (typeof window === "undefined") return "overview";
   const value = new URL(window.location.href).searchParams.get("view");
   return TABS.some((t) => t.id === value) ? value as Tab : "overview";
+};
+
+const overlayFromUrl = (): Overlay => {
+  if (typeof window === "undefined") return null;
+  const value = new URL(window.location.href).searchParams.get("overlay");
+  return value === "guide" || value === "accounts" || value === "privacy" ? value : null;
 };
 
 const navUrl = (tab: Tab, overlay: Overlay = null) => {
@@ -95,11 +105,15 @@ export default function App() {
   const [accounts, setAccountsState] = useState<Account[]>([]);
   const [filters, setFilters] = useState<Filters>(DEFAULT_FILTERS);
   const [isDemo, setIsDemo] = useState(false);
-  const [showGuide, setShowGuide] = useState(false);
-  const [showAccounts, setShowAccounts] = useState(false);
-  // Scene history stands alone: it reads no replays, so it must be reachable
-  // straight from the landing page rather than only as a dashboard tab.
-  const [browsingHistory, setBrowsingHistory] = useState(() => tabFromUrl() === "liquipedia");
+  const [showGuide, setShowGuide] = useState(() => overlayFromUrl() === "guide");
+  const [showAccounts, setShowAccounts] = useState(() => overlayFromUrl() === "accounts");
+  const [showPrivacy, setShowPrivacy] = useState(() => overlayFromUrl() === "privacy");
+  // Public aggregate/history views need no replays, so both are reachable
+  // straight from the landing page as well as from dashboard tabs.
+  const [publicView, setPublicView] = useState<PublicView>(() => {
+    const initial = tabFromUrl();
+    return initial === "community" || initial === "liquipedia" ? initial : null;
+  });
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
@@ -127,49 +141,54 @@ export default function App() {
 
   const selectTab = useCallback((next: Tab, replace = false) => {
     setTab(next);
-    setBrowsingHistory(false);
-    const state: AppHistoryState = { ssbm: true, tab: next, overlay: null, browsingHistory: false };
+    setPublicView(null);
+    const state: AppHistoryState = { ssbm: true, tab: next, overlay: null, publicView: null };
     window.history[replace ? "replaceState" : "pushState"](state, "", navUrl(next));
   }, []);
 
-  const browseHistory = useCallback(() => {
-    setBrowsingHistory(true);
-    const state: AppHistoryState = { ssbm: true, tab: "liquipedia", overlay: null, browsingHistory: true };
-    window.history.pushState(state, "", navUrl("liquipedia"));
+  const browsePublic = useCallback((next: Exclude<PublicView, null>) => {
+    setPublicView(next);
+    setTab(next);
+    const state: AppHistoryState = { ssbm: true, tab: next, overlay: null, publicView: next };
+    window.history.pushState(state, "", navUrl(next));
   }, []);
 
-  const leaveHistory = useCallback(() => {
+  const leavePublic = useCallback(() => {
     const state = window.history.state as AppHistoryState | null;
-    if (state?.ssbm && state.browsingHistory) window.history.back();
+    if (state?.ssbm && state.publicView) window.history.back();
     else selectTab(phase === "dashboard" ? tab : "overview", true);
   }, [phase, selectTab, tab]);
 
   const openOverlay = useCallback((overlay: Exclude<Overlay, null>) => {
     if (overlay === "guide") setShowGuide(true);
-    else setShowAccounts(true);
-    const state: AppHistoryState = { ssbm: true, tab, overlay, browsingHistory };
+    else if (overlay === "accounts") setShowAccounts(true);
+    else setShowPrivacy(true);
+    const state: AppHistoryState = { ssbm: true, tab, overlay, publicView };
     window.history.pushState(state, "", navUrl(tab, overlay));
-  }, [browsingHistory, tab]);
+  }, [publicView, tab]);
 
   const closeOverlay = useCallback((overlay: Exclude<Overlay, null>) => {
     const state = window.history.state as AppHistoryState | null;
     if (state?.ssbm && state.overlay === overlay) window.history.back();
     else if (overlay === "guide") setShowGuide(false);
-    else setShowAccounts(false);
+    else if (overlay === "accounts") setShowAccounts(false);
+    else setShowPrivacy(false);
   }, []);
 
   useEffect(() => {
     const initialTab = tabFromUrl();
-    const initialBrowsing = initialTab === "liquipedia";
-    const state: AppHistoryState = { ssbm: true, tab: initialTab, overlay: null, browsingHistory: initialBrowsing };
-    window.history.replaceState(state, "", navUrl(initialTab));
+    const initialPublic = initialTab === "community" || initialTab === "liquipedia" ? initialTab : null;
+    const initialOverlay = overlayFromUrl();
+    const state: AppHistoryState = { ssbm: true, tab: initialTab, overlay: initialOverlay, publicView: initialPublic };
+    window.history.replaceState(state, "", navUrl(initialTab, initialOverlay));
     const onPop = (event: PopStateEvent) => {
       const next = event.state as AppHistoryState | null;
       const nextTab = next?.ssbm ? next.tab : tabFromUrl();
       setTab(nextTab);
-      setBrowsingHistory(next?.ssbm ? next.browsingHistory : false);
+      setPublicView(next?.ssbm ? next.publicView : null);
       setShowGuide(Boolean(next?.ssbm && next.overlay === "guide"));
       setShowAccounts(Boolean(next?.ssbm && next.overlay === "accounts"));
+      setShowPrivacy(Boolean(next?.ssbm && next.overlay === "privacy"));
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
@@ -541,20 +560,20 @@ export default function App() {
 
   return (
     <div className="shell">
-      {(browsingHistory || phase !== "landing") && (
+      {(publicView || phase !== "landing") && (
         <div className="topbar">
           <div className="brand">
             <h1>SSBM Dashboard</h1>
             {isDemo && <span className="tag">demo data</span>}
           </div>
-          {browsingHistory && (
+          {publicView && (
             <div className="identity">
-              <button className="ghost" onClick={leaveHistory}>
+              <button className="ghost" onClick={leavePublic}>
                 {phase === "dashboard" ? "Back to my stats" : "Back"}
               </button>
             </div>
           )}
-          {!browsingHistory && phase === "dashboard" && (
+          {!publicView && phase === "dashboard" && (
             <div className="identity">
               <span className="identity-summary">
                 <b>{accounts.map((a) => a.code).join(", ") || "—"}</b>
@@ -587,7 +606,7 @@ export default function App() {
                 <button className="ghost" onClick={installApp}>Install app</button>
               )}
               <button className="ghost" onClick={() => openOverlay("accounts")}>
-                {accounts.length > 1 ? "Accounts" : "My account"}
+                My account
               </button>
               <button className="ghost" onClick={() => openOverlay("guide")}>
                 Metrics guide
@@ -609,7 +628,7 @@ export default function App() {
         </div>
       )}
 
-      {browsingHistory && (
+      {publicView === "liquipedia" && (
         <ViewErrorBoundary>
           <Suspense fallback={<div className="empty-note">Loading…</div>}>
             <Liquipedia />
@@ -617,12 +636,25 @@ export default function App() {
         </ViewErrorBoundary>
       )}
 
-      {!browsingHistory && phase === "landing" && (
+      {publicView === "community" && (
+        <ViewErrorBoundary>
+          <Suspense fallback={<div className="empty-note">Loading…</div>}>
+            <Community
+              games={resolved}
+              isDemo={false}
+              onOpenAccount={() => phase === "dashboard" ? openOverlay("accounts") : void signInWithGoogle()}
+            />
+          </Suspense>
+        </ViewErrorBoundary>
+      )}
+
+      {!publicView && phase === "landing" && (
         <Landing
           onPickDirectory={onPickDirectory}
           onPickFiles={onPickFiles}
           onDemo={onDemo}
-          onBrowseHistory={browseHistory}
+          onBrowseHistory={() => browsePublic("liquipedia")}
+          onBrowseCommunity={() => browsePublic("community")}
           supportsFsAccess={supportsFsAccess}
           onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
           cloudRestoring={cloudRestoring}
@@ -630,11 +662,11 @@ export default function App() {
         />
       )}
 
-      {!browsingHistory && phase === "parsing" && progress && <ProgressBar p={progress} />}
+      {!publicView && phase === "parsing" && progress && <ProgressBar p={progress} />}
 
-      {!browsingHistory && phase === "identity" && <IdentityPicker gameCounts={gameCounts} onConfirm={confirmIdentity} />}
+      {!publicView && phase === "identity" && <IdentityPicker gameCounts={gameCounts} onConfirm={confirmIdentity} />}
 
-      {!browsingHistory && phase === "dashboard" && (
+      {!publicView && phase === "dashboard" && (
         <>
           <FilterBar
             filters={filters}
@@ -712,6 +744,7 @@ export default function App() {
           {tab === "insights" && <Insights games={filtered} />}
           {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
           {tab === "log" && <GameLog games={filtered} accounts={accounts} />}
+          {tab === "community" && <Community games={resolved} isDemo={isDemo} onOpenAccount={() => openOverlay("accounts")} />}
           {tab === "liquipedia" && <Liquipedia />}
         </>
           )}
@@ -733,13 +766,21 @@ export default function App() {
             gameCounts={gameCounts}
             onSave={saveAccounts}
             onClose={() => closeOverlay("accounts")}
+            isDemo={isDemo}
           />
+        </Suspense>
+      )}
+
+      {showPrivacy && (
+        <Suspense fallback={null}>
+          <PrivacyPromise onClose={() => closeOverlay("privacy")} />
         </Suspense>
       )}
 
       <footer className="site-footer">
         <span>Brought to you by Studio Pinball · © 2026</span>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
+        <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
         {/* Which deploy this tab is actually running. The service worker
             precaches the whole shell, so a browser can sit on an old build
             through several releases — compare this to the latest commit on

@@ -46,6 +46,12 @@ export default defineConfig({
             icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
           },
           {
+            name: 'Open Community Lab',
+            short_name: 'Community',
+            url: '/?view=community',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
             name: 'Browse Melee history',
             short_name: 'Melee history',
             url: '/?view=liquipedia',

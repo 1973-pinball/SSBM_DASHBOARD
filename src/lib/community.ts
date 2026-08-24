@@ -1,0 +1,250 @@
+import type { ResolvedGame } from "./types";
+import { executionSummary, moveTable } from "./stats";
+import { supabase } from "./supabase";
+
+export const COMMUNITY_CONSENT_VERSION = "2026-08-24";
+export const COMMUNITY_MIN_CONTRIBUTORS = 25;
+export const COMMUNITY_MIN_GAMES = 100;
+
+export interface CommunityMatchupRow {
+  characterId: number;
+  opponentCharacterId: number;
+  stageId: number; // 0 = every legal stage
+  gameType: string; // "all" or a GameType
+  games: number;
+  contributors: number;
+  wins: number;
+  winRate: number;
+}
+
+export interface CommunityBenchmarkRow {
+  characterId: number; // -1 = every character
+  games: number;
+  contributors: number;
+  lCancel: Quartiles | null;
+  openingsPerKill: Quartiles | null;
+  damagePerOpening: Quartiles | null;
+  inputsPerMinute: Quartiles | null;
+}
+
+export interface Quartiles {
+  p25: number;
+  p50: number;
+  p75: number;
+}
+
+export interface CommunityMoveRow {
+  characterId: number;
+  moveKey: string;
+  characterGames: number;
+  contributors: number;
+  attempts: number | null;
+  attemptGames: number;
+  landed: number;
+  damage: number;
+  kills: number;
+  killPctSum: number;
+  openings: number;
+  openingDamage: number;
+  lCancelSuccess: number;
+  lCancelFail: number;
+}
+
+export interface CommunityMonthRow {
+  month: string;
+  playerGames: number;
+  contributors: number;
+  averageDurationSeconds: number;
+  ranked: number;
+  unranked: number;
+  direct: number;
+  offline: number;
+}
+
+export interface CommunityCharacterRow {
+  characterId: number;
+  playerGames: number;
+  contributors: number;
+  wins: number;
+  decided: number;
+  winRate: number | null;
+}
+
+export interface CommunityStageRow {
+  stageId: number;
+  playerGames: number;
+  contributors: number;
+  averageDurationSeconds: number;
+}
+
+export interface CommunitySnapshot {
+  refreshedAt: string;
+  contributorCount: number;
+  playerGameCount: number;
+  minContributors: number;
+  minGames: number;
+  matchups: CommunityMatchupRow[];
+  benchmarks: CommunityBenchmarkRow[];
+  moves: CommunityMoveRow[];
+  months: CommunityMonthRow[];
+  characters: CommunityCharacterRow[];
+  stages: CommunityStageRow[];
+  demo?: boolean;
+}
+
+interface SnapshotPayload {
+  matchups?: CommunityMatchupRow[];
+  benchmarks?: CommunityBenchmarkRow[];
+  moves?: CommunityMoveRow[];
+  months?: CommunityMonthRow[];
+  characters?: CommunityCharacterRow[];
+  stages?: CommunityStageRow[];
+}
+
+export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase
+    .from("community_snapshot")
+    .select("refreshed_at, contributor_count, player_game_count, min_contributors, min_games, payload")
+    .eq("snapshot_id", "current")
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return {
+    refreshedAt: new Date(0).toISOString(),
+    contributorCount: 0,
+    playerGameCount: 0,
+    minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+    minGames: COMMUNITY_MIN_GAMES,
+    matchups: [], benchmarks: [], moves: [], months: [], characters: [], stages: [],
+  };
+  const payload = (data.payload ?? {}) as SnapshotPayload;
+  return {
+    refreshedAt: data.refreshed_at as string,
+    contributorCount: Number(data.contributor_count ?? 0),
+    playerGameCount: Number(data.player_game_count ?? 0),
+    minContributors: Number(data.min_contributors ?? COMMUNITY_MIN_CONTRIBUTORS),
+    minGames: Number(data.min_games ?? COMMUNITY_MIN_GAMES),
+    matchups: payload.matchups ?? [],
+    benchmarks: payload.benchmarks ?? [],
+    moves: payload.moves ?? [],
+    months: payload.months ?? [],
+    characters: payload.characters ?? [],
+    stages: payload.stages ?? [],
+  };
+}
+
+/** null means signed out; false is the default for a signed-in account with no row. */
+export async function getCommunityConsent(): Promise<boolean | null> {
+  if (!supabase) return null;
+  const { data: sessionData } = await supabase.auth.getSession();
+  if (!sessionData.session) return null;
+  const { data, error } = await supabase
+    .from("community_consent")
+    .select("enabled")
+    .maybeSingle();
+  if (error) throw error;
+  return Boolean(data?.enabled);
+}
+
+export async function setCommunityConsent(enabled: boolean): Promise<void> {
+  if (!supabase) throw new Error("Cloud sync is not configured.");
+  const { error } = await supabase.from("community_consent").upsert(
+    { enabled, consent_version: COMMUNITY_CONSENT_VERSION, updated_at: new Date().toISOString() },
+    { onConflict: "user_id" },
+  );
+  if (error) throw error;
+}
+
+const quartilesAround = (value: number | null, spread: number): Quartiles | null => value === null ? null : ({
+  p25: Math.max(0, value - spread),
+  p50: value,
+  p75: value + spread,
+});
+
+/**
+ * Local-only fixture for demo mode. It exercises the complete Community UI
+ * without pretending the synthetic games are real contributors.
+ */
+export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot {
+  type MatchAgg = Omit<CommunityMatchupRow, "contributors" | "winRate">;
+  const matchups = new Map<string, MatchAgg>();
+  const months = new Map<string, { playerGames: number; seconds: number; ranked: number; unranked: number; direct: number; offline: number }>();
+  const chars = new Map<number, { playerGames: number; wins: number; decided: number }>();
+  const stages = new Map<number, { playerGames: number; seconds: number }>();
+
+  for (const g of games) {
+    const seconds = g.rec.durationFrames / 60;
+    const char = chars.get(g.me.characterId) ?? { playerGames: 0, wins: 0, decided: 0 };
+    char.playerGames++;
+    if (g.isWin !== null) { char.decided++; if (g.isWin) char.wins++; }
+    chars.set(g.me.characterId, char);
+    const stage = stages.get(g.rec.stageId) ?? { playerGames: 0, seconds: 0 };
+    stage.playerGames++; stage.seconds += seconds; stages.set(g.rec.stageId, stage);
+    if (g.date) {
+      const month = `${g.date.getFullYear()}-${String(g.date.getMonth() + 1).padStart(2, "0")}-01`;
+      const m = months.get(month) ?? { playerGames: 0, seconds: 0, ranked: 0, unranked: 0, direct: 0, offline: 0 };
+      m.playerGames++; m.seconds += seconds;
+      if (g.rec.gameType === "ranked" || g.rec.gameType === "unranked" || g.rec.gameType === "direct" || g.rec.gameType === "offline") m[g.rec.gameType]++;
+      months.set(month, m);
+    }
+    if (g.isWin === null) continue;
+    for (const stageId of [0, g.rec.stageId]) for (const gameType of ["all", g.rec.gameType]) {
+      const key = `${g.me.characterId}:${g.opp.characterId}:${stageId}:${gameType}`;
+      const row = matchups.get(key) ?? { characterId: g.me.characterId, opponentCharacterId: g.opp.characterId, stageId, gameType, games: 0, wins: 0 };
+      row.games++; if (g.isWin) row.wins++; matchups.set(key, row);
+    }
+  }
+
+  const benchmarkChars = [-1, ...chars.keys()];
+  const benchmarks = benchmarkChars.map((characterId): CommunityBenchmarkRow => {
+    const selected = characterId === -1 ? games : games.filter((g) => g.me.characterId === characterId);
+    const s = executionSummary(selected, Number.MAX_SAFE_INTEGER);
+    return {
+      characterId,
+      games: selected.length,
+      contributors: 64,
+      lCancel: quartilesAround(s.lCancel, 7),
+      openingsPerKill: quartilesAround(s.opk, 0.35),
+      damagePerOpening: quartilesAround(s.dpo, 3.2),
+      inputsPerMinute: quartilesAround(s.ipm, 55),
+    };
+  });
+
+  const moves: CommunityMoveRow[] = [];
+  for (const characterId of chars.keys()) {
+    const selected = games.filter((g) => g.me.characterId === characterId);
+    const table = moveTable(selected);
+    for (const row of table.rows) moves.push({
+      characterId,
+      moveKey: row.key,
+      characterGames: table.covered,
+      contributors: 48,
+      attempts: row.attempts,
+      attemptGames: row.attempts === null ? 0 : table.covered,
+      landed: row.landed,
+      damage: row.damage,
+      kills: row.kills,
+      killPctSum: (row.avgKillPct ?? 0) * row.kills,
+      openings: row.openings,
+      openingDamage: (row.dmgPerOpening ?? 0) * row.openings,
+      lCancelSuccess: (row.lCancelPct ?? 0) * row.lCancelAttempts,
+      lCancelFail: row.lCancelAttempts - (row.lCancelPct ?? 0) * row.lCancelAttempts,
+    });
+  }
+
+  const refreshedAt = games.at(-1)?.date?.toISOString() ?? new Date().toISOString();
+  return {
+    refreshedAt,
+    contributorCount: 84,
+    playerGameCount: games.length,
+    minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+    minGames: COMMUNITY_MIN_GAMES,
+    demo: true,
+    matchups: [...matchups.values()].filter((r) => r.games >= 5).map((r) => ({ ...r, contributors: Math.max(25, Math.min(84, Math.round(r.games / 3))), winRate: r.wins / r.games })),
+    benchmarks,
+    moves,
+    months: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, m]) => ({ month, playerGames: m.playerGames, contributors: 52, averageDurationSeconds: m.seconds / m.playerGames, ranked: m.ranked, unranked: m.unranked, direct: m.direct, offline: m.offline })),
+    characters: [...chars.entries()].map(([characterId, c]) => ({ characterId, ...c, contributors: 56, winRate: c.decided ? c.wins / c.decided : null })),
+    stages: [...stages.entries()].map(([stageId, s]) => ({ stageId, playerGames: s.playerGames, contributors: 60, averageDurationSeconds: s.seconds / s.playerGames })),
+  };
+}

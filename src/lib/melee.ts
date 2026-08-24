@@ -80,10 +80,13 @@ export interface MoveGroup {
 }
 
 const MOVE_GROUP_BY_ID = new Map<number, MoveGroup>();
+const MOVE_GROUP_LABEL_BY_KEY = new Map<string, string>();
 for (const [ids, key, label] of MOVE_GROUPS) {
+  MOVE_GROUP_LABEL_BY_KEY.set(key, label);
   for (const id of ids) MOVE_GROUP_BY_ID.set(id, { key, label });
 }
 
 const OTHER_MOVE: MoveGroup = { key: "other", label: "Other" };
 
 export const moveGroup = (moveId: number): MoveGroup => MOVE_GROUP_BY_ID.get(moveId) ?? OTHER_MOVE;
+export const moveGroupLabel = (key: string): string => MOVE_GROUP_LABEL_BY_KEY.get(key) ?? OTHER_MOVE.label;
