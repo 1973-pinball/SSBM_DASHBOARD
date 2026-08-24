@@ -781,13 +781,6 @@ export default function App() {
         <span>Brought to you by Studio Pinball · © 2026</span>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
-        {/* Which deploy this tab is actually running. The service worker
-            precaches the whole shell, so a browser can sit on an old build
-            through several releases — compare this to the latest commit on
-            main to know for certain. */}
-        <span className="build-id" title="Build this tab is running">
-          build {__BUILD_ID__}
-        </span>
       </footer>
 
       {updateReady && (

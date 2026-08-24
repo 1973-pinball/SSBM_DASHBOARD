@@ -1175,7 +1175,6 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 .site-footer a:hover { color: var(--accent); text-decoration: underline; }
 .footer-link { border: 0; background: transparent; padding: 0; color: var(--muted); font: inherit; text-decoration: underline; }
 .footer-link:hover { color: var(--accent); }
-.site-footer .build-id { font-family: var(--font-data); color: var(--faint); }
 
 .pwa-toast {
   position: fixed;
