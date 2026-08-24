@@ -18,6 +18,7 @@ const TIER_COLOR = { major: "#5d51b8", supermajor: "#8f7ff7" } as const;
  * global filter bar deliberately does not apply.
  */
 export function Liquipedia() {
+  const currentYear = new Date().getFullYear();
   // Netplay-era events are excluded from every total on this tab: a week of an
   // online league isn't the same achievement as winning Genesis, and leaving
   // them in inflated the 2020–21 champions. They stay in the dataset flagged,
@@ -94,7 +95,7 @@ export function Liquipedia() {
         <ResponsiveContainer width="100%" height={220}>
           <BarChart data={years} margin={{ top: 6, right: 12, bottom: 0, left: -24 }}>
             <CartesianGrid {...gridStyle} />
-            <XAxis dataKey="year" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} />
+            <XAxis dataKey="year" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} tickFormatter={(year) => Number(year) === currentYear ? `${year} YTD` : String(year)} />
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} allowDecimals={false} />
             <Tooltip
               {...tooltipStyle}
@@ -126,7 +127,7 @@ export function Liquipedia() {
         <div className="hint">
           Tournaments Liquipedia classifies as Melee majors; supermajors are its Premier/Tier-1 events. Hover a year for
           the full card and each winner. 2020–21 look thin because the pandemic moved the circuit onto Slippi, and those
-          online events aren't counted here.
+          online events aren't counted here. {years.at(-1)?.year === currentYear ? `${currentYear} is year-to-date, not a completed season.` : ""}
         </div>
       </div>
 

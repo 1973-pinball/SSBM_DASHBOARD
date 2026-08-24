@@ -24,6 +24,7 @@ export default defineConfig({
       // shell no matter how many times it's released behind.
       injectRegister: null,
       manifest: {
+        id: '/',
         name: 'SSBM Dashboard',
         short_name: 'SSBM Dash',
         description:
@@ -31,10 +32,25 @@ export default defineConfig({
         display: 'standalone',
         background_color: '#121022',
         theme_color: '#121022',
+        categories: ['games', 'sports', 'utilities'],
         icons: [
           { src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: '/pwa-512x512.png', sizes: '512x512', type: 'image/png' },
           { src: '/pwa-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+        shortcuts: [
+          {
+            name: 'Open my stats',
+            short_name: 'My stats',
+            url: '/?view=overview',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
+          {
+            name: 'Browse Melee history',
+            short_name: 'Melee history',
+            url: '/?view=liquipedia',
+            icons: [{ src: '/pwa-192x192.png', sizes: '192x192', type: 'image/png' }],
+          },
         ],
       },
       workbox: {

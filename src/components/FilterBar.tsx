@@ -1,6 +1,6 @@
 import type { Account, Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { charName, stageName } from "../lib/melee";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { DEFAULT_FILTERS, accountLabel } from "../lib/types";
 import { localDay } from "../lib/stats";
 import { shortDate } from "../lib/format";
@@ -18,6 +18,7 @@ const GAME_TYPES: GameType[] = ["ranked", "unranked", "direct", "offline"];
 
 export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames, accounts }: Props) {
   const isTeams = filters.format === "teams";
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   // Option lists come from whichever format is active — offering "vs Fox" when no
   // 2v2 opponent played Fox would produce an empty dashboard with no explanation.
@@ -98,8 +99,43 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
     filters.teammateCode === null &&
     filters.gameType === null;
 
+  const rangeLabels: Record<Filters["range"], string> = {
+    all: "All time",
+    "7d": "Last 7 days",
+    "14d": "Last 14 days",
+    "30d": "Last 30 days",
+    "90d": "Last 90 days",
+    "1y": "Last year",
+  };
+  const activeFilters: { key: string; label: string; clear: () => void }[] = [];
+  if (filters.range !== "all") activeFilters.push({ key: "range", label: rangeLabels[filters.range], clear: () => set({ range: "all" }) });
+  if (filters.day) activeFilters.push({ key: "day", label: shortDate(new Date(`${filters.day}T12:00:00`)), clear: () => set({ day: null }) });
+  if (filters.accountCode) {
+    const account = accounts.find((a) => a.code === filters.accountCode);
+    activeFilters.push({ key: "account", label: account ? accountLabel(account) : filters.accountCode, clear: () => set({ accountCode: null }) });
+  }
+  if (filters.myCharacter !== null) activeFilters.push({ key: "me", label: `Me: ${charName(filters.myCharacter)}`, clear: () => set({ myCharacter: null }) });
+  if (filters.oppCharacter !== null) activeFilters.push({ key: "vs", label: `Vs: ${charName(filters.oppCharacter)}`, clear: () => set({ oppCharacter: null }) });
+  if (filters.stageId !== null) activeFilters.push({ key: "stage", label: stageName(filters.stageId), clear: () => set({ stageId: null }) });
+  if (filters.teammateCode) activeFilters.push({ key: "teammate", label: `With: ${filters.teammateCode}`, clear: () => set({ teammateCode: null }) });
+  if (filters.opponentCode) activeFilters.push({ key: "opponent", label: `Opponent: ${filters.opponentCode}`, clear: () => set({ opponentCode: null }) });
+  if (filters.gameType) activeFilters.push({ key: "mode", label: filters.gameType, clear: () => set({ gameType: null }) });
+
   return (
-    <div className="filters">
+    <div className={`filters ${mobileOpen ? "open" : ""}`}>
+      <div className="filter-mobile-summary">
+        <button
+          className="filter-toggle"
+          aria-expanded={mobileOpen}
+          aria-controls="dashboard-filter-fields"
+          onClick={() => setMobileOpen((v) => !v)}
+        >
+          Filters{activeFilters.length ? ` (${activeFilters.length})` : ""}
+          <span aria-hidden="true">{mobileOpen ? "▲" : "▼"}</span>
+        </button>
+        <span className="filter-format-label">{isTeams ? "Teams · 2v2" : "Singles · 1v1"}</span>
+      </div>
+      <div className="filter-fields" id="dashboard-filter-fields">
       {hasTeamGames && (
         <label>
           Format
@@ -227,10 +263,19 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
           ))}
         </select>
       </label>
+      </div>
       {!isDefault && (
-        <button className="ghost" onClick={() => setFilters({ ...DEFAULT_FILTERS, format: filters.format })}>
-          Clear filters
-        </button>
+        <div className="active-filter-row" aria-label="Active filters">
+          <span className="active-filter-label">Active</span>
+          {activeFilters.map((item) => (
+            <button key={item.key} className="filter-chip" onClick={item.clear} aria-label={`Remove ${item.label} filter`}>
+              {item.label} <span aria-hidden="true">×</span>
+            </button>
+          ))}
+          <button className="clear-filters" onClick={() => setFilters({ ...DEFAULT_FILTERS, format: filters.format })}>
+            Clear all
+          </button>
+        </div>
       )}
     </div>
   );

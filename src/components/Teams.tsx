@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { ResolvedTeamGame } from "../lib/types";
 import {
   teamOverview, byTeammate, teamsByMyCharacter, teamsByOppCharacter, teamsByStage,
@@ -9,6 +9,7 @@ import { pct, num, int, duration, shortDate, winRateColor } from "../lib/format"
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick } from "./chartStyle";
+import { activateOnKey, moveTabFocus } from "../lib/a11y";
 
 interface Props {
   games: ResolvedTeamGame[]; // filtered
@@ -26,10 +27,10 @@ export function Teams({ games, onSelectTeammate }: Props) {
   return (
     <>
       <div className="tabs" role="tablist">
-        <button role="tab" aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onClick={() => setTab("overview")}>
+        <button role="tab" tabIndex={tab === "overview" ? 0 : -1} aria-selected={tab === "overview"} className={tab === "overview" ? "active" : ""} onKeyDown={moveTabFocus} onClick={() => setTab("overview")}>
           Overview
         </button>
-        <button role="tab" aria-selected={tab === "damage"} className={tab === "damage" ? "active" : ""} onClick={() => setTab("damage")}>
+        <button role="tab" tabIndex={tab === "damage" ? 0 : -1} aria-selected={tab === "damage"} className={tab === "damage" ? "active" : ""} onKeyDown={moveTabFocus} onClick={() => setTab("damage")}>
           Damage &amp; FF
         </button>
       </div>
@@ -83,7 +84,7 @@ function OverviewTab({ games, onSelectTeammate }: Props) {
           </thead>
           <tbody>
             {mates.slice(0, 100).map((r) => (
-              <tr key={r.code} className="clickable" onClick={() => onSelectTeammate(r.code)}>
+              <tr key={r.code} className="clickable" role="button" tabIndex={0} aria-label={`Filter to teammate ${r.code}`} onClick={() => onSelectTeammate(r.code)} onKeyDown={(e) => activateOnKey(e, () => onSelectTeammate(r.code))}>
                 <td style={{ fontFamily: "var(--font-data)" }}>{r.code}</td>
                 <td>{r.displayName ?? "—"}</td>
                 <td>{charName(r.topCharacter)}</td>
@@ -225,34 +226,40 @@ function DamageTab({ games, onSelectTeammate }: Props) {
         {weeks.length < 2 ? (
           <div className="empty-note">Not enough weeks of 2v2 games to chart yet.</div>
         ) : (
-          <ResponsiveContainer width="100%" height={260}>
-            <LineChart data={weeks} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
-              <CartesianGrid {...gridStyle} />
-              <XAxis
-                dataKey="week"
-                tick={axisStyle}
-                tickLine={false}
-                axisLine={{ stroke: "var(--line)" }}
-                minTickGap={48}
-                tickFormatter={dayTick}
-              />
-              <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-              <Tooltip
-                {...tooltipStyle}
-                labelFormatter={(v) => `Week of ${dayTick(String(v))}`}
-                formatter={(v) => `${Number(v).toFixed(1)}%`}
-              />
-              <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
-              <Line type="monotone" dataKey="myDmg" name="My damage" stroke="var(--accent)" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="mateDmg" name="Teammate damage" stroke="#3fcf8e" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="myFF" name="FF by me" stroke="#f0564f" strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
-              <Line type="monotone" dataKey="mateFF" name="FF by teammate" stroke="#f0a54f" strokeWidth={1.5} strokeDasharray="5 3" dot={false} />
-            </LineChart>
-          </ResponsiveContainer>
+          <div className="team-chart-grid">
+            <section className="team-chart-block" aria-label="Weekly damage to opponents">
+              <h3>Damage to opponents</h3>
+              <ResponsiveContainer width="100%" height={210}>
+                <LineChart data={weeks} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="week" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={48} tickFormatter={dayTick} />
+                  <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                  <Tooltip {...tooltipStyle} labelFormatter={(v) => `Week of ${dayTick(String(v))}`} formatter={(v, name) => [Number(v).toFixed(1), name]} />
+                  <Line type="monotone" dataKey="myDmg" name="Me" stroke="var(--accent)" strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="mateDmg" name="Teammate" stroke="#52d6a0" strokeWidth={2.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="chart-meta"><span>Me <b>{num(weeks.at(-1)?.myDmg ?? null, 1)}</b></span><span>Teammate <b>{num(weeks.at(-1)?.mateDmg ?? null, 1)}</b></span></div>
+            </section>
+            <section className="team-chart-block" aria-label="Weekly friendly fire">
+              <h3>Friendly fire</h3>
+              <ResponsiveContainer width="100%" height={210}>
+                <LineChart data={weeks} margin={{ top: 4, right: 8, left: -12, bottom: 0 }}>
+                  <CartesianGrid {...gridStyle} />
+                  <XAxis dataKey="week" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={48} tickFormatter={dayTick} />
+                  <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
+                  <Tooltip {...tooltipStyle} labelFormatter={(v) => `Week of ${dayTick(String(v))}`} formatter={(v, name) => [Number(v).toFixed(1), name]} />
+                  <Line type="monotone" dataKey="myFF" name="By me" stroke="#e87fd0" strokeWidth={2.5} dot={false} />
+                  <Line type="monotone" dataKey="mateFF" name="By teammate" stroke="#e8b54d" strokeWidth={2.5} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+              <div className="chart-meta"><span>By me <b>{num(weeks.at(-1)?.myFF ?? null, 1)}</b></span><span>By teammate <b>{num(weeks.at(-1)?.mateFF ?? null, 1)}</b></span></div>
+            </section>
+          </div>
         )}
         <div className="hint">
-          Damage to enemies and friendly fire, averaged per game within each week. Solid lines are damage dealt to the
-          enemy team; dashed lines are friendly fire.
+          Damage to enemies and friendly fire, averaged per game within each week. The panels use independent scales so
+          friendly-fire changes stay legible without flattening the damage lines; the latest week appears below each chart.
         </div>
       </div>
 
@@ -276,7 +283,7 @@ function DamageTab({ games, onSelectTeammate }: Props) {
           </thead>
           <tbody>
             {mates.slice(0, 100).map((r) => (
-              <tr key={r.code} className="clickable" onClick={() => onSelectTeammate(r.code)}>
+              <tr key={r.code} className="clickable" role="button" tabIndex={0} aria-label={`Filter to teammate ${r.code}`} onClick={() => onSelectTeammate(r.code)} onKeyDown={(e) => activateOnKey(e, () => onSelectTeammate(r.code))}>
                 <td style={{ fontFamily: "var(--font-data)" }}>{r.code}</td>
                 <td>{r.displayName ?? "—"}</td>
                 <td className="data">{r.games.toLocaleString()}</td>

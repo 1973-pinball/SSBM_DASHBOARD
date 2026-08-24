@@ -8,6 +8,7 @@ import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format"
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
+import { activateOnKey } from "../lib/a11y";
 
 // ---------------- Matchups ----------------
 
@@ -63,8 +64,12 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
                       <td
                         key={oc}
                         className="cell"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`${charName(mc)} versus ${charName(oc)}, ${pct(cell.winRate, 0)} win rate across ${cell.games} games`}
                         style={{ background: winRateColor(cell.winRate, alpha) }}
                         onClick={() => onSelect(mc, oc)}
+                        onKeyDown={(e) => activateOnKey(e, () => onSelect(mc, oc))}
                         title={`${charName(mc)} vs ${charName(oc)}: ${cell.wins}–${cell.losses}`}
                       >
                         {pct(cell.winRate, 0)}
@@ -110,6 +115,7 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
                   title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}
                 >
                   {pct(r.lCancelPct)}
+                  {r.lCancelAttempts > 0 && <span className="sample-note">{r.lCancelAttempts.toLocaleString()} att.</span>}
                 </td>
               </tr>
             ))}
@@ -185,8 +191,12 @@ function StageCharGrid({
                   <td
                     key={c}
                     className="cell"
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`${stageName(s)}, ${side === "opp" ? "versus" : "as"} ${charName(c)}, ${pct(cell.winRate, 0)} win rate across ${cell.games} games`}
                     style={{ background: winRateColor(cell.winRate, alpha) }}
                     onClick={() => onSelect(s, c, side)}
+                    onKeyDown={(e) => activateOnKey(e, () => onSelect(s, c, side))}
                     title={`${stageName(s)} ${side === "opp" ? "vs" : "as"} ${charName(c)}: ${cell.wins}–${cell.losses}`}
                   >
                     {pct(cell.winRate, 0)}
@@ -326,7 +336,7 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
           </thead>
           <tbody>
             {recent.map((set, i) => (
-              <tr key={`${set.oppCode}-${set.start?.getTime() ?? i}`} className="clickable" onClick={() => onSelect(set.oppCode)}>
+              <tr key={`${set.oppCode}-${set.start?.getTime() ?? i}`} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${set.oppCode}`} onClick={() => onSelect(set.oppCode)} onKeyDown={(e) => activateOnKey(e, () => onSelect(set.oppCode))}>
                 <td className="data">{shortDate(set.start)}</td>
                 <td style={{ fontFamily: "var(--font-data)" }}>
                   {set.oppCode}
@@ -403,7 +413,7 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
         </thead>
         <tbody>
           {filtered.slice(0, 100).map((r) => (
-            <tr key={r.code} className="clickable" onClick={() => onSelect(r.code)}>
+            <tr key={r.code} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${r.code}`} onClick={() => onSelect(r.code)} onKeyDown={(e) => activateOnKey(e, () => onSelect(r.code))}>
               <td style={{ fontFamily: "var(--font-data)" }}>{r.code}</td>
               <td>{r.displayName ?? "—"}</td>
               <td>{charName(r.topCharacter)}</td>
@@ -892,6 +902,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
                 <td className="data">{r.avgKillPct !== null ? `${num(r.avgKillPct, 0)}%` : "—"}</td>
                 <td className="data" title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}>
                   {pct(r.lCancelPct)}
+                  {r.lCancelAttempts > 0 && <span className="sample-note">{r.lCancelAttempts.toLocaleString()} att.</span>}
                 </td>
               </tr>
             ))}
@@ -1017,34 +1028,36 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) =
   })),
 ];
 
-function GameDetail({ g }: { g: ResolvedGame }) {
+function GameDetailTable({ g }: { g: ResolvedGame }) {
+  return (
+    <div className="detail-grid">
+      <table>
+        <thead>
+          <tr>
+            <th />
+            <th className="data">Me — {charName(g.me.characterId)} (P{g.me.port})</th>
+            <th className="data">{g.opp.displayName ?? g.opp.connectCode ?? "Opponent"} — {charName(g.opp.characterId)} (P{g.opp.port})</th>
+          </tr>
+        </thead>
+        <tbody>
+          {DETAIL_STATS.map((s) => (
+            <tr key={s.label}>
+              <td>{s.label}</td>
+              <td className="data">{s.value(g.me, g.opp)}</td>
+              <td className="data">{s.value(g.opp, g.me)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function GameDetail({ g, colSpan }: { g: ResolvedGame; colSpan: number }) {
   return (
     <tr className="detail-row">
-      <td colSpan={8}>
-        <div className="detail-grid">
-          <table>
-            <thead>
-              <tr>
-                <th />
-                <th className="data">
-                  Me — {charName(g.me.characterId)} (P{g.me.port})
-                </th>
-                <th className="data">
-                  {g.opp.displayName ?? g.opp.connectCode ?? "Opponent"} — {charName(g.opp.characterId)} (P{g.opp.port})
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {DETAIL_STATS.map((s) => (
-                <tr key={s.label}>
-                  <td>{s.label}</td>
-                  <td className="data">{s.value(g.me, g.opp)}</td>
-                  <td className="data">{s.value(g.opp, g.me)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <td colSpan={colSpan}>
+        <GameDetailTable g={g} />
       </td>
     </tr>
   );
@@ -1101,13 +1114,13 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
   if (games.length === 0) return <div className="empty-note">No games match the current filters.</div>;
   return (
     <div className="panel">
-      <h2>
-        Game log{" "}
+      <h2 className="game-log-head">
+        <span>Game log</span>
         <button className="ghost" style={{ float: "right", marginTop: -6 }} onClick={exportCsv}>
           Export CSV ({games.length.toLocaleString()})
         </button>
       </h2>
-      <table>
+      <table className="game-log-table">
         <thead>
           <tr>
             <th>Date</th>
@@ -1124,7 +1137,15 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
         <tbody>
           {recent.map((g) => (
             <Fragment key={g.rec.id}>
-              <tr className="clickable" onClick={() => setOpenId(openId === g.rec.id ? null : g.rec.id)}>
+              <tr
+                className="clickable"
+                role="button"
+                tabIndex={0}
+                aria-expanded={openId === g.rec.id}
+                aria-label={`${shortDate(g.date)}, ${charName(g.me.characterId)} versus ${charName(g.opp.characterId)}, ${g.isWin === null ? "no result" : g.isWin ? "win" : "loss"}`}
+                onClick={() => setOpenId(openId === g.rec.id ? null : g.rec.id)}
+                onKeyDown={(e) => activateOnKey(e, () => setOpenId(openId === g.rec.id ? null : g.rec.id))}
+              >
                 <td className="data">{shortDate(g.date)}</td>
                 {showAccount && (
                   <td title={g.me.connectCode ?? undefined}>
@@ -1162,11 +1183,37 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
                 </td>
                 <td className="data">{duration(g.rec.durationFrames / 60)}</td>
               </tr>
-              {openId === g.rec.id && <GameDetail g={g} />}
+              {openId === g.rec.id && <GameDetail g={g} colSpan={showAccount ? 9 : 8} />}
             </Fragment>
           ))}
         </tbody>
       </table>
+      <div className="game-log-cards">
+        {recent.map((g) => {
+          const open = openId === g.rec.id;
+          return (
+            <article className="game-card" key={g.rec.id}>
+              <button className="game-card-toggle" aria-expanded={open} onClick={() => setOpenId(open ? null : g.rec.id)}>
+                <span className="game-card-head">
+                  <span>{shortDate(g.date)}{showAccount && g.me.connectCode ? ` · ${codeShort(accounts, g.me.connectCode)}` : ""}</span>
+                  <span>{duration(g.rec.durationFrames / 60)}</span>
+                </span>
+                <span className="game-card-main">
+                  <span className="game-card-matchup">{charName(g.me.characterId)} vs {charName(g.opp.characterId)}</span>
+                  <span className={`game-card-result ${g.isWin === null ? "" : g.isWin ? "up" : "down"}`}>{g.isWin === null ? (g.selfMatch ? "self" : "n/a") : g.isWin ? "W" : "L"}</span>
+                </span>
+                <span className="game-card-meta">
+                  <span>{g.opp.connectCode ?? g.opp.displayName ?? "Unknown opponent"}</span>
+                  <span>·</span><span>{stageName(g.rec.stageId)}</span>
+                  <span>·</span><span>{int(g.me.kills)}–{int(g.opp.kills)}</span>
+                  <span className="badge">{g.rec.gameType}</span>
+                </span>
+              </button>
+              {open && <div className="game-card-detail"><GameDetailTable g={g} /></div>}
+            </article>
+          );
+        })}
+      </div>
       {games.length > 300 && <div className="hint">Showing latest 300 of {games.length.toLocaleString()} — export CSV for the full set.</div>}
       <div className="hint">Click a game to see the full stat line for both players.</div>
     </div>

@@ -12,6 +12,7 @@ import { FilterBar } from "./components/FilterBar";
 import { CloudSync } from "./components/CloudSync";
 import { cloudEnabled, currentSession, signInWithGoogle } from "./lib/supabase";
 import { syncRecords, pullMyAccounts } from "./lib/cloudSync";
+import { moveTabFocus } from "./lib/a11y";
 
 // Dashboard views are lazy so the landing/parsing path doesn't pay for
 // recharts — it's the biggest dependency in the app and none of it renders
@@ -69,9 +70,26 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "liquipedia", label: "Liquipedia" },
 ];
 
+type Overlay = "guide" | "accounts" | null;
+interface AppHistoryState { ssbm: true; tab: Tab; overlay: Overlay; browsingHistory: boolean }
+
+const tabFromUrl = (): Tab => {
+  if (typeof window === "undefined") return "overview";
+  const value = new URL(window.location.href).searchParams.get("view");
+  return TABS.some((t) => t.id === value) ? value as Tab : "overview";
+};
+
+const navUrl = (tab: Tab, overlay: Overlay = null) => {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", tab);
+  if (overlay) url.searchParams.set("overlay", overlay);
+  else url.searchParams.delete("overlay");
+  return `${url.pathname}${url.search}${url.hash}`;
+};
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("landing");
-  const [tab, setTab] = useState<Tab>("overview");
+  const [tab, setTab] = useState<Tab>(tabFromUrl);
   const [records, setRecords] = useState<GameRecord[]>([]);
   const [progress, setProgress] = useState<ParseProgress | null>(null);
   const [accounts, setAccountsState] = useState<Account[]>([]);
@@ -81,11 +99,17 @@ export default function App() {
   const [showAccounts, setShowAccounts] = useState(false);
   // Scene history stands alone: it reads no replays, so it must be reachable
   // straight from the landing page rather than only as a dashboard tab.
-  const [browsingHistory, setBrowsingHistory] = useState(false);
+  const [browsingHistory, setBrowsingHistory] = useState(() => tabFromUrl() === "liquipedia");
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   const [cloudRestoring, setCloudRestoring] = useState(false);
+  const [online, setOnline] = useState(() => navigator.onLine);
+  const [folderPermission, setFolderPermission] = useState<PermissionState | "unknown">("unknown");
+  const [lastScanned, setLastScanned] = useState<string | null>(() => localStorage.getItem("ssbm-last-scanned"));
+  const [installPrompt, setInstallPrompt] = useState<BeforeInstallPromptEvent | null>(null);
+  const [updateReady, setUpdateReady] = useState(false);
+  const [offlineReady, setOfflineReady] = useState(false);
   const autoSyncDone = useRef(false);
   // Bumped by reset(); async work captures the value at start and drops its
   // results if a reset happened in between, so an abandoned scan or cloud sync
@@ -94,6 +118,96 @@ export default function App() {
   const abortRef = useRef<AbortController | null>(null);
 
   const supportsFsAccess = typeof window !== "undefined" && "showDirectoryPicker" in window;
+
+  const markScanned = useCallback(() => {
+    const now = new Date().toISOString();
+    localStorage.setItem("ssbm-last-scanned", now);
+    setLastScanned(now);
+  }, []);
+
+  const selectTab = useCallback((next: Tab, replace = false) => {
+    setTab(next);
+    setBrowsingHistory(false);
+    const state: AppHistoryState = { ssbm: true, tab: next, overlay: null, browsingHistory: false };
+    window.history[replace ? "replaceState" : "pushState"](state, "", navUrl(next));
+  }, []);
+
+  const browseHistory = useCallback(() => {
+    setBrowsingHistory(true);
+    const state: AppHistoryState = { ssbm: true, tab: "liquipedia", overlay: null, browsingHistory: true };
+    window.history.pushState(state, "", navUrl("liquipedia"));
+  }, []);
+
+  const leaveHistory = useCallback(() => {
+    const state = window.history.state as AppHistoryState | null;
+    if (state?.ssbm && state.browsingHistory) window.history.back();
+    else selectTab(phase === "dashboard" ? tab : "overview", true);
+  }, [phase, selectTab, tab]);
+
+  const openOverlay = useCallback((overlay: Exclude<Overlay, null>) => {
+    if (overlay === "guide") setShowGuide(true);
+    else setShowAccounts(true);
+    const state: AppHistoryState = { ssbm: true, tab, overlay, browsingHistory };
+    window.history.pushState(state, "", navUrl(tab, overlay));
+  }, [browsingHistory, tab]);
+
+  const closeOverlay = useCallback((overlay: Exclude<Overlay, null>) => {
+    const state = window.history.state as AppHistoryState | null;
+    if (state?.ssbm && state.overlay === overlay) window.history.back();
+    else if (overlay === "guide") setShowGuide(false);
+    else setShowAccounts(false);
+  }, []);
+
+  useEffect(() => {
+    const initialTab = tabFromUrl();
+    const initialBrowsing = initialTab === "liquipedia";
+    const state: AppHistoryState = { ssbm: true, tab: initialTab, overlay: null, browsingHistory: initialBrowsing };
+    window.history.replaceState(state, "", navUrl(initialTab));
+    const onPop = (event: PopStateEvent) => {
+      const next = event.state as AppHistoryState | null;
+      const nextTab = next?.ssbm ? next.tab : tabFromUrl();
+      setTab(nextTab);
+      setBrowsingHistory(next?.ssbm ? next.browsingHistory : false);
+      setShowGuide(Boolean(next?.ssbm && next.overlay === "guide"));
+      setShowAccounts(Boolean(next?.ssbm && next.overlay === "accounts"));
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  useEffect(() => {
+    const onOnline = () => setOnline(true);
+    const onOffline = () => setOnline(false);
+    const onInstall = (event: BeforeInstallPromptEvent) => {
+      event.preventDefault();
+      setInstallPrompt(event);
+    };
+    const onUpdate = () => setUpdateReady(true);
+    const onOfflineReady = () => setOfflineReady(true);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+    window.addEventListener("beforeinstallprompt", onInstall);
+    window.addEventListener("ssbm:update-ready", onUpdate);
+    window.addEventListener("ssbm:offline-ready", onOfflineReady);
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+      window.removeEventListener("beforeinstallprompt", onInstall);
+      window.removeEventListener("ssbm:update-ready", onUpdate);
+      window.removeEventListener("ssbm:offline-ready", onOfflineReady);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!offlineReady) return;
+    const id = window.setTimeout(() => setOfflineReady(false), 6000);
+    return () => window.clearTimeout(id);
+  }, [offlineReady]);
+
+  const installApp = useCallback(() => {
+    if (!installPrompt) return;
+    void installPrompt.prompt().then(() => installPrompt.userChoice).finally(() => setInstallPrompt(null));
+  }, [installPrompt]);
 
   /**
    * Append records to state, deduped by id. Both the folder scan and a cloud
@@ -117,7 +231,14 @@ export default function App() {
     void (async () => {
       try {
         const [raw, accts, handle] = await Promise.all([allRecords(), getMyAccounts(), getDirHandle()]);
-        if (handle) setDirHandleState(handle);
+        if (handle) {
+          setDirHandleState(handle);
+          try {
+            setFolderPermission(await handle.queryPermission({ mode: "read" }));
+          } catch {
+            setFolderPermission("unknown");
+          }
+        }
         // A copied or re-organized replay folder leaves the same game cached
         // under several file keys; collapse them once here so the cache doesn't
         // carry the duplicates forward (see lib/dedupe.ts).
@@ -181,6 +302,7 @@ export default function App() {
           },
           controller.signal,
         );
+        markScanned();
         if (generation.current !== gen) return;
         const all = await allRecords();
         setRecords(all);
@@ -205,7 +327,7 @@ export default function App() {
         if (generation.current === gen) setProgress(null);
       }
     },
-    [appendRecords],
+    [appendRecords, markScanned],
   );
 
   /**
@@ -231,6 +353,7 @@ export default function App() {
           },
           controller.signal,
         );
+        markScanned();
       } catch (err) {
         console.error(err);
         if (generation.current !== gen) return;
@@ -243,7 +366,7 @@ export default function App() {
         if (generation.current === gen) setSyncing(null);
       }
     },
-    [appendRecords],
+    [appendRecords, markScanned],
   );
 
   // Warm the lazy view chunks once the dashboard is idle so the first click
@@ -279,6 +402,7 @@ export default function App() {
     void (async () => {
       try {
         const perm = await dirHandle.queryPermission({ mode: "read" });
+        setFolderPermission(perm);
         if (perm === "granted") await syncFolder(dirHandle);
       } catch (err) {
         // syncFolder handles its own failures; this is queryPermission dying.
@@ -296,6 +420,7 @@ export default function App() {
       try {
         let perm = await dirHandle.queryPermission({ mode: "read" });
         if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
+        setFolderPermission(perm);
         if (perm === "granted") await syncFolder(dirHandle);
       } catch (err) {
         console.error(err);
@@ -311,6 +436,7 @@ export default function App() {
       // startIn only applies the first time; afterwards the id remembers the last-picked folder.
       const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
       setDirHandleState(dir);
+      setFolderPermission("granted");
       await setDirHandle(dir);
       // This parse walks the whole tree itself; without this the auto-sync
       // effect would immediately re-walk it just to skip everything as cached.
@@ -349,8 +475,8 @@ export default function App() {
     setAccountsState(accts);
     if (!isDemo) void setMyAccounts(accts);
     setFilters((f) => ({ ...DEFAULT_FILTERS, format: f.format, range: f.range }));
-    setShowAccounts(false);
-  }, [isDemo]);
+    closeOverlay("accounts");
+  }, [closeOverlay, isDemo]);
 
   // Cloud pulls land in the Dexie cache before this fires; state just catches
   // up. `gen` is captured by the sync when it starts — a pull that raced a
@@ -373,11 +499,13 @@ export default function App() {
     setFilters(DEFAULT_FILTERS);
     setIsDemo(false);
     setDirHandleState(null);
+    setFolderPermission("unknown");
     setProgress(null);
     setSyncing(null);
     autoSyncDone.current = false;
     setPhase("landing");
-  }, [isDemo]);
+    selectTab("overview", true);
+  }, [isDemo, selectTab]);
 
   const onCloudSignIn = useCallback(() => {
     void signInWithGoogle().catch((err) => {
@@ -406,6 +534,10 @@ export default function App() {
   // Never strand the user in a teams view they have no games for.
   const hasTeamGames = resolvedTeams.length > 0;
   const showTeams = hasTeamGames && filters.format === "teams";
+  const busy = phase === "parsing" || syncing !== null;
+  const lastScanLabel = lastScanned
+    ? new Date(lastScanned).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+    : null;
 
   return (
     <div className="shell">
@@ -417,7 +549,7 @@ export default function App() {
           </div>
           {browsingHistory && (
             <div className="identity">
-              <button className="ghost" onClick={() => setBrowsingHistory(false)}>
+              <button className="ghost" onClick={leaveHistory}>
                 {phase === "dashboard" ? "Back to my stats" : "Back"}
               </button>
             </div>
@@ -432,13 +564,16 @@ export default function App() {
                   {showTeams ? "2v2 games" : "games"}
                 </span>
               </span>
+              <span className={`app-state ${online ? "" : "offline"}`} title={online ? "Local features are ready" : "Offline — local stats still work"}>
+                {online ? (lastScanLabel ? `Scanned ${lastScanLabel}` : "Local") : "Offline · local stats available"}
+              </span>
               {!isDemo && dirHandle && (
                 <button className="ghost" onClick={onRefresh} disabled={syncing !== null}>
                   {syncing
                     ? syncing.total === 0
                       ? "Scanning…"
                       : `Parsing ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
-                    : "Refresh"}
+                    : folderPermission === "granted" ? "Refresh" : "Reconnect folder"}
                 </button>
               )}
               <CloudSync
@@ -448,10 +583,13 @@ export default function App() {
                 generation={generation.current}
                 onPulled={onCloudPulled}
               />
-              <button className="ghost" onClick={() => setShowAccounts(true)}>
+              {installPrompt && (
+                <button className="ghost" onClick={installApp}>Install app</button>
+              )}
+              <button className="ghost" onClick={() => openOverlay("accounts")}>
                 {accounts.length > 1 ? "Accounts" : "My account"}
               </button>
-              <button className="ghost" onClick={() => setShowGuide(true)}>
+              <button className="ghost" onClick={() => openOverlay("guide")}>
                 Metrics guide
               </button>
               <button className="ghost" onClick={reset}>
@@ -484,10 +622,11 @@ export default function App() {
           onPickDirectory={onPickDirectory}
           onPickFiles={onPickFiles}
           onDemo={onDemo}
-          onBrowseHistory={() => setBrowsingHistory(true)}
+          onBrowseHistory={browseHistory}
           supportsFsAccess={supportsFsAccess}
           onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
           cloudRestoring={cloudRestoring}
+          online={online}
         />
       )}
 
@@ -515,7 +654,15 @@ export default function App() {
         <>
           <div className="tabs" role="tablist">
             {TABS.map((t) => (
-              <button key={t.id} role="tab" aria-selected={tab === t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id)}>
+              <button
+                key={t.id}
+                role="tab"
+                tabIndex={tab === t.id ? 0 : -1}
+                aria-selected={tab === t.id}
+                className={tab === t.id ? "active" : ""}
+                onKeyDown={moveTabFocus}
+                onClick={() => selectTab(t.id)}
+              >
                 {t.label}
               </button>
             ))}
@@ -538,7 +685,7 @@ export default function App() {
               games={filtered}
               onSelect={(my, opp) => {
                 setFilters({ ...filters, myCharacter: my, oppCharacter: opp });
-                setTab("overview");
+                selectTab("overview");
               }}
             />
           )}
@@ -547,7 +694,7 @@ export default function App() {
               games={filtered}
               onSelect={(stageId, charId, side) => {
                 setFilters({ ...filters, stageId, ...(side === "opp" ? { oppCharacter: charId } : { myCharacter: charId }) });
-                setTab("overview");
+                selectTab("overview");
               }}
             />
           )}
@@ -556,7 +703,7 @@ export default function App() {
               games={filtered}
               onSelect={(code) => {
                 setFilters({ ...filters, opponentCode: code });
-                setTab("overview");
+                selectTab("overview");
               }}
             />
           )}
@@ -575,7 +722,7 @@ export default function App() {
 
       {showGuide && (
         <Suspense fallback={null}>
-          <MetricsGuide onClose={() => setShowGuide(false)} />
+          <MetricsGuide onClose={() => closeOverlay("guide")} />
         </Suspense>
       )}
 
@@ -585,7 +732,7 @@ export default function App() {
             accounts={accounts}
             gameCounts={gameCounts}
             onSave={saveAccounts}
-            onClose={() => setShowAccounts(false)}
+            onClose={() => closeOverlay("accounts")}
           />
         </Suspense>
       )}
@@ -601,6 +748,19 @@ export default function App() {
           build {__BUILD_ID__}
         </span>
       </footer>
+
+      {updateReady && (
+        <div className="pwa-toast" role="status">
+          <span><b>Update ready.</b> {busy ? "It will wait while local parsing finishes." : "Reload when you’re ready."}</span>
+          {!busy && <button className="primary" onClick={() => window.location.reload()}>Reload</button>}
+        </div>
+      )}
+      {!updateReady && offlineReady && (
+        <div className="pwa-toast" role="status">
+          <span><b>Ready offline.</b> The dashboard shell is installed on this device.</span>
+          <button className="ghost" aria-label="Dismiss" onClick={() => setOfflineReady(false)}>×</button>
+        </div>
+      )}
     </div>
   );
 }

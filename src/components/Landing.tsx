@@ -11,6 +11,7 @@ interface Props {
   /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
   onCloudSignIn: (() => void) | null;
   cloudRestoring: boolean;
+  online: boolean;
 }
 
 export function Landing({
@@ -21,6 +22,7 @@ export function Landing({
   supportsFsAccess,
   onCloudSignIn,
   cloudRestoring,
+  online,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -51,10 +53,10 @@ export function Landing({
             className="ghost"
             style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             onClick={onCloudSignIn}
-            disabled={cloudRestoring}
+            disabled={cloudRestoring || !online}
           >
             <GoogleG size={15} />
-            {cloudRestoring ? "Restoring your stats…" : "Sign in with Google to restore"}
+            {cloudRestoring ? "Restoring your stats…" : online ? "Sign in with Google to restore" : "Cloud restore unavailable offline"}
           </button>
         )}
       </div>
@@ -84,6 +86,7 @@ export function Landing({
           ? " Signing in syncs only parsed stats — never replay files — to your own account."
           : " No uploads, no accounts, no tracking."}
       </div>
+      {!online && <div className="badge gold">Offline mode · demo, cached stats, and Melee history still work.</div>}
     </div>
   );
 }

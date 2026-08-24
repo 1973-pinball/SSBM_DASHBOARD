@@ -27,3 +27,14 @@ interface Window {
     startIn?: WellKnownDirectory;
   }): Promise<FileSystemDirectoryHandle>;
 }
+
+interface BeforeInstallPromptEvent extends Event {
+  prompt(): Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+}
+
+interface WindowEventMap {
+  beforeinstallprompt: BeforeInstallPromptEvent;
+  "ssbm:update-ready": CustomEvent;
+  "ssbm:offline-ready": CustomEvent;
+}

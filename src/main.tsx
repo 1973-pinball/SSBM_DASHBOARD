@@ -39,6 +39,14 @@ const UPDATE_CHECK_MS = 60 * 60 * 1000
 
 registerSW({
   immediate: true,
+  // Keep an update from reloading through an active folder parse. App owns the
+  // user-facing prompt and only offers the reload once local work is idle.
+  onNeedReload() {
+    window.dispatchEvent(new CustomEvent('ssbm:update-ready'))
+  },
+  onOfflineReady() {
+    window.dispatchEvent(new CustomEvent('ssbm:offline-ready'))
+  },
   onRegisteredSW(_swUrl, registration) {
     if (!registration) return
     setInterval(() => {

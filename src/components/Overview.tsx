@@ -10,6 +10,7 @@ import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { ShareCard } from "./ShareCard";
 import { axisStyle, tooltipStyle, gridStyle, dayTick } from "./chartStyle";
+import { activateOnKey } from "../lib/a11y";
 
 interface Props {
   games: ResolvedGame[]; // filtered
@@ -43,6 +44,11 @@ export function Overview({
 
   const delta =
     stats.prevWinRate !== null && stats.winRate !== null ? (stats.winRate - stats.prevWinRate) * 100 : null;
+  const rollingLatest = rolling.at(-1);
+  const rollingPrior = rolling.length > 50 ? rolling[rolling.length - 51] : rolling[0];
+  const rollingChange = rollingLatest && rollingPrior ? rollingLatest.winRate - rollingPrior.winRate : null;
+  const latestWeek = weeks.at(-1);
+  const priorWeek = weeks.length > 1 ? weeks[weeks.length - 2] : null;
 
   // Hours span both formats — the only KPI here that counts 2v2 time.
   const hours = useMemo(() => {
@@ -102,8 +108,12 @@ export function Overview({
                 <tr
                   key={row.code}
                   className="clickable"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Filter to ${codeLabel(accounts, row.code)}`}
                   style={filters.accountCode === row.code ? { background: "var(--panel-2)" } : undefined}
                   onClick={() => onSelectAccount(filters.accountCode === row.code ? null : row.code)}
+                  onKeyDown={(e) => activateOnKey(e, () => onSelectAccount(filters.accountCode === row.code ? null : row.code))}
                 >
                   <td>{codeLabel(accounts, row.code)}</td>
                   <td className="data">{row.games.toLocaleString()}</td>
@@ -148,8 +158,12 @@ export function Overview({
                 <tr
                   key={row.mode}
                   className="clickable"
+                  role="button"
+                  tabIndex={0}
+                  aria-label={row.mode === "overall" ? "Clear mode filter" : `Filter to ${row.mode}`}
                   style={active ? { background: "var(--panel-2)" } : undefined}
                   onClick={() => onSelectMode(row.mode === "overall" ? null : row.mode)}
+                  onKeyDown={(e) => activateOnKey(e, () => onSelectMode(row.mode === "overall" ? null : row.mode))}
                 >
                   <td style={{ fontWeight: row.mode === "overall" ? 600 : 400, textTransform: "capitalize" }}>
                     {row.mode}
@@ -176,8 +190,9 @@ export function Overview({
           {rolling.length < 2 ? (
             <div className="empty-note">Not enough decided games yet.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <AreaChart data={rolling} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <AreaChart data={rolling} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="wr-fill" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="0%" stopColor="var(--accent)" stopOpacity={0.22} />
@@ -197,8 +212,17 @@ export function Overview({
                 <ReferenceLine y={50} stroke="var(--faint)" strokeDasharray="4 4" />
                 <Tooltip {...tooltipStyle} labelFormatter={(v) => dayTick(String(v))} formatter={(v) => [`${Number(v).toFixed(1)}%`, "win rate"]} />
                 <Area type="monotone" dataKey="winRate" stroke="var(--accent)" strokeWidth={2} fill="url(#wr-fill)" dot={false} />
-              </AreaChart>
-            </ResponsiveContainer>
+                </AreaChart>
+              </ResponsiveContainer>
+              <div className="chart-meta" aria-label="Rolling win-rate summary">
+                <span>Latest <b>{rollingLatest?.winRate.toFixed(1)}%</b></span>
+                {rollingChange !== null && (
+                  <span className={rollingChange >= 0 ? "positive" : "negative"}>
+                    {rollingChange >= 0 ? "+" : ""}{rollingChange.toFixed(1)} pts vs 50 games earlier
+                  </span>
+                )}
+              </div>
+            </>
           )}
         </div>
 
@@ -207,8 +231,9 @@ export function Overview({
           {weeks.length === 0 ? (
             <div className="empty-note">No dated games.</div>
           ) : (
-            <ResponsiveContainer width="100%" height={220}>
-              <BarChart data={weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
+            <>
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={weeks} margin={{ top: 4, right: 8, left: -18, bottom: 0 }}>
                 <CartesianGrid {...gridStyle} />
                 <XAxis
                   dataKey="week"
@@ -226,8 +251,17 @@ export function Overview({
                   formatter={(v) => [Number(v).toLocaleString(), "games"]}
                 />
                 <Bar dataKey="games" fill="var(--accent-dim)" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
+                </BarChart>
+              </ResponsiveContainer>
+              <div className="chart-meta" aria-label="Weekly games summary">
+                <span>Latest week <b>{latestWeek?.games.toLocaleString()}</b> games</span>
+                {latestWeek && priorWeek && (
+                  <span className={latestWeek.games >= priorWeek.games ? "positive" : "negative"}>
+                    {latestWeek.games - priorWeek.games >= 0 ? "+" : ""}{latestWeek.games - priorWeek.games} vs prior week
+                  </span>
+                )}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -248,7 +282,15 @@ export function Overview({
           </thead>
           <tbody>
             {chars.map((row) => (
-              <tr key={row.characterId} className="clickable" onClick={() => onSelectMyCharacter(row.characterId)}>
+              <tr
+                key={row.characterId}
+                className="clickable"
+                role="button"
+                tabIndex={0}
+                aria-label={`Filter to ${charName(row.characterId)}`}
+                onClick={() => onSelectMyCharacter(row.characterId)}
+                onKeyDown={(e) => activateOnKey(e, () => onSelectMyCharacter(row.characterId))}
+              >
                 <td>{charName(row.characterId)}</td>
                 <td className="data">{row.games.toLocaleString()}</td>
                 <td className="data">
@@ -265,6 +307,7 @@ export function Overview({
                   title={row.lCancelAttempts ? `${row.lCancelAttempts.toLocaleString()} attempts` : undefined}
                 >
                   {pct(row.lCancelPct)}
+                  {row.lCancelAttempts > 0 && <span className="sample-note">{row.lCancelAttempts.toLocaleString()} att.</span>}
                 </td>
               </tr>
             ))}
