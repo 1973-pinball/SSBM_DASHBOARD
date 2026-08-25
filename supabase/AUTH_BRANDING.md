@@ -58,5 +58,6 @@ Run `schema.sql`, then `community.sql`. Create a Supabase Cron job that runs:
 select public.refresh_community_snapshot();
 ```
 
-Hourly is enough for the Community tab. The refresh rebuilds aggregates from
-currently consenting accounts; it is deliberately not callable by the PWA.
+Run it every 15 minutes while the community is growing. The refresh rebuilds
+aggregates from currently consenting accounts; it is deliberately not callable
+by the PWA.

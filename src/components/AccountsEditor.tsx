@@ -195,17 +195,24 @@ export function AccountsEditor({ accounts, gameCounts, onSave, onClose, isDemo }
               <div className="hint">Community contribution is unavailable in demo/local-only mode.</div>
             )}
             {typeof consent === "boolean" && (
-              <button
-                type="button"
-                role="switch"
-                aria-checked={consent}
-                className={`consent-switch ${consent ? "on" : ""}`}
-                disabled={consentSaving}
-                onClick={() => void updateConsent(!consent)}
-              >
-                <span className="switch-track" aria-hidden="true"><span /></span>
-                <span>{consentSaving ? "Saving…" : consent ? "Contributing to future aggregate refreshes" : "Contribute anonymous stats"}</span>
-              </button>
+              <>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={consent}
+                  className={`consent-switch ${consent ? "on" : ""}`}
+                  disabled={consentSaving}
+                  onClick={() => void updateConsent(!consent)}
+                >
+                  <span className="switch-track" aria-hidden="true"><span /></span>
+                  <span>{consentSaving ? "Saving…" : consent ? "Contributing to future aggregate refreshes" : "Contribute anonymous stats"}</span>
+                </button>
+                {consent && !consentSaving && (
+                  <div className="hint" role="status" aria-live="polite">
+                    Contribution queued for the next refresh. Community aggregates update every 15 minutes.
+                  </div>
+                )}
+              </>
             )}
             {consentError && <div className="acct-error" role="alert">{consentError}</div>}
             <p className="privacy-pledge-inline">

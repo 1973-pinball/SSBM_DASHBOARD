@@ -368,6 +368,6 @@ grant execute on function public.refresh_community_snapshot() to service_role;
 -- First run / manual refresh:
 --   select public.refresh_community_snapshot();
 --
--- In production, schedule that statement hourly or daily with Supabase Cron.
+-- In production, schedule that statement every 15 minutes with Supabase Cron.
 -- The refresh replaces the snapshot, so switching consent off removes a user's
 -- private rows from the next aggregate instead of trying to subtract deltas.
