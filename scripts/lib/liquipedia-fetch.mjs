@@ -7,7 +7,7 @@
 
 const API = "https://liquipedia.net/smash/api.php";
 const CONTACT = process.env.LIQUIPEDIA_CONTACT || "info.studio.pinball@gmail.com";
-const UA = `SSBMDashboard/1.0 (bundled scene-history snapshot; contact: ${CONTACT})`;
+const UA = `SSBMStats/1.0 (bundled scene-history snapshot; contact: ${CONTACT})`;
 // Deliberately slower than their limit. Overridable only so offline tests
 // don't sit through real pacing.
 const REQUEST_GAP_MS = Number(process.env.LIQUIPEDIA_GAP_MS) || 30_000;

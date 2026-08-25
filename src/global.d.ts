@@ -1,4 +1,6 @@
 // Minimal File System Access API surface used by the app (Chromium).
+declare const __BUILD_ID__: string;
+
 interface FileSystemHandlePermissionDescriptor {
   mode?: "read" | "readwrite";
 }

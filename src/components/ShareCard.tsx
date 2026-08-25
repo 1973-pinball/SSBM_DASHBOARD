@@ -143,7 +143,7 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
 
           <div className="sc-foot">
             <span>{int(d.distinctOpponents)} opponents faced</span>
-            <span className="sc-url">ssbm-dashboard.vercel.app</span>
+            <span className="sc-url">ssbmstats.com</span>
           </div>
         </div>
       </div>

@@ -1,4 +1,6 @@
-# SSBM Dashboard
+# SSBM Stats
+
+Production: [ssbmstats.com](https://ssbmstats.com/)
 
 Point it at your Slippi replay folder and get a full statistical readout of your Melee play: win rates by opponent, matchup, and stage; kill stats; and execution trends. **Everything is parsed in your browser — no uploads, no accounts, no server.** An optional Google sign-in ([Cloud sync](#cloud-sync-optional)) mirrors your parsed stats — never raw replays — across devices; without it the app stays fully local.
 

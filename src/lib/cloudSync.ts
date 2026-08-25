@@ -1,6 +1,6 @@
 import type { Account, GameRecord } from "./types";
 import { putRecords } from "./db";
-import { gameKey } from "./dedupe";
+import { dedupeRecords, gameKey } from "./dedupe";
 import { supabase } from "./supabase";
 
 /**
@@ -17,10 +17,45 @@ const PUSH_CHUNK = 500;
 const PULL_CHUNK = 150;
 /** Ids per page when listing what the cloud already has. */
 const ID_PAGE = 1000;
+/** Rows per request on a fresh-device restore. Unlike the normal id diff, an
+ *  empty device can stream full rows directly instead of listing every id and
+ *  then fetching them again in much smaller query-string batches. */
+const RESTORE_PAGE = 1000;
 
 export interface SyncResult {
   pushed: number;
   pulled: GameRecord[];
+}
+
+/**
+ * Fast path for an empty local cache (new browser/device/custom domain).
+ * Fetch full records once in stable id order, report progress per page, then
+ * persist the deterministic content-deduped result. The normal two-way sync
+ * deliberately keeps its id diff; it is still cheaper when local is populated.
+ */
+export async function restoreCloudRecords(
+  onProgress?: (loaded: number) => void,
+  signal?: AbortSignal,
+): Promise<GameRecord[]> {
+  if (!supabase) return [];
+  const records: GameRecord[] = [];
+  for (let from = 0; ; from += RESTORE_PAGE) {
+    let query = supabase
+      .from("game_records")
+      .select("data")
+      .order("id", { ascending: true })
+      .range(from, from + RESTORE_PAGE - 1);
+    if (signal) query = query.abortSignal(signal);
+    const { data, error } = await query;
+    if (error) throw error;
+    const rows = data ?? [];
+    for (const row of rows) records.push(row.data as GameRecord);
+    onProgress?.(records.length);
+    if (rows.length < RESTORE_PAGE) break;
+  }
+  const restored = dedupeRecords(records);
+  if (restored.length) await putRecords(restored);
+  return restored;
 }
 
 /**
@@ -169,12 +204,14 @@ export async function pushMyAccounts(accounts: Account[]): Promise<void> {
   }
 }
 
-export async function pullMyAccounts(): Promise<Account[] | null> {
+export async function pullMyAccounts(signal?: AbortSignal): Promise<Account[] | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase
+  let query = supabase
     .from("user_codes")
     .select("code, label, sort_order")
     .order("sort_order", { ascending: true });
+  if (signal) query = query.abortSignal(signal);
+  const { data, error } = await query;
   if (error) throw error;
   // No user_settings fallback: the schema's backfill copied every pre-existing
   // my_codes array into user_codes, so a user who had an identity before the

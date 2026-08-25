@@ -27,6 +27,8 @@ class SsbmDb extends Dexie {
   kv!: Table<{ key: string; value: unknown }, string>;
 
   constructor() {
+    // Storage identity predates the public SSBM Stats name. Keep it stable so
+    // existing installs retain their parsed replay cache across the rebrand.
     super("ssbm-dashboard");
     this.version(1).stores({
       games: "id, playedAt, stageId, gameType",

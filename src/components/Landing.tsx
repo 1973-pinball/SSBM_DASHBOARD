@@ -12,8 +12,11 @@ interface Props {
   supportsFsAccess: boolean;
   /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
   onCloudSignIn: (() => void) | null;
-  cloudRestoring: boolean;
+  /** Null while idle; otherwise the number of cloud games fetched so far. */
+  cloudRestoring: number | null;
   online: boolean;
+  /** Chromium install prompt; null on unsupported/already-installed browsers. */
+  onInstall: (() => void) | null;
 }
 
 export function Landing({
@@ -26,11 +29,16 @@ export function Landing({
   onCloudSignIn,
   cloudRestoring,
   online,
+  onInstall,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="landing">
+      <div className="landing-brand" aria-label="SSBM Stats">
+        <img src="/favicon.svg" alt="" aria-hidden="true" />
+        <span>SSBM Stats</span>
+      </div>
       <h1>
         Ready? <span className="accent">Go!</span>
       </h1>
@@ -40,26 +48,37 @@ export function Landing({
       </p>
       <div className="cta-row">
         {supportsFsAccess ? (
-          <button className="primary" onClick={onPickDirectory}>
+          <button className="primary" onClick={onPickDirectory} disabled={cloudRestoring !== null}>
             Select replay folder
           </button>
         ) : (
-          <button className="primary" onClick={() => inputRef.current?.click()}>
+          <button className="primary" onClick={() => inputRef.current?.click()} disabled={cloudRestoring !== null}>
             Select replay folder
           </button>
         )}
-        <button className="ghost" onClick={onDemo}>
+        <button className="ghost" onClick={onDemo} disabled={cloudRestoring !== null}>
           Explore with demo data
         </button>
+        {onInstall && (
+          <button className="ghost" onClick={onInstall}>
+            Install app
+          </button>
+        )}
         {onCloudSignIn && (
           <button
             className="ghost"
             style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
             onClick={onCloudSignIn}
-            disabled={cloudRestoring || !online}
+            disabled={cloudRestoring !== null || !online}
           >
             <GoogleG size={15} />
-            {cloudRestoring ? "Restoring your stats…" : online ? "Sign in with Google to restore" : "Cloud restore unavailable offline"}
+            {cloudRestoring !== null
+              ? cloudRestoring > 0
+                ? `Restoring ${cloudRestoring.toLocaleString()} games…`
+                : "Restoring your stats…"
+              : online
+                ? "Sign in with Google to restore"
+                : "Cloud restore unavailable offline"}
           </button>
         )}
       </div>
@@ -75,8 +94,8 @@ export function Landing({
       {/* Neither public tab touches replays, so they should not sit behind the
           folder picker or demo mode. */}
       <div className="landing-aside">
-        No replays to hand? <button className="linky" onClick={onBrowseCommunity}>Explore anonymous community benchmarks</button>
-        {" "}or <button className="linky" onClick={onBrowseHistory}>browse Melee tournament history</button>. Neither needs
+        No replays to hand? <button className="linky" onClick={onBrowseCommunity} disabled={cloudRestoring !== null}>Explore anonymous community benchmarks</button>
+        {" "}or <button className="linky" onClick={onBrowseHistory} disabled={cloudRestoring !== null}>browse Melee tournament history</button>. Neither needs
         access to your replay folder.
       </div>
       <div className="hint" style={{ marginTop: 10 }}>

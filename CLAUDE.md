@@ -1,4 +1,4 @@
-# CLAUDE.md — SSBM Dashboard
+# CLAUDE.md — SSBM Stats
 
 ## What this is
 

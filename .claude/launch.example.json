@@ -2,7 +2,7 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ssbm-dashboard",
+      "name": "ssbm-stats",
       "runtimeExecutable": "npm",
       "runtimeArgs": [
         "run",

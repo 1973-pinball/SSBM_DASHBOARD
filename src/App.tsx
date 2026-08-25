@@ -11,7 +11,7 @@ import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
 import { CloudSync } from "./components/CloudSync";
 import { cloudEnabled, currentSession, signInWithGoogle } from "./lib/supabase";
-import { syncRecords, pullMyAccounts } from "./lib/cloudSync";
+import { pullMyAccounts, restoreCloudRecords } from "./lib/cloudSync";
 import { moveTabFocus } from "./lib/a11y";
 
 // Dashboard views are lazy so the landing/parsing path doesn't pay for
@@ -117,7 +117,9 @@ export default function App() {
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
-  const [cloudRestoring, setCloudRestoring] = useState(false);
+  // Null means idle; a number is the count streamed down so a first visit on a
+  // new origin never looks frozen while a large cloud library is restoring.
+  const [cloudRestoring, setCloudRestoring] = useState<number | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [folderPermission, setFolderPermission] = useState<PermissionState | "unknown">("unknown");
   const [lastScanned, setLastScanned] = useState<string | null>(() => localStorage.getItem("ssbm-last-scanned"));
@@ -247,6 +249,7 @@ export default function App() {
   // on a new device, or returning from the OAuth redirect), restore from the
   // cloud instead — that's the whole point of signing in.
   useEffect(() => {
+    const restoreController = new AbortController();
     void (async () => {
       try {
         const [raw, accts, handle] = await Promise.all([allRecords(), getMyAccounts(), getDirHandle()]);
@@ -272,13 +275,23 @@ export default function App() {
           }
         } else if (cloudEnabled && (await currentSession())) {
           const gen = generation.current;
-          setCloudRestoring(true);
+          let timedOut = false;
+          setCloudRestoring(0);
+          const timeout = window.setTimeout(() => {
+            timedOut = true;
+            restoreController.abort();
+          }, 120_000);
           try {
-            // Local is empty, so this is a pure pull and the code set only
-            // gates the push half — nothing to filter. Accounts aren't known
-            // until pullMyAccounts below, which is why it can't be passed here.
-            const { pulled } = await syncRecords([], new Set<string>());
-            const cloudAccounts = (await pullMyAccounts()) ?? [];
+            // A new origin has no IndexedDB cache at all, so fetch full rows
+            // directly. Running the account query alongside it also avoids an
+            // extra serial wait after a large library finishes.
+            const [pulled, cloudAccountsResult] = await Promise.all([
+              restoreCloudRecords((loaded) => {
+                if (generation.current === gen) setCloudRestoring(loaded);
+              }, restoreController.signal),
+              pullMyAccounts(restoreController.signal),
+            ]);
+            const cloudAccounts = cloudAccountsResult ?? [];
             if (generation.current !== gen || pulled.length === 0) return;
             setRecords(pulled);
             if (cloudAccounts.length > 0) {
@@ -288,8 +301,17 @@ export default function App() {
             } else {
               setPhase("identity");
             }
+          } catch (err) {
+            if (restoreController.signal.aborted && !timedOut) return;
+            console.error(err);
+            setPipelineError(
+              timedOut
+                ? "Cloud restore timed out. Reload to retry, or select your replay folder — your cloud data is unchanged."
+                : "Couldn't restore your cloud stats. Reload to retry, or select your replay folder.",
+            );
           } finally {
-            setCloudRestoring(false);
+            window.clearTimeout(timeout);
+            if (generation.current === gen) setCloudRestoring(null);
           }
         }
       } catch (err) {
@@ -297,6 +319,7 @@ export default function App() {
         setPipelineError("Couldn't read the local replay cache — your browser may be blocking storage.");
       }
     })();
+    return () => restoreController.abort();
   }, []);
 
   const startPipeline = useCallback(
@@ -563,7 +586,8 @@ export default function App() {
       {(publicView || phase !== "landing") && (
         <div className="topbar">
           <div className="brand">
-            <h1>SSBM Dashboard</h1>
+            <img src="/favicon.svg" alt="" aria-hidden="true" />
+            <h1>SSBM Stats</h1>
             {isDemo && <span className="tag">demo data</span>}
           </div>
           {publicView && (
@@ -659,6 +683,7 @@ export default function App() {
           onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
           cloudRestoring={cloudRestoring}
           online={online}
+          onInstall={installPrompt ? installApp : null}
         />
       )}
 
@@ -779,8 +804,10 @@ export default function App() {
 
       <footer className="site-footer">
         <span>Brought to you by Studio Pinball · © 2026</span>
+        <a href="https://ssbmstats.com/">ssbmstats.com</a>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
+        <span className="footer-build" title="Deployed source revision">build {__BUILD_ID__}</span>
       </footer>
 
       {updateReady && (
@@ -791,7 +818,7 @@ export default function App() {
       )}
       {!updateReady && offlineReady && (
         <div className="pwa-toast" role="status">
-          <span><b>Ready offline.</b> The dashboard shell is installed on this device.</span>
+          <span><b>Ready offline.</b> SSBM Stats is available on this device.</span>
           <button className="ghost" aria-label="Dismiss" onClick={() => setOfflineReady(false)}>×</button>
         </div>
       )}

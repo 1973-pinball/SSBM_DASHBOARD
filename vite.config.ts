@@ -1,9 +1,23 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
+import { execFileSync } from 'node:child_process'
+
+const buildId = (() => {
+  const vercelCommit = process.env.VERCEL_GIT_COMMIT_SHA?.trim()
+  if (vercelCommit) return vercelCommit.slice(0, 7)
+  try {
+    return execFileSync('git', ['rev-parse', '--short=7', 'HEAD'], { encoding: 'utf8' }).trim()
+  } catch {
+    return 'local'
+  }
+})()
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __BUILD_ID__: JSON.stringify(buildId),
+  },
   plugins: [
     react(),
     VitePWA({
@@ -16,10 +30,13 @@ export default defineConfig({
       injectRegister: null,
       manifest: {
         id: '/',
-        name: 'SSBM Dashboard',
-        short_name: 'SSBM Dash',
+        name: 'SSBM Stats',
+        short_name: 'SSBM Stats',
         description:
-          'Slippi replay stats, parsed in your browser — win rates, matchups, and execution trends.',
+          'Private Slippi replay analytics and Melee history, parsed entirely in your browser.',
+        start_url: '/',
+        scope: '/',
+        lang: 'en-US',
         display: 'standalone',
         background_color: '#121022',
         theme_color: '#121022',

@@ -1,4 +1,4 @@
--- SSBM Dashboard cloud sync schema.
+-- SSBM Stats cloud sync schema.
 -- Paste into the Supabase SQL editor (Dashboard → SQL Editor → New query → Run).
 -- Safe to re-run: every statement is idempotent, so this doubles as the migration
 -- path when the schema gains something. Policies are dropped and recreated rather

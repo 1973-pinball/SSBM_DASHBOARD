@@ -14,7 +14,7 @@ const CONTACT = process.env.LIQUIPEDIA_CONTACT || "info.studio.pinball@gmail.com
 
 const res = await fetch(
   `https://liquipedia.net/smash/api.php?action=parse&page=${encodeURIComponent(page)}&format=json&prop=text&redirects=1`,
-  { headers: { "User-Agent": `SSBMDashboard/1.0 (pipeline debugging; contact: ${CONTACT})` } },
+  { headers: { "User-Agent": `SSBMStats/1.0 (pipeline debugging; contact: ${CONTACT})` } },
 );
 if (!res.ok) {
   console.error(`HTTP ${res.status} for ${page}`);

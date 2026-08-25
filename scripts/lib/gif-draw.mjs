@@ -78,7 +78,7 @@ function chrome(ctx, { title, subtitle, cornerTop, cornerBottom }) {
 
   ctx.fillStyle = FAINT;
   ctx.font = `12px ${MONO}`;
-  ctx.fillText("ssbm-dashboard.vercel.app · data: Liquipedia", 28, h - 18);
+  ctx.fillText("ssbmstats.com · data: Liquipedia", 28, h - 18);
 }
 
 /**

@@ -1,5 +1,5 @@
 /* ---------------------------------------------------------------------------
-   SSBM Dashboard - token system
+   SSBM Stats - token system
    Palette pulled from the GameCube-era Melee menu world: deep indigo glass,
    controller purple, phosphor green for wins, P1-red for losses.
 --------------------------------------------------------------------------- */
@@ -52,6 +52,7 @@ button {
   padding: 8px 14px;
 }
 button:hover { border-color: var(--accent-dim); }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
 button:focus-visible, select:focus-visible, a:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -107,7 +108,8 @@ select:disabled { opacity: 0.45; }
   flex-wrap: wrap;
   margin-bottom: 18px;
 }
-.brand { display: flex; align-items: baseline; gap: 12px; }
+.brand { display: flex; align-items: center; gap: 10px; }
+.brand > img { width: 23px; height: 23px; flex: 0 0 auto; }
 .brand h1 { font-size: 20px; letter-spacing: 0.06em; text-transform: uppercase; }
 .brand .tag {
   font-family: var(--font-data);
@@ -167,6 +169,18 @@ select:disabled { opacity: 0.45; }
   text-align: center;
   gap: 20px;
 }
+.landing-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.landing-brand img { width: 34px; height: 34px; }
 .landing h1 { font-size: 40px; letter-spacing: 0.04em; text-transform: uppercase; }
 .landing h1 .accent { color: var(--accent); }
 .landing p.sub { color: var(--muted); max-width: 540px; margin: 0; }
@@ -1175,6 +1189,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 .site-footer a:hover { color: var(--accent); text-decoration: underline; }
 .footer-link { border: 0; background: transparent; padding: 0; color: var(--muted); font: inherit; text-decoration: underline; }
 .footer-link:hover { color: var(--accent); }
+.footer-build { color: var(--faint); font-family: var(--font-data); }
 
 .pwa-toast {
   position: fixed;
@@ -1213,8 +1228,10 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
     padding-bottom: max(64px, calc(32px + env(safe-area-inset-bottom)));
   }
   .topbar { gap: 10px; margin-bottom: 12px; }
-  .brand { width: 100%; justify-content: space-between; }
+  .brand { width: 100%; justify-content: flex-start; }
+  .brand > img { margin-right: -2px; }
   .brand h1 { font-size: 19px; }
+  .brand .tag { margin-left: auto; }
   .identity { gap: 8px; }
   .identity-summary { flex: 1 0 100%; flex-wrap: wrap; }
   .app-state { margin-left: auto; }
