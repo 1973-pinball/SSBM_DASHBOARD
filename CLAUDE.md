@@ -62,6 +62,7 @@ Categorical series colors (the Liquipedia character charts) come from `CHAR_COLO
 - New aggregate views: respect the global `Filters` and the click-to-filter pattern (clicking a row/cell scopes the dashboard).
 - Sample-size honesty: any win-rate display over small n should fade or badge it (see matchup matrix `minGames`).
 - Smoke-test selectors against demo data (`generateDemoRecords`) when touching `stats.ts`.
+- **Commits are authored as `Studio Pinball <info.studio.pinball@gmail.com>`** — the same address the app publishes as its contact. `.githooks/pre-push` refuses to push anything else. Git will not run a tracked hook until the clone opts in, so a fresh clone needs `git config core.hooksPath .githooks` once; without it the guard is silently absent.
 
 ## Deployment
 

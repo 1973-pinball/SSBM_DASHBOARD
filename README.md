@@ -46,6 +46,12 @@ npm run lint     # oxlint
 npm run assets   # render the share images into public/share (gitignored)
 ```
 
+Run once per clone, so the repo's hooks are active:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Scene data (the Liquipedia tab)
 
 The tab reads `src/lib/liquipedia/data.ts`, a snapshot compiled from [Liquipedia's Smash wiki](https://liquipedia.net/smash) (content licensed [CC BY-SA 3.0](https://creativecommons.org/licenses/by-sa/3.0/)) — [Major Tournaments/Melee](https://liquipedia.net/smash/Major_Tournaments/Melee), the [SSBMRank](https://liquipedia.net/smash/SSBMRank) editions, and player pages for career winnings. Every source is listed at the bottom of the tab.

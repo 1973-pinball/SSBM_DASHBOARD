@@ -1,0 +1,4 @@
+# Shell hooks must stay LF: with core.autocrlf=true a CRLF checkout gives
+# /bin/sh a \r it can't parse, and the hook dies as a bad interpreter on
+# exactly the fresh clone it exists to protect.
+.githooks/** text eol=lf
