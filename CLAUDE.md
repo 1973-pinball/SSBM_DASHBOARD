@@ -5,7 +5,7 @@
 A zero-backend web app: a Melee player points their browser at their local Slippi replay folder and gets a stats dashboard. All parsing happens client-side via `@slippi/slippi-js` in web workers. The privacy contract, precisely:
 
 1. **Raw `.slp` files never leave the machine — hard product constraint, no exceptions.**
-2. Parsed `GameRecord` stats (~5 KB/game — ~1 KB of headline stats plus the per-move table) may sync, but only **opt-in**, only to the **user's own Supabase project**, behind `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` env vars, with per-user row-level security. Without those vars `supabase` is `null`, `CloudSync` renders nothing, and the app is exactly the local-only tool described here.
+2. Parsed `GameRecord` stats (~5 KB/game — ~1 KB of headline stats plus the per-move table) may sync, but only **opt-in**, only to **the Supabase project that deployment is configured against** — the user's own when self-hosted, the operator's on ssbmstats.com — behind `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` env vars, with per-user row-level security. Without those vars `supabase` is `null`, `CloudSync` renders nothing, and the app is exactly the local-only tool described here. Never tell a hosted user their stats sync to "their own Supabase": on ssbmstats.com those rows sit in the operator's project, isolated per user by RLS. "Your private account" is the honest claim; the stronger one is a privacy misstatement.
 3. No telemetry, analytics, or any other non-opt-in transmission of replay-derived data — ever.
 
 ## Architecture

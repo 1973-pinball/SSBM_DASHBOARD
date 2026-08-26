@@ -2,7 +2,7 @@
 
 Production: [ssbmstats.com](https://ssbmstats.com/)
 
-Point it at your Slippi replay folder and get a full statistical readout of your Melee play: win rates by opponent, matchup, and stage; kill stats; and execution trends. **Everything is parsed in your browser — no uploads, no accounts, no server.** An optional Google sign-in ([Cloud sync](#cloud-sync-optional)) mirrors your parsed stats — never raw replays — across devices; without it the app stays fully local.
+Point it at your Slippi replay folder and get a full statistical readout of your Melee play: win rates by opponent, matchup, and stage; kill stats; and execution trends. **Everything is parsed in your browser — your replays never leave your machine.** An optional Google sign-in ([Cloud sync](#cloud-sync-optional)) mirrors your parsed stats — never raw replays — across devices; without it the app stays fully local.
 
 No replays handy? The landing page has a demo mode: a deterministic synthetic year of a Falco player's netplay.
 
@@ -71,6 +71,8 @@ Both animated charts have a **Share GIF** button that exports the animation at t
 ## Cloud sync (optional)
 
 With no configuration the app is 100% local. When enabled, the cloud is a **mirror, not a backend**: the dashboard always renders from the local IndexedDB cache, and sync keeps that cache converged with the union of games from every device you've signed in on. So the app stays instant, works offline, and a failed sync means a stale mirror, never a broken dashboard.
+
+**Which Supabase project the stats land in depends on the deployment.** The steps below stand up your own, so a self-hosted instance mirrors to infrastructure you control. On the hosted [ssbmstats.com](https://ssbmstats.com/) they land in the operator's project instead, where row-level security scopes every row to the account that wrote it and no other signed-in user can read them.
 
 To enable accounts and cross-device sync of the flattened `GameRecord` metadata (raw `.slp` files never leave the machine):
 
