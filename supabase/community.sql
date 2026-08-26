@@ -48,6 +48,31 @@ create policy "community aggregate read" on public.community_snapshot
 grant select on public.community_snapshot to anon, authenticated;
 revoke insert, update, delete on public.community_snapshot from anon, authenticated;
 
+-- Publish-time coarsening.
+--
+-- The k-thresholds below protect any single snapshot; they do not protect a
+-- sequence of them. This snapshot is world-readable and replaced on a schedule,
+-- so an observer who archives each refresh can diff them, and a contributor
+-- joining or leaving moves exact counts by a knowable amount -- which is what
+-- attributes a delta to one person. Rounding published figures to a bucket puts
+-- a single contributor beneath the resolution of the number, so the diff has
+-- nothing to attribute.
+--
+-- Rates are rounded only to the precision the UI actually renders (pct() shows
+-- one decimal), on the principle that a payload should not publish digits no
+-- one is shown. That is hygiene, not protection: one game moves a 100-game cell
+-- by a full point, which no display-precision rounding can hide. The bucketed
+-- counts are what does the work, by hiding that the population changed at all.
+--
+-- So this raises the cost of the attack; it is not differential privacy and does
+-- not claim to be. Refresh cadence is the other half: every refresh is another
+-- observation, so publish as rarely as the view can tolerate.
+create or replace function public.pub_bucket(value numeric, bucket numeric)
+returns numeric
+language sql
+immutable
+as $$ select case when value is null then null else round(value / bucket) * bucket end $$;
+
 -- Rebuild the one public snapshot from consenting users' private rows. This is
 -- intentionally a scheduled/admin operation, never a browser-callable RPC.
 -- It counts only the consenting user's own player side for execution and move
@@ -313,36 +338,50 @@ assembled as (
   select jsonb_build_object(
     'matchups', coalesce((select jsonb_agg(jsonb_build_object(
       'characterId', character_id, 'opponentCharacterId', opponent_character_id,
-      'stageId', stage_id, 'gameType', game_type, 'games', games,
-      'contributors', contributors, 'wins', wins, 'winRate', wins::numeric / games
+      'stageId', stage_id, 'gameType', game_type, 'games', public.pub_bucket(games, 25),
+      'contributors', public.pub_bucket(contributors, 5), 'wins', public.pub_bucket(wins, 25),
+      'winRate', round(wins::numeric / games, 3)
     ) order by games desc) from matchup_rollup), '[]'::jsonb),
     'benchmarks', coalesce((select jsonb_agg(jsonb_build_object(
-      'characterId', character_id, 'games', games, 'contributors', contributors,
-      'lCancel', case when l_cancel_q is null then null else jsonb_build_object('p25', l_cancel_q[1], 'p50', l_cancel_q[2], 'p75', l_cancel_q[3]) end,
-      'openingsPerKill', case when opk_q is null then null else jsonb_build_object('p25', opk_q[1], 'p50', opk_q[2], 'p75', opk_q[3]) end,
-      'damagePerOpening', case when dpo_q is null then null else jsonb_build_object('p25', dpo_q[1], 'p50', dpo_q[2], 'p75', dpo_q[3]) end,
-      'inputsPerMinute', case when ipm_q is null then null else jsonb_build_object('p25', ipm_q[1], 'p50', ipm_q[2], 'p75', ipm_q[3]) end
+      'characterId', character_id, 'games', public.pub_bucket(games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'lCancel', case when l_cancel_q is null then null else jsonb_build_object('p25', round(l_cancel_q[1], 1), 'p50', round(l_cancel_q[2], 1), 'p75', round(l_cancel_q[3], 1)) end,
+      'openingsPerKill', case when opk_q is null then null else jsonb_build_object('p25', round(opk_q[1], 1), 'p50', round(opk_q[2], 1), 'p75', round(opk_q[3], 1)) end,
+      'damagePerOpening', case when dpo_q is null then null else jsonb_build_object('p25', round(dpo_q[1], 1), 'p50', round(dpo_q[2], 1), 'p75', round(dpo_q[3], 1)) end,
+      'inputsPerMinute', case when ipm_q is null then null else jsonb_build_object('p25', round(ipm_q[1], 1), 'p50', round(ipm_q[2], 1), 'p75', round(ipm_q[3], 1)) end
     ) order by character_id) from benchmark_rollup), '[]'::jsonb),
+    -- The move sums below are deliberately NOT bucketed. They span orders of
+    -- magnitude in the same column -- a jab lands thousands of times while its
+    -- kill count is single digits -- so any bucket wide enough to mask one
+    -- contributor erases the small cells entirely (12 kills rounding to 0),
+    -- and any bucket narrow enough to keep them masks nobody. They stay a
+    -- differencing vector; refresh cadence is what limits them.
     'moves', coalesce((select jsonb_agg(jsonb_build_object(
-      'characterId', character_id, 'moveKey', move_key, 'characterGames', character_games,
-      'contributors', contributors, 'attempts', attempts, 'attemptGames', attempt_games,
+      'characterId', character_id, 'moveKey', move_key,
+      'characterGames', public.pub_bucket(character_games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'attempts', attempts, 'attemptGames', public.pub_bucket(attempt_games, 25),
       'landed', landed, 'damage', damage, 'kills', kills, 'killPctSum', kill_pct_sum,
       'openings', openings, 'openingDamage', opening_damage,
       'lCancelSuccess', l_cancel_success, 'lCancelFail', l_cancel_fail
     ) order by character_id, damage desc) from move_rollup), '[]'::jsonb),
     'months', coalesce((select jsonb_agg(jsonb_build_object(
-      'month', month, 'playerGames', player_games, 'contributors', contributors,
-      'averageDurationSeconds', average_duration_seconds, 'ranked', ranked,
-      'unranked', unranked, 'direct', direct, 'offline', offline
+      'month', month, 'playerGames', public.pub_bucket(player_games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'averageDurationSeconds', round(average_duration_seconds, 0), 'ranked', public.pub_bucket(ranked, 25),
+      'unranked', public.pub_bucket(unranked, 25), 'direct', public.pub_bucket(direct, 25),
+      'offline', public.pub_bucket(offline, 25)
     ) order by month) from month_rollup), '[]'::jsonb),
     'characters', coalesce((select jsonb_agg(jsonb_build_object(
-      'characterId', character_id, 'playerGames', player_games, 'contributors', contributors,
-      'wins', coalesce(wins, 0), 'decided', decided,
-      'winRate', case when decided > 0 then wins::numeric / decided else null end
+      'characterId', character_id, 'playerGames', public.pub_bucket(player_games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'wins', public.pub_bucket(coalesce(wins, 0), 25), 'decided', public.pub_bucket(decided, 25),
+      'winRate', case when decided > 0 then round(wins::numeric / decided, 3) else null end
     ) order by player_games desc) from character_rollup), '[]'::jsonb),
     'stages', coalesce((select jsonb_agg(jsonb_build_object(
-      'stageId', stage_id, 'playerGames', player_games, 'contributors', contributors,
-      'averageDurationSeconds', average_duration_seconds
+      'stageId', stage_id, 'playerGames', public.pub_bucket(player_games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'averageDurationSeconds', round(average_duration_seconds, 0)
     ) order by player_games desc) from stage_rollup), '[]'::jsonb)
   ) as payload
 )
