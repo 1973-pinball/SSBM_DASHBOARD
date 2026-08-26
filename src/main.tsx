@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
+import { Analytics } from '@vercel/analytics/react'
 // Self-hosted fonts (was Google Fonts): same-origin, hashed, immutable-cached.
 import '@fontsource/chakra-petch/500.css'
 import '@fontsource/chakra-petch/600.css'
@@ -59,5 +60,9 @@ registerSW({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
+    {/* Aggregate, cookieless pageview counts. Vercel auto-injects this beacon
+        on Next.js but not on Vite, so it is mounted by hand or nothing is ever
+        recorded. Counts visits only — nothing per-visitor. */}
+    <Analytics />
   </StrictMode>,
 )
