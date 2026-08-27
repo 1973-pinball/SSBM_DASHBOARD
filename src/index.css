@@ -158,6 +158,10 @@ select:disabled { opacity: 0.45; }
 }
 .app-state.offline { color: var(--gold); }
 .app-state.offline::before { background: var(--gold); }
+/* Same gold "needs your attention" treatment for a dashboard with no replay
+   folder attached — the stats are fine, but nothing will ever be added. */
+.app-state.warn { color: var(--gold); }
+.app-state.warn::before { background: var(--gold); }
 
 /* ---- Landing ---- */
 .landing {
