@@ -3,7 +3,7 @@ import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, Ca
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
-import type { ExecMetricKey } from "../lib/stats";
+import type { ExecMetricKey, GameSet, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
@@ -311,82 +311,99 @@ const OPPONENT_ROWS = 25;
  * runback". Sets are always best of three (see computeSets); an unfinished
  * trailing set is not counted.
  */
-function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
-  const sets = useMemo(() => computeSets(games), [games]);
-  const s = useMemo(() => setsSummary(sets), [sets]);
-  // Closed by default, like the session log: the KPI strip above is the summary
-  // worth landing on, and this table is for when you want to go looking.
+/** The set summary bars. Split from RecentSets so the game log can sit between them. */
+function SetsKpis({ s }: { s: SetsSummary }) {
+  if (s.sets === 0) return null;
+  return (
+    <div className="kpi-strip">
+      <Kpi label="Sets" value={int(s.sets)} />
+      <Kpi label="Set record" value={`${s.wins}–${s.losses}`} />
+      <Kpi label="Set win rate" value={pct(s.setWinRate)} />
+      <Kpi label="Games / set" value={num(s.avgGames, 1)} />
+      <Kpi
+        label="After dropping game 1"
+        value={s.afterG1Loss.total ? pct(s.afterG1Loss.wins / s.afterG1Loss.total, 0) : "—"}
+        delta={s.afterG1Loss.total ? `${s.afterG1Loss.wins} of ${s.afterG1Loss.total} sets won` : undefined}
+      />
+      <Kpi
+        label="Sets that went to game 3"
+        value={s.deciders.total ? pct(s.deciders.wins / s.deciders.total, 0) : "—"}
+        delta={s.deciders.total ? `${s.deciders.wins} of ${s.deciders.total} won` : undefined}
+      />
+    </div>
+  );
+}
+
+/**
+ * Recent sets, collapsed by default like the session log: the bars above are
+ * the summary worth landing on, this table is for going looking.
+ *
+ * Separate from SetsKpis so Opponents can order the game log between the two —
+ * and so a library with no completed sets, which renders neither of these,
+ * still gets its game log.
+ */
+function RecentSets({
+  sets,
+  s,
+  onSelect,
+}: {
+  sets: GameSet[];
+  s: SetsSummary;
+  onSelect: (code: string) => void;
+}) {
   const [logOpen, setLogOpen] = useState(false);
   if (s.sets === 0) return null;
   const recent = [...sets].reverse().slice(0, 15);
   return (
-    <>
-      <div className="kpi-strip">
-        <Kpi label="Sets" value={int(s.sets)} />
-        <Kpi label="Set record" value={`${s.wins}–${s.losses}`} />
-        <Kpi label="Set win rate" value={pct(s.setWinRate)} />
-        <Kpi label="Games / set" value={num(s.avgGames, 1)} />
-        <Kpi
-          label="After dropping game 1"
-          value={s.afterG1Loss.total ? pct(s.afterG1Loss.wins / s.afterG1Loss.total, 0) : "—"}
-          delta={s.afterG1Loss.total ? `${s.afterG1Loss.wins} of ${s.afterG1Loss.total} sets won` : undefined}
-        />
-        <Kpi
-          label="Sets that went to game 3"
-          value={s.deciders.total ? pct(s.deciders.wins / s.deciders.total, 0) : "—"}
-          delta={s.deciders.total ? `${s.deciders.wins} of ${s.deciders.total} won` : undefined}
-        />
-      </div>
-      <div className="panel">
-        <h2 className="panel-disclosure">
-          <button aria-expanded={logOpen} aria-controls="recent-sets" onClick={() => setLogOpen((v) => !v)}>
-            Recent sets
-            <span className="panel-disclosure-meta">
-              latest {Math.min(recent.length, s.sets).toLocaleString()} of {s.sets.toLocaleString()}
-              <span aria-hidden="true">{logOpen ? "▲" : "▼"}</span>
-            </span>
-          </button>
-        </h2>
-        {logOpen && (
-        <div id="recent-sets">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Opponent</th>
-              <th className="data">Score</th>
-              <th className="data">Result</th>
-              <th className="data">Games</th>
+    <div className="panel">
+      <h2 className="panel-disclosure">
+        <button aria-expanded={logOpen} aria-controls="recent-sets" onClick={() => setLogOpen((v) => !v)}>
+          Recent sets
+          <span className="panel-disclosure-meta">
+            latest {Math.min(recent.length, s.sets).toLocaleString()} of {s.sets.toLocaleString()}
+            <span aria-hidden="true">{logOpen ? "▲" : "▼"}</span>
+          </span>
+        </button>
+      </h2>
+      {logOpen && (
+      <div id="recent-sets">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Opponent</th>
+            <th className="data">Score</th>
+            <th className="data">Result</th>
+            <th className="data">Games</th>
+          </tr>
+        </thead>
+        <tbody>
+          {recent.map((set, i) => (
+            <tr key={`${set.oppCode}-${set.start?.getTime() ?? i}`} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${set.oppCode}`} onClick={() => onSelect(set.oppCode)} onKeyDown={(e) => activateOnKey(e, () => onSelect(set.oppCode))}>
+              <td className="data">{shortDate(set.start)}</td>
+              <td style={{ fontFamily: "var(--font-data)" }}>
+                {set.oppCode}
+                {set.oppName && <span style={{ color: "var(--faint)" }}> · {set.oppName}</span>}
+              </td>
+              <td className="data">
+                <span className="up">{set.wins}</span>–<span className="down">{set.losses}</span>
+              </td>
+              <td className="data">
+                <span className={`wl-pill ${set.result === "W" ? "up" : "down"}`}>{set.result}</span>
+              </td>
+              <td className="data">{set.games.length}</td>
             </tr>
-          </thead>
-          <tbody>
-            {recent.map((set, i) => (
-              <tr key={`${set.oppCode}-${set.start?.getTime() ?? i}`} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${set.oppCode}`} onClick={() => onSelect(set.oppCode)} onKeyDown={(e) => activateOnKey(e, () => onSelect(set.oppCode))}>
-                <td className="data">{shortDate(set.start)}</td>
-                <td style={{ fontFamily: "var(--font-data)" }}>
-                  {set.oppCode}
-                  {set.oppName && <span style={{ color: "var(--faint)" }}> · {set.oppName}</span>}
-                </td>
-                <td className="data">
-                  <span className="up">{set.wins}</span>–<span className="down">{set.losses}</span>
-                </td>
-                <td className="data">
-                  <span className={`wl-pill ${set.result === "W" ? "up" : "down"}`}>{set.result}</span>
-                </td>
-                <td className="data">{set.games.length}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="hint">
-          A set is consecutive games against the same opponent, best of three — it ends when someone reaches two wins,
-          and the next game starts a new one. A 20-minute gap also ends it, and a trailing set nobody won is not
-          counted. Click a row to filter to that opponent.
-        </div>
-        </div>
-        )}
+          ))}
+        </tbody>
+      </table>
+      <div className="hint">
+        A set is consecutive games against the same opponent, best of three — it ends when someone reaches two wins,
+        and the next game starts a new one. A 20-minute gap also ends it, and a trailing set nobody won is not
+        counted. Click a row to filter to that opponent.
       </div>
-    </>
+      </div>
+      )}
+    </div>
   );
 }
 
@@ -408,6 +425,10 @@ export function Opponents({
       (r) => !q || r.code.toLowerCase().includes(q) || (r.displayName ?? "").toLowerCase().includes(q),
     );
   }, [rows, query]);
+  // Computed here rather than inside the sets components so both read the same
+  // pass, and so Opponents controls where the game log lands between them.
+  const sets = useMemo(() => computeSets(games), [games]);
+  const setsSum = useMemo(() => setsSummary(sets), [sets]);
   const pageCount = Math.max(1, Math.ceil(filtered.length / OPPONENT_ROWS));
   // Clamped rather than reset in an effect: a dashboard filter can shrink the
   // list under whatever page you were on, and deriving the page keeps that from
@@ -418,10 +439,11 @@ export function Opponents({
   if (rows.length === 0) return <div className="empty-note">No opponents with connect codes in the current filter.</div>;
   return (
     <>
-    {/* Both logs collapsed, so the tab still opens on the sets summary and the
-        opponents table rather than two long tables. */}
+    {/* Bars first, then the two collapsed logs: the tab opens on the summary
+        and the opponents table rather than on two long tables. */}
+    <SetsKpis s={setsSum} />
     <GameLog games={games} accounts={accounts} />
-    <SetsPanel games={games} onSelect={onSelect} />
+    <RecentSets sets={sets} s={setsSum} onSelect={onSelect} />
     <div className="panel">
       <h2>Opponents</h2>
       <div style={{ marginBottom: 10 }}>
