@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { CHAR_STACK_ORDER, OTHER_CHAR, charColor, charId } from "../../lib/liquipedia/chars";
 import type { Major, PlayerMeta } from "../../lib/liquipedia/types";
@@ -188,7 +188,11 @@ export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) 
         }
       />
 
-      <div className="lq-race" style={{ height: comp.chars.length * ROW_H }}>
+      {/* See MajorsRace: the transitions are sized off the real frame duration. */}
+      <div
+        className="lq-race"
+        style={{ height: comp.chars.length * ROW_H, "--lq-step": `${PLAY_MS / playback.speed}ms` } as CSSProperties}
+      >
         {comp.chars.map((s, i) => {
           const isNew = prev !== undefined && !prev.byChar.has(s.char);
           const top = s.reps[0]!;

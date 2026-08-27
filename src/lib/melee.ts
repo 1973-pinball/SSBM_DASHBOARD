@@ -1,4 +1,6 @@
-// In-game external character IDs used by Slippi.
+// In-game external character IDs used by Slippi. This is the playable roster;
+// `INCLUDED_CHARACTER_IDS` in config.ts is the allowlist built from it, and
+// it's what actually keeps everything below out of the dashboard.
 export const CHARACTERS: Record<number, string> = {
   0: "Captain Falcon",
   1: "DK",
@@ -37,7 +39,25 @@ export const STAGES: Record<number, string> = {
   32: "Final Destination",
 };
 
-export const charName = (id: number): string => CHARACTERS[id] ?? `Char ${id}`;
+/**
+ * The rest of Melee's external character table, kept separate because none of
+ * it is selectable in a versus match — a replay reporting one of these is
+ * malformed or came from a mod, and the allowlist drops the game before any
+ * view sees it. Named anyway so that if one ever does slip through some path
+ * that doesn't resolve through `resolveGames`, it reads as "Sandbag" rather
+ * than "Char 31". Names match slippi-js's own table.
+ */
+const NON_PLAYABLE: Record<number, string> = {
+  26: "Master Hand",
+  27: "Wireframe (Male)",
+  28: "Wireframe (Female)",
+  29: "Giga Bowser",
+  30: "Crazy Hand",
+  31: "Sandbag",
+  32: "Popo",
+};
+
+export const charName = (id: number): string => CHARACTERS[id] ?? NON_PLAYABLE[id] ?? `Char ${id}`;
 export const stageName = (id: number): string => STAGES[id] ?? `Stage ${id}`;
 
 /**

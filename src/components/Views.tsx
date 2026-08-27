@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
@@ -9,6 +9,58 @@ import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
 import { activateOnKey } from "../lib/a11y";
+
+/**
+ * A horizontally scrolling win-rate grid with a second scrollbar above it.
+ *
+ * A full roster is 26 columns, so the grid overflows on any normal window —
+ * and the only handle for the columns off the right edge sat under the last
+ * row, which is the far corner of the panel from where you're reading. The
+ * strip above is an empty div the same width as the grid; the two scroll
+ * positions are kept in sync in both directions, so either bar drives.
+ * It renders only when the content actually overflows — a dead scrollbar over
+ * a grid that already fits is worse than no scrollbar.
+ */
+function MatrixScroll({ children }: { children: ReactNode }) {
+  const topRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [scrollWidth, setScrollWidth] = useState(0); // 0 = fits, no top bar
+
+  // No dep array: the grid's width changes with the filters, not with anything
+  // this component can name. Re-measuring to the same number is a no-op state
+  // set, so this settles in one pass rather than looping.
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const measure = () => setScrollWidth(body.scrollWidth > body.clientWidth ? body.scrollWidth : 0);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(body);
+    // The box can keep its size while the table inside it grows or shrinks.
+    if (body.firstElementChild) ro.observe(body.firstElementChild);
+    return () => ro.disconnect();
+  });
+
+  // The guard is what stops the pair ping-ponging: assigning scrollLeft fires
+  // a scroll event on the target, which syncs straight back.
+  const sync = (from: HTMLDivElement | null, to: HTMLDivElement | null) => {
+    if (from && to && to.scrollLeft !== from.scrollLeft) to.scrollLeft = from.scrollLeft;
+  };
+
+  return (
+    <>
+      {scrollWidth > 0 && (
+        // Purely a duplicate control surface: the grid below is the content.
+        <div className="matrix-scroll-top" ref={topRef} aria-hidden="true" onScroll={() => sync(topRef.current, bodyRef.current)}>
+          <div style={{ width: scrollWidth }} />
+        </div>
+      )}
+      <div className="matrix-wrap" ref={bodyRef} onScroll={() => sync(bodyRef.current, topRef.current)}>
+        {children}
+      </div>
+    </>
+  );
+}
 
 // ---------------- Matchups ----------------
 
@@ -36,7 +88,7 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
             games
           </label>
         </div>
-        <div className="matrix-wrap">
+        <MatrixScroll>
           <table className="matrix">
             <thead>
               <tr>
@@ -81,7 +133,7 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
               ))}
             </tbody>
           </table>
-        </div>
+        </MatrixScroll>
         <MatrixLegend />
         <div className="hint">Click a cell to filter the dashboard to that matchup. Faded cells are below the sample threshold.</div>
       </div>
@@ -163,7 +215,7 @@ function StageCharGrid({
   const { stages, chars, cells } = useMemo(() => stageCharMatrix(games, side), [games, side]);
   if (stages.length === 0) return <div className="empty-note">No games match the current filters.</div>;
   return (
-    <div className="matrix-wrap">
+    <MatrixScroll>
       <table className="matrix">
         <thead>
           <tr>
@@ -209,7 +261,7 @@ function StageCharGrid({
         </tbody>
       </table>
       <MatrixLegend />
-    </div>
+    </MatrixScroll>
   );
 }
 

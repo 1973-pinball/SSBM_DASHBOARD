@@ -1,7 +1,16 @@
 import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame } from "./types";
 import { ACTION_LABELS } from "./types";
-import { INCLUDED_STAGE_ID_SET } from "./config";
+import { INCLUDED_CHARACTER_ID_SET, INCLUDED_STAGE_ID_SET } from "./config";
 import { moveGroup } from "./melee";
+
+/**
+ * Every side is a character anyone could actually have picked. One malformed
+ * replay reporting Sandbag or Popo is enough to put a "Char 31" row in the
+ * matchup tables, and there is no honest name to give it — so the game is
+ * dropped whole, the same treatment an illegal stage gets.
+ */
+const playableRoster = (players: PlayerSide[]): boolean =>
+  players.every((p) => INCLUDED_CHARACTER_ID_SET.has(p.characterId));
 
 /** Local-timezone YYYY-MM-DD, matching the dates the user sees in the UI. */
 export function localDay(d: Date): string {
@@ -52,6 +61,7 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
   for (const rec of records) {
     if (rec.parseError || rec.isTeams || rec.players.length !== 2) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
+    if (!playableRoster(rec.players)) continue;
     const meIdx = rec.players.findIndex((p) => p.connectCode && myCodes.has(p.connectCode));
     if (meIdx < 0) continue;
     // meIdx is 0 or 1 (players.length === 2 checked above), so both are in bounds.
@@ -77,6 +87,7 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
   for (const rec of records) {
     if (rec.parseError || !rec.isTeams || rec.players.length !== 4) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
+    if (!playableRoster(rec.players)) continue;
     const me = rec.players.find((p) => p.connectCode && myCodes.has(p.connectCode));
     if (!me || me.teamId === null) continue;
     const allies = rec.players.filter((p) => p !== me && p.teamId === me.teamId);

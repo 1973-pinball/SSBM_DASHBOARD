@@ -121,6 +121,13 @@ export function Landing({
           <p className="privacy-points">No uploads, no accounts, no tracking.</p>
         )}
       </div>
+      {/* Below the privacy panel on purpose: worth saying plainly, but it is
+          not the claim someone is weighing when they decide to point this at
+          their replay folder. */}
+      <p className="landing-made-with">
+        <b>Built with AI assistance.</b> AI coding tools were used throughout — and countless hours of hands-on
+        refinement, testing, and design went in on top of them.
+      </p>
       {!online && <div className="badge gold">Offline mode · demo, cached stats, and Melee history still work.</div>}
     </div>
   );

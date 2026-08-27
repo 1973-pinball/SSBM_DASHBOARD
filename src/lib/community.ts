@@ -1,4 +1,5 @@
 import type { ResolvedGame } from "./types";
+import { INCLUDED_CHARACTER_ID_SET } from "./config";
 import { executionSummary, moveTable } from "./stats";
 import { supabase } from "./supabase";
 
@@ -124,14 +125,22 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     playerGameCount: Number(data.player_game_count ?? 0),
     minContributors: Number(data.min_contributors ?? COMMUNITY_MIN_CONTRIBUTORS),
     minGames: Number(data.min_games ?? COMMUNITY_MIN_GAMES),
-    matchups: payload.matchups ?? [],
-    benchmarks: payload.benchmarks ?? [],
-    moves: payload.moves ?? [],
+    matchups: (payload.matchups ?? []).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
+    benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
+    moves: (payload.moves ?? []).filter((r) => playable(r.characterId)),
     months: payload.months ?? [],
-    characters: payload.characters ?? [],
+    characters: (payload.characters ?? []).filter((r) => playable(r.characterId)),
     stages: payload.stages ?? [],
   };
 }
+
+/**
+ * The aggregate is computed server-side over every synced game, including ones
+ * pushed by clients built before the roster allowlist existed, so a "Char 31"
+ * row can still arrive over the wire. `-1` is the deliberate every-character
+ * bucket the benchmark rows use, not a character id.
+ */
+const playable = (characterId: number): boolean => characterId === -1 || INCLUDED_CHARACTER_ID_SET.has(characterId);
 
 /** null means signed out; false is the default for a signed-in account with no row. */
 export async function getCommunityConsent(): Promise<boolean | null> {
