@@ -1181,6 +1181,26 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   border-radius: 10px;
   background: var(--panel);
 }
+/* Slim strip above the topbar. Same switch as My Account — only the frame
+   around it changes — with room for the one sentence that answers "does this
+   expose my code?" before anyone has to go looking. */
+.community-consent.bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0 0 14px;
+  padding: 9px 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  background: rgba(26, 23, 51, 0.7);
+}
+/* The dialog copy is width:100% inside a narrow column; in the strip it has to
+   size to its own label so the note can sit beside it. */
+.community-consent.bar .consent-switch { margin: 0; width: auto; flex: 0 0 auto; }
+.cc-bar-note { color: var(--muted); font-size: 12px; line-height: 1.45; flex: 1 1 260px; min-width: 0; }
+.cc-bar-note b { color: var(--text); }
 .community-consent.feature h3 { font-size: 18px; }
 .community-consent.feature > p { font-size: 13px; }
 .community-consent.feature .consent-switch { margin-top: 14px; font-size: 14px; }

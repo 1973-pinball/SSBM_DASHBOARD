@@ -10,6 +10,7 @@ import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
 import { FilterBar } from "./components/FilterBar";
 import { CloudSync } from "./components/CloudSync";
+import { CommunityConsent } from "./components/CommunityConsent";
 import { cloudEnabled, currentSession, signInWithGoogle } from "./lib/supabase";
 import { pullMyAccounts, restoreCloudRecords } from "./lib/cloudSync";
 import { moveTabFocus } from "./lib/a11y";
@@ -650,6 +651,10 @@ export default function App() {
 
   return (
     <div className="shell">
+      {/* Above the topbar rather than inside a settings dialog: the opt-in only
+          works if the people who'd say yes ever see it. Renders nothing in demo
+          or a local-only build. */}
+      {phase === "dashboard" && <CommunityConsent isDemo={isDemo} variant="bar" />}
       {(publicView || phase !== "landing") && (
         <div className="topbar">
           <div className="brand">
