@@ -29,7 +29,7 @@ const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: 
 const Community = lazy(() => import("./components/Community").then((m) => ({ default: m.Community })));
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
 
-const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
+
 const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
 const AccountsEditor = lazy(() => import("./components/AccountsEditor").then((m) => ({ default: m.AccountsEditor })));
 const PrivacyPromise = lazy(() => import("./components/PrivacyPromise").then((m) => ({ default: m.PrivacyPromise })));
@@ -58,10 +58,11 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-// "sessions" is gone: the fatigue and tilt tables render inside Insights now.
-// tabFromUrl validates against TABS, so an old ?view=sessions link falls back
-// to overview rather than rendering nothing.
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "records" | "log" | "community" | "liquipedia";
+// "sessions" and "records" are gone: the fatigue and tilt tables render inside
+// Insights, and personal bests are a card at the foot of Overview. tabFromUrl
+// validates against TABS, so an old ?view= link for either falls back to
+// overview rather than rendering nothing.
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "log" | "community" | "liquipedia";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -71,7 +72,7 @@ const TABS: { id: Tab; label: string }[] = [
 
   { id: "execution", label: "Execution" },
   { id: "insights", label: "Insights" },
-  { id: "records", label: "Records" },
+
   { id: "log", label: "Game log" },
   { id: "community", label: "Community" },
   { id: "liquipedia", label: "Liquipedia" },
@@ -492,7 +493,7 @@ export default function App() {
       void import("./components/Teams");
       void import("./components/Insights");
 
-      void import("./components/Records");
+
       void import("./components/MetricsGuide");
       void import("./components/AccountsEditor");
       void import("./components/liquipedia/Liquipedia");
@@ -850,7 +851,7 @@ export default function App() {
 
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "insights" && <Insights games={filtered} />}
-          {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
+
           {tab === "log" && <GameLog games={filtered} accounts={accounts} />}
           {tab === "community" && <Community games={resolved} isDemo={isDemo} onOpenAccount={() => openOverlay("accounts")} />}
           {tab === "liquipedia" && <Liquipedia />}

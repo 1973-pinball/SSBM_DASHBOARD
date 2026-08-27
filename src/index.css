@@ -349,6 +349,40 @@ select:disabled { opacity: 0.45; }
   margin-bottom: 12px;
 }
 .panel .hint { font-size: 12px; color: var(--faint); margin-top: 8px; }
+/* Collapsible panel heading. The button carries the whole heading row so the
+   hit target is the full width, and inherits the h2's type so the closed state
+   is indistinguishable from a plain panel title. */
+.panel > h2.panel-disclosure { margin-bottom: 0; }
+.panel-disclosure > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.panel-disclosure > button:hover { color: var(--text); }
+.panel-disclosure > button[aria-expanded="true"] { margin-bottom: 12px; }
+.panel-disclosure-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  color: var(--faint);
+  font-family: var(--font-data);
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+}
 .chart-meta {
   display: flex;
   justify-content: space-between;

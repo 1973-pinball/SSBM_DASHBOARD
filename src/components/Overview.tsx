@@ -9,6 +9,7 @@ import { pct, num, int, duration, winRateColor, shortDate, hoursLabel } from "..
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { ShareCard } from "./ShareCard";
+import { RecordsCard } from "./RecordsCard";
 import { axisStyle, tooltipStyle, gridStyle, dayTick } from "./chartStyle";
 import { activateOnKey } from "../lib/a11y";
 
@@ -320,6 +321,10 @@ export function Overview({
           attempts are faded.
         </div>
       </div>
+
+      {/* Personal bests close the tab out. This was the Records tab; as a card
+          it is one thing to share rather than a grid of loose panels. */}
+      <RecordsCard games={games} teamGames={teamGames} />
     </>
   );
 }

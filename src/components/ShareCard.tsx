@@ -1,9 +1,10 @@
-import { useMemo, useRef, useState } from "react";
-import { toBlob, toPng } from "html-to-image";
+import { useMemo } from "react";
 import type { ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { executionSummary, statCardData } from "../lib/stats";
 import { duration, hoursLabel, int, num, pct, shortDate } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
+import { CardActions } from "./CardActions";
+import { useCardExport } from "./useCardExport";
 
 /**
  * Shareable player card: a fun one-glance summary of who you play, who you
@@ -11,8 +12,6 @@ import { charName, stageName } from "../lib/melee";
  * (html-to-image) — sharing is the user's choice, nothing is uploaded.
  */
 export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGames: ResolvedTeamGame[] }) {
-  const cardRef = useRef<HTMLDivElement>(null);
-  const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   const d = useMemo(() => statCardData(games), [games]);
   const hands = useMemo(() => executionSummary(games, 100), [games]);
   // Time on the sticks spans both formats, matching the Overview "Hours played"
@@ -25,31 +24,11 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
   }, [teamGames]);
   const hours = d.hours + teamHours;
 
+  const { cardRef, copied, download, copy } = useCardExport(
+    `ssbm-card-${(d.code ?? "player").replace(/[^A-Za-z0-9#-]/g, "")}.png`,
+  );
+
   if (d.games === 0) return null;
-
-  const fileName = `ssbm-card-${(d.code ?? "player").replace(/[^A-Za-z0-9#-]/g, "")}.png`;
-
-  const download = async () => {
-    if (!cardRef.current) return;
-    const url = await toPng(cardRef.current, { pixelRatio: 2 });
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = fileName;
-    a.click();
-  };
-
-  const copy = async () => {
-    if (!cardRef.current) return;
-    try {
-      const blob = await toBlob(cardRef.current, { pixelRatio: 2 });
-      if (!blob) throw new Error("render failed");
-      await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
-      setCopied("ok");
-    } catch {
-      setCopied("fail");
-    }
-    setTimeout(() => setCopied("idle"), 2000);
-  };
 
   // charIcon is a Melee external character ID → bundled stock-counter sprite.
   const cell = (label: string, value: string, sub?: string, charIcon?: number) => (
@@ -176,13 +155,7 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
         </div>
       </div>
 
-      <div className="sc-actions">
-        <button className="primary" onClick={() => void download()}>Download PNG</button>
-        <button onClick={() => void copy()}>
-          {copied === "ok" ? "Copied!" : copied === "fail" ? "Copy failed" : "Copy image"}
-        </button>
-        <span className="hint" style={{ margin: 0 }}>Rendered in your browser — share it wherever you like.</span>
-      </div>
+      <CardActions copied={copied} onDownload={download} onCopy={copy} />
     </div>
   );
 }

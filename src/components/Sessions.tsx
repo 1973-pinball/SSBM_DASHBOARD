@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { ResolvedGame } from "../lib/types";
 import { computeSessions, winRateBySessionPosition, tiltStats } from "../lib/stats";
 import { pct, num, int, duration, shortDate, winRateColor } from "../lib/format";
@@ -13,6 +13,10 @@ export function Sessions({ games }: { games: ResolvedGame[] }) {
   const sessions = useMemo(() => computeSessions(games), [games]);
   const positions = useMemo(() => winRateBySessionPosition(sessions), [sessions]);
   const tilt = useMemo(() => tiltStats(sessions), [sessions]);
+  // Collapsed by default: this is a 50-row table sitting between the tilt
+  // tables and the win models now that Sessions renders inside Insights, and
+  // scrolling past it every visit is worse than one click to open it.
+  const [logOpen, setLogOpen] = useState(false);
 
   if (sessions.length === 0) return <div className="empty-note">No dated games match the current filters.</div>;
 
@@ -104,7 +108,19 @@ export function Sessions({ games }: { games: ResolvedGame[] }) {
       </div>
 
       <div className="panel">
-        <h2>Session log</h2>
+        {/* Button inside the heading, not the other way round: <button> takes
+            phrasing content, and this keeps the h2 in the document outline. */}
+        <h2 className="panel-disclosure">
+          <button aria-expanded={logOpen} aria-controls="session-log" onClick={() => setLogOpen((v) => !v)}>
+            Session log
+            <span className="panel-disclosure-meta">
+              {sessions.length.toLocaleString()} session{sessions.length === 1 ? "" : "s"}
+              <span aria-hidden="true">{logOpen ? "▲" : "▼"}</span>
+            </span>
+          </button>
+        </h2>
+        {logOpen && (
+        <div id="session-log">
         <table>
           <thead>
             <tr>
@@ -135,6 +151,8 @@ export function Sessions({ games }: { games: ResolvedGame[] }) {
           </tbody>
         </table>
         {sessions.length > 50 && <div className="hint">Latest 50 of {sessions.length.toLocaleString()} sessions.</div>}
+        </div>
+        )}
       </div>
     </>
   );

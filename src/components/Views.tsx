@@ -299,6 +299,13 @@ export function Stages({
 // ---------------- Opponents ----------------
 
 /**
+ * Rows shown before the list is cut off. Sorted by games played, so the tail is
+ * mostly one-off netplay encounters — 100 of them buried the panels underneath
+ * without telling anyone anything. Search reaches the rest.
+ */
+const OPPONENT_ROWS = 25;
+
+/**
  * Set-level framing: players think in sets, not games — "I went 3–1 in the
  * runback". Sets are always best of three (see computeSets); an unfinished
  * trailing set is not counted.
@@ -412,7 +419,7 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
           </tr>
         </thead>
         <tbody>
-          {filtered.slice(0, 100).map((r) => (
+          {filtered.slice(0, OPPONENT_ROWS).map((r) => (
             <tr key={r.code} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${r.code}`} onClick={() => onSelect(r.code)} onKeyDown={(e) => activateOnKey(e, () => onSelect(r.code))}>
               <td style={{ fontFamily: "var(--font-data)" }}>{r.code}</td>
               <td>{r.displayName ?? "—"}</td>
@@ -427,7 +434,9 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
           ))}
         </tbody>
       </table>
-      {filtered.length > 100 && <div className="hint">Showing top 100 of {filtered.length.toLocaleString()} — refine with search.</div>}
+      {filtered.length > OPPONENT_ROWS && (
+        <div className="hint">Showing top {OPPONENT_ROWS} of {filtered.length.toLocaleString()} — refine with search.</div>
+      )}
       <div className="hint">Click a row to filter the dashboard to that opponent.</div>
     </div>
     </>
@@ -994,6 +1003,13 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
 
 // ---------------- Game log ----------------
 
+/**
+ * Rows rendered before the log is cut off. This is a browsing view, not an
+ * archive — the CSV export is the archive — and every row mounts an expandable
+ * card, so the old 300 cost real render time to show games nobody scrolled to.
+ */
+const GAME_LOG_ROWS = 50;
+
 /** Count plus this player's share of the game total, e.g. "13 (57%)". */
 const withShare = (mine: number, theirs: number) =>
   mine + theirs > 0 ? `${mine} (${pct(mine / (mine + theirs), 0)})` : "0";
@@ -1064,7 +1080,7 @@ function GameDetail({ g, colSpan }: { g: ResolvedGame; colSpan: number }) {
 }
 
 export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: Account[] }) {
-  const recent = useMemo(() => [...games].reverse().slice(0, 300), [games]);
+  const recent = useMemo(() => [...games].reverse().slice(0, GAME_LOG_ROWS), [games]);
   const [openId, setOpenId] = useState<string | null>(null);
   // One account needs no column — every row would say the same thing.
   const showAccount = accounts.length > 1;
@@ -1214,7 +1230,11 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
           );
         })}
       </div>
-      {games.length > 300 && <div className="hint">Showing latest 300 of {games.length.toLocaleString()} — export CSV for the full set.</div>}
+      {games.length > GAME_LOG_ROWS && (
+        <div className="hint">
+          Showing latest {GAME_LOG_ROWS} of {games.length.toLocaleString()} — export CSV for the full set.
+        </div>
+      )}
       <div className="hint">Click a game to see the full stat line for both players.</div>
     </div>
   );
