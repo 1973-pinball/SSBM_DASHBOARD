@@ -124,7 +124,7 @@ export function CompositionBars({ comps }: { comps: EditionComposition[] }) {
  */
 export function CompositionExplorer({ comps }: { comps: EditionComposition[] }) {
   const playback = usePlayback(comps.length, PLAY_MS);
-  const ticks = useMemo(() => comps.map((c) => String(c.edition.year)), [comps]);
+  const ticks = useMemo(() => comps.map((c, i) => ({ value: i, label: String(c.edition.year) })), [comps]);
   const share = useShareGif();
 
   const onShare = () => {

@@ -1,4 +1,10 @@
 import type { ReactNode } from "react";
+
+/** One notch on the scrubber: which frame it marks, and what to call it. */
+export interface SliderTick {
+  value: number;
+  label: string;
+}
 import { SPEEDS, type Playback } from "./usePlayback";
 import { shareLabel, type ShareState } from "./useShareGif";
 
@@ -18,8 +24,9 @@ export function Playbar({
   max: number;
   sliderLabel: string;
   caption: ReactNode;
-  /** Optional tick labels under the slider, one per frame. */
-  ticks?: string[];
+  /** Optional notches on the slider. Sparse on purpose — the majors race is
+   * 200-plus frames, and one notch per frame is a solid line, not a guide. */
+  ticks?: SliderTick[];
   /** What frame `idx` actually is, spoken instead of the bare index. */
   valueText: string;
   /** Renders the animation to a GIF at the selected speed. */
@@ -91,8 +98,8 @@ export function Playbar({
       />
       {ticks && ticksId && (
         <datalist id={ticksId}>
-          {ticks.map((t, i) => (
-            <option key={`${t}-${i}`} value={i} label={t} />
+          {ticks.map((t) => (
+            <option key={t.value} value={t.value} label={t.label} />
           ))}
         </datalist>
       )}
