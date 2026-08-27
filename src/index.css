@@ -185,12 +185,31 @@ select:disabled { opacity: 0.45; }
 .landing h1 .accent { color: var(--accent); }
 .landing p.sub { color: var(--muted); max-width: 540px; margin: 0; }
 .landing .privacy {
-  font-family: var(--font-data);
-  font-size: 12px;
-  color: var(--faint);
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(26, 23, 51, 0.55);
+  padding: 16px 20px;
+  max-width: 640px;
+  margin: 0 auto;
+  text-align: left;
 }
+.landing .privacy-lead {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 17px;
+  line-height: 1.35;
+  color: var(--text);
+}
+.landing .privacy-points {
+  margin: 10px 0 0;
+  padding: 0 0 0 18px;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.landing p.privacy-points { padding-left: 0; }
+.landing .privacy-points li + li { margin-top: 7px; }
+.landing .privacy-points b { color: var(--text); }
 .landing .cta-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 .landing button.primary { font-size: 16px; padding: 12px 22px; }
 
@@ -746,7 +765,7 @@ button.linky:hover { color: #a094ff; }
 /* ---- Share card ---- */
 .sc-wrap { display: flex; justify-content: center; }
 .share-card {
-  width: 640px;
+  width: 720px;
   max-width: 100%;
   background: linear-gradient(160deg, #1a1730 0%, #121022 55%, #191136 100%);
   border: 1px solid var(--accent-dim);
@@ -761,14 +780,16 @@ button.linky:hover { color: #a094ff; }
 .sc-range { font-family: var(--font-data); font-size: 11px; color: var(--faint); margin-top: 2px; }
 .sc-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 1px;
   background: var(--line);
   border: 1px solid var(--line);
   border-radius: 10px;
   overflow: hidden;
 }
-.sc-cell { background: rgba(32, 28, 56, 0.92); padding: 12px 14px; }
+/* Four across in the same card width means narrower cells: trim the padding and
+   drop the value a point so a long stage name still fits on two lines. */
+.sc-cell { background: rgba(32, 28, 56, 0.92); padding: 11px 12px; min-width: 0; }
 .sc-label {
   font-family: var(--font-display);
   font-size: 10px;
@@ -779,12 +800,13 @@ button.linky:hover { color: #a094ff; }
 }
 .sc-value {
   font-family: var(--font-data);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
   color: var(--text);
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 6px;
+  overflow-wrap: anywhere;
 }
 .sc-stock { width: 22px; height: 22px; image-rendering: pixelated; flex-shrink: 0; }
 .sc-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
@@ -798,6 +820,9 @@ button.linky:hover { color: #a094ff; }
 }
 .sc-url { color: var(--accent); }
 .sc-actions { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
+@media (max-width: 760px) {
+  .sc-grid { grid-template-columns: repeat(3, 1fr); }
+}
 @media (max-width: 560px) {
   .sc-grid { grid-template-columns: repeat(2, 1fr); }
 }
@@ -1146,6 +1171,19 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   padding-top: 18px;
   border-top: 1px solid var(--line);
 }
+/* Standalone panel on the Community tab: same content, given the weight of a
+   card so it reads as an offer rather than a footnote. */
+.community-consent.feature {
+  margin: 0 0 18px;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 10px;
+  background: var(--panel);
+}
+.community-consent.feature h3 { font-size: 18px; }
+.community-consent.feature > p { font-size: 13px; }
+.community-consent.feature .consent-switch { margin-top: 14px; font-size: 14px; }
 .community-consent-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .community-consent h3 { margin-top: 4px; color: var(--text); font-family: var(--font-display); font-size: 16px; }
 .community-consent > p { margin-top: 8px; color: var(--muted); font-size: 12px; }

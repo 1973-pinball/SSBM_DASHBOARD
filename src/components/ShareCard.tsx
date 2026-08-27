@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { toBlob, toPng } from "html-to-image";
 import type { ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { executionSummary, statCardData } from "../lib/stats";
-import { hoursLabel, int, num, pct, shortDate } from "../lib/format";
+import { duration, hoursLabel, int, num, pct, shortDate } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 
 /**
@@ -103,9 +103,18 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
                 : `${int(d.games)} games, zero regrets`,
             )}
             {cell(
+              "Average match",
+              duration(d.avgSeconds),
+              d.avgSeconds !== null ? "per game, start to finish" : undefined,
+            )}
+            {cell(
               "Sworn rival",
               d.rival ? d.rival.code : "—",
-              d.rival ? `${int(d.rival.games)} runbacks · ${d.rival.wins}–${d.rival.losses}` : undefined,
+              // Set record leads: "2–3 in five runbacks" reads as a losing
+              // record when those five games were two sets you split.
+              d.rival
+                ? `${d.rival.setWins}–${d.rival.setLosses} in sets · ${int(d.rival.games)} games`
+                : undefined,
             )}
             {cell(
               "Most common foe",
@@ -114,11 +123,34 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
               d.topOppChar?.id,
             )}
             {cell(
+              "Best matchup",
+              d.bestMatchup ? charName(d.bestMatchup.id) : "—",
+              d.bestMatchup
+                ? `${d.bestMatchup.wins}–${d.bestMatchup.losses} · ${pct(d.bestMatchup.winRate, 0)} win rate`
+                : "not enough games yet",
+              d.bestMatchup?.id,
+            )}
+            {cell(
+              "Worst matchup",
+              d.worstMatchup ? charName(d.worstMatchup.id) : "—",
+              d.worstMatchup
+                ? `${d.worstMatchup.wins}–${d.worstMatchup.losses} · ${pct(d.worstMatchup.winRate, 0)} win rate`
+                : "not enough games yet",
+              d.worstMatchup?.id,
+            )}
+            {cell(
               "Home turf",
               d.favStage ? stageName(d.favStage.id) : "—",
               d.favStage && d.favStage.winRate !== null
                 ? `won ${pct(d.favStage.winRate, 0)} of ${int(d.favStage.games)} there`
                 : undefined,
+            )}
+            {cell(
+              "Counterpick gutpunch",
+              d.worstStage ? stageName(d.worstStage.id) : "—",
+              d.worstStage && d.worstStage.winRate !== null
+                ? `only ${pct(d.worstStage.winRate, 0)} of ${int(d.worstStage.games)} there`
+                : "not enough games yet",
             )}
             {cell(
               // The 100-game window is applied *after* the dashboard filters, so under a
@@ -134,11 +166,7 @@ export function ShareCard({ games, teamGames }: { games: ResolvedGame[]; teamGam
               d.bestWinStreak ? `${d.bestWinStreak} wins` : "—",
               d.bestWinStreak ? "in a row, no brakes" : undefined,
             )}
-            {cell(
-              "Busiest day",
-              d.busiestDay ? shortDate(d.busiestDay.day) : "—",
-              d.busiestDay ? `${d.busiestDay.games} games in one sitting` : undefined,
-            )}
+
           </div>
 
           <div className="sc-foot">

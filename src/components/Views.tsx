@@ -298,7 +298,11 @@ export function Stages({
 
 // ---------------- Opponents ----------------
 
-/** Set-level framing: players think in sets, not games — "I went 3–1 in the runback". */
+/**
+ * Set-level framing: players think in sets, not games — "I went 3–1 in the
+ * runback". Sets are always best of three (see computeSets); an unfinished
+ * trailing set is not counted.
+ */
 function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
   const sets = useMemo(() => computeSets(games), [games]);
   const s = useMemo(() => setsSummary(sets), [sets]);
@@ -308,7 +312,7 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
     <>
       <div className="kpi-strip">
         <Kpi label="Sets" value={int(s.sets)} />
-        <Kpi label="Set record" value={`${s.wins}–${s.losses}${s.ties ? ` (${s.ties}T)` : ""}`} />
+        <Kpi label="Set record" value={`${s.wins}–${s.losses}`} />
         <Kpi label="Set win rate" value={pct(s.setWinRate)} />
         <Kpi label="Games / set" value={num(s.avgGames, 1)} />
         <Kpi
@@ -317,7 +321,7 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
           delta={s.afterG1Loss.total ? `${s.afterG1Loss.wins} of ${s.afterG1Loss.total} sets won` : undefined}
         />
         <Kpi
-          label="Close sets (1-game margin)"
+          label="Sets that went to game 3"
           value={s.deciders.total ? pct(s.deciders.wins / s.deciders.total, 0) : "—"}
           delta={s.deciders.total ? `${s.deciders.wins} of ${s.deciders.total} won` : undefined}
         />
@@ -346,11 +350,7 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
                   <span className="up">{set.wins}</span>–<span className="down">{set.losses}</span>
                 </td>
                 <td className="data">
-                  {set.result === "T" ? (
-                    <span className="badge">tie</span>
-                  ) : (
-                    <span className={`wl-pill ${set.result === "W" ? "up" : "down"}`}>{set.result}</span>
-                  )}
+                  <span className={`wl-pill ${set.result === "W" ? "up" : "down"}`}>{set.result}</span>
                 </td>
                 <td className="data">{set.games.length}</td>
               </tr>

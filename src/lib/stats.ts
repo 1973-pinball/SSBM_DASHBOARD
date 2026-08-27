@@ -905,26 +905,40 @@ export interface GameSet {
   games: ResolvedGame[];
   wins: number;
   losses: number;
-  /** Majority of decided games; "T" for even splits. */
-  result: "W" | "L" | "T";
+  /** Who reached SET_TARGET_WINS. Always decisive — a Bo3 cannot be tied. */
+  result: "W" | "L";
   start: Date | null;
   end: Date | null;
 }
 
+/** Game wins that take a set. Sets are always best of three. */
+export const SET_TARGET_WINS = 2;
+
 /**
  * Group consecutive games against the same opponent (within `gapMinutes`) into
- * a set. Formats vary too much to assume Bo3/Bo5 — ranked sets, friendly
- * runbacks, and money matches all show up as blocks — so a set's result is the
- * majority of its decided games. Blocks need 2+ decided games; a lone game
- * isn't a set.
+ * best-of-three sets.
+ *
+ * Replays carry no set metadata, so this is inferred: a set runs until one side
+ * reaches SET_TARGET_WINS, and the next game against that same opponent opens
+ * the next set. An opponent change or a gap longer than `gapMinutes` also ends
+ * the block.
+ *
+ * Only a set someone actually won is returned. A trailing 1–0 or 1–1 is a set
+ * still in progress — scoring it by margin would invent a result the games
+ * never produced, and would be the majority-of-a-block rule this replaced.
+ * That rule made five straight games one 2–3 "set"; they are two sets.
+ *
+ * Indeterminate games (`isWin === null` — under 30s, or two of the user's own
+ * accounts) sit inside the set without counting toward the two.
  */
 export function computeSets(games: ResolvedGame[], gapMinutes = 20): GameSet[] {
   const sets: GameSet[] = [];
   let cur: GameSet | null = null;
   let lastEndMs = 0;
+  const decided = (s: GameSet) => s.wins >= SET_TARGET_WINS || s.losses >= SET_TARGET_WINS;
   const flush = () => {
-    if (cur && cur.wins + cur.losses >= 2) {
-      cur.result = cur.wins > cur.losses ? "W" : cur.wins < cur.losses ? "L" : "T";
+    if (cur && decided(cur)) {
+      cur.result = cur.wins > cur.losses ? "W" : "L";
       sets.push(cur);
     }
     cur = null;
@@ -932,9 +946,14 @@ export function computeSets(games: ResolvedGame[], gapMinutes = 20): GameSet[] {
   for (const g of games) {
     if (!g.opp.connectCode || !g.date) continue;
     const startMs = g.date.getTime();
-    if (!cur || cur.oppCode !== g.opp.connectCode || startMs - lastEndMs > gapMinutes * 60_000) {
+    if (
+      !cur ||
+      cur.oppCode !== g.opp.connectCode ||
+      startMs - lastEndMs > gapMinutes * 60_000 ||
+      decided(cur) // previous set is over; this game starts the next one
+    ) {
       flush();
-      cur = { oppCode: g.opp.connectCode, oppName: null, games: [], wins: 0, losses: 0, result: "T", start: g.date, end: g.date };
+      cur = { oppCode: g.opp.connectCode, oppName: null, games: [], wins: 0, losses: 0, result: "W", start: g.date, end: g.date };
     }
     cur.games.push(g);
     cur.oppName = g.opp.displayName ?? cur.oppName;
@@ -951,29 +970,28 @@ export interface SetsSummary {
   sets: number;
   wins: number;
   losses: number;
-  ties: number;
-  setWinRate: number | null; // ties excluded
+  setWinRate: number | null;
   avgGames: number | null;
   /** Sets where you dropped game 1 — how often you still took the set. */
   afterG1Loss: { wins: number; total: number };
-  /** Sets decided by a single game (2–1, 3–2, …) — your record when it's close. */
+  /** Sets that went the distance (2–1) — your record when it's close. */
   deciders: { wins: number; total: number };
 }
 
 export function setsSummary(sets: GameSet[]): SetsSummary {
-  let wins = 0, losses = 0, ties = 0, totalGames = 0;
+  let wins = 0, losses = 0, totalGames = 0;
   const afterG1Loss = { wins: 0, total: 0 };
   const deciders = { wins: 0, total: 0 };
   for (const s of sets) {
     totalGames += s.games.length;
     if (s.result === "W") wins++;
-    else if (s.result === "L") losses++;
-    else ties++;
+    else losses++;
     const firstDecided = s.games.find((g) => g.isWin !== null);
-    if (firstDecided?.isWin === false && s.result !== "T") {
+    if (firstDecided?.isWin === false) {
       afterG1Loss.total++;
       if (s.result === "W") afterG1Loss.wins++;
     }
+    // Bo3: a one-game margin is 2–1, i.e. it went to a third game.
     if (Math.abs(s.wins - s.losses) === 1) {
       deciders.total++;
       if (s.result === "W") deciders.wins++;
@@ -983,7 +1001,6 @@ export function setsSummary(sets: GameSet[]): SetsSummary {
     sets: sets.length,
     wins,
     losses,
-    ties,
     setWinRate: winRate(wins, wins + losses),
     avgGames: sets.length ? totalGames / sets.length : null,
     afterG1Loss,
@@ -1009,12 +1026,49 @@ export interface StatCardData {
   mainChar: { id: number; games: number } | null;
   topOppChar: { id: number; games: number } | null;
   favStage: { id: number; games: number; winRate: number | null } | null;
-  /** Most-played opponent by connect code. */
-  rival: { code: string; name: string | null; games: number; wins: number; losses: number } | null;
+  /**
+   * Lowest win rate among stages with a real sample. Null when nothing clears
+   * the gate, or when it would name the same stage as `favStage` — one stage
+   * being both your best and your worst is a non-statement.
+   */
+  worstStage: { id: number; games: number; winRate: number | null } | null;
+  /** Best and worst matchup by opponent character, gated the same way. */
+  bestMatchup: MatchupPick | null;
+  worstMatchup: MatchupPick | null;
+  /** Mean game length in seconds across the games in view. */
+  avgSeconds: number | null;
+  /**
+   * Most-played opponent by connect code. Carries both records: players talk
+   * about a rivalry in sets, and the games are the context for it.
+   */
+  rival: {
+    code: string;
+    name: string | null;
+    games: number;
+    wins: number;
+    losses: number;
+    setWins: number;
+    setLosses: number;
+  } | null;
   distinctOpponents: number;
   bestWinStreak: number | null;
   busiestDay: { day: string; games: number } | null;
 }
+
+export interface MatchupPick {
+  id: number;
+  games: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+}
+
+/**
+ * Decided games a stage or matchup needs before the card will crown it. Low
+ * enough that a normal library fills the cells, high enough that a 2–0 can't
+ * claim "best matchup".
+ */
+const MIN_CARD_SAMPLE = 10;
 
 /** Everything the shareable profile card needs, in one pass over the games. */
 export function statCardData(games: ResolvedGame[]): StatCardData {
@@ -1027,7 +1081,9 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
   // title the card — which, under the account filter, is the only one present.
   const mine = new Map<string, { games: number; name: string | null }>();
   const myChars = new Map<number, number>();
-  const oppChars = new Map<number, number>();
+  // Opponent characters carry a record, not just a count: the most-faced one
+  // and the best/worst matchup all come off this one map.
+  const oppChars = new Map<number, { games: number; wins: number; losses: number }>();
   const stages = new Map<number, { games: number; wins: number; losses: number }>();
   const opps = new Map<string, { name: string | null; games: number; wins: number; losses: number }>();
   const days = new Map<string, number>();
@@ -1048,7 +1104,11 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
       mine.set(g.me.connectCode, m);
     }
     myChars.set(g.me.characterId, (myChars.get(g.me.characterId) ?? 0) + 1);
-    oppChars.set(g.opp.characterId, (oppChars.get(g.opp.characterId) ?? 0) + 1);
+    const oc = oppChars.get(g.opp.characterId) ?? { games: 0, wins: 0, losses: 0 };
+    oc.games++;
+    if (g.isWin === true) oc.wins++;
+    else if (g.isWin === false) oc.losses++;
+    oppChars.set(g.opp.characterId, oc);
     const st = stages.get(g.rec.stageId) ?? { games: 0, wins: 0, losses: 0 };
     st.games++;
     if (g.isWin === true) st.wins++;
@@ -1069,21 +1129,56 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
   const top = <K,>(m: Map<K, number>): [K, number] | null =>
     m.size ? [...m.entries()].sort((a, b) => b[1] - a[1])[0]! : null;
   const mainChar = top(myChars);
-  const topOppChar = top(oppChars);
+  let topOppChar: StatCardData["topOppChar"] = null;
+  for (const [id, o] of oppChars) {
+    if (!topOppChar || o.games > topOppChar.games) topOppChar = { id, games: o.games };
+  }
+  // Best/worst matchup share the stage gate, so a 2–0 can't take the crown.
+  let bestMatchup: MatchupPick | null = null;
+  let worstMatchup: MatchupPick | null = null;
+  for (const [id, o] of oppChars) {
+    const decided = o.wins + o.losses;
+    if (decided < MIN_CARD_SAMPLE) continue;
+    const wr = winRate(o.wins, decided);
+    if (wr === null) continue;
+    const entry: MatchupPick = { id, games: o.games, wins: o.wins, losses: o.losses, winRate: wr };
+    if (!bestMatchup || wr > bestMatchup.winRate) bestMatchup = entry;
+    if (!worstMatchup || wr < worstMatchup.winRate) worstMatchup = entry;
+  }
+  // Only one matchup qualified, so it is trivially both. Report it once.
+  if (bestMatchup && worstMatchup && bestMatchup.id === worstMatchup.id) worstMatchup = null;
   // Home turf = best win rate among stages with a real sample (10+ decided
   // games), so a 2-0 stage can't claim it; most-played is the fallback.
   let favStage: StatCardData["favStage"] = null;
+  let worstStage: StatCardData["worstStage"] = null;
   let mostPlayed: StatCardData["favStage"] = null;
   for (const [id, s] of stages) {
     const wr = winRate(s.wins, s.wins + s.losses);
     const entry = { id, games: s.games, winRate: wr };
     if (!mostPlayed || s.games > mostPlayed.games) mostPlayed = entry;
-    if (s.wins + s.losses >= 10 && wr !== null && (!favStage || wr > (favStage.winRate ?? -1))) favStage = entry;
+    if (s.wins + s.losses < MIN_CARD_SAMPLE || wr === null) continue;
+    if (!favStage || wr > (favStage.winRate ?? -1)) favStage = entry;
+    if (!worstStage || wr < (worstStage.winRate ?? 2)) worstStage = entry;
   }
   favStage = favStage ?? mostPlayed;
+  // favStage falls back to most-played so the card is never empty; the worst
+  // stage gets no such fallback, and must not echo whatever favStage landed on.
+  if (worstStage && favStage && worstStage.id === favStage.id) worstStage = null;
+  // Set records per opponent, off the same best-of-three grouping the Sets
+  // panel uses, so the card and that view can never disagree.
+  const setRecord = new Map<string, { wins: number; losses: number }>();
+  for (const s of computeSets(games)) {
+    const r = setRecord.get(s.oppCode) ?? { wins: 0, losses: 0 };
+    if (s.result === "W") r.wins++;
+    else r.losses++;
+    setRecord.set(s.oppCode, r);
+  }
   let rival: StatCardData["rival"] = null;
   for (const [c, o] of opps) {
-    if (!rival || o.games > rival.games) rival = { code: c, ...o };
+    if (!rival || o.games > rival.games) {
+      const sr = setRecord.get(c);
+      rival = { code: c, ...o, setWins: sr?.wins ?? 0, setLosses: sr?.losses ?? 0 };
+    }
   }
   let busiestDay: StatCardData["busiestDay"] = null;
   for (const [day, n] of days) {
@@ -1105,8 +1200,12 @@ export function statCardData(games: ResolvedGame[]): StatCardData {
     firstDate: first,
     lastDate: last,
     mainChar: mainChar ? { id: mainChar[0], games: mainChar[1] } : null,
-    topOppChar: topOppChar ? { id: topOppChar[0], games: topOppChar[1] } : null,
+    topOppChar,
     favStage,
+    worstStage,
+    bestMatchup,
+    worstMatchup,
+    avgSeconds: base.games > 0 ? frames / 60 / base.games : null,
     rival,
     distinctOpponents: opps.size,
     bestWinStreak: bestStreak || null,
