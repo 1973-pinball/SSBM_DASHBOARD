@@ -6,9 +6,29 @@ export interface DiscoveredFile {
   id: string;
   path: string;
   file: File;
+  /**
+   * Kept so the pipeline can re-stat the file immediately before reading it.
+   * Absent on the <input webkitdirectory> path, which hands over File objects
+   * with no way back to the entry.
+   */
+  handle?: FileSystemFileHandle;
 }
 
 const fileId = (path: string, f: File) => `${path}|${f.size}|${f.lastModified}`;
+
+/**
+ * A replay whose mtime is within seconds of now is almost certainly the game
+ * that just ended: Slippi appends frames until it closes the file, so reading
+ * it now yields a truncated parse where waiting yields the whole game. This is
+ * a cheap first line, not the only one — Windows can report a stale mtime for a
+ * file another process still holds open, which is why parse.ts independently
+ * rejects a replay with no metadata block.
+ */
+const IN_PROGRESS_MS = 10_000;
+const writtenJustNow = (f: File): boolean => {
+  const age = Date.now() - f.lastModified;
+  return age >= 0 && age < IN_PROGRESS_MS;
+};
 
 // getFile() is one OS roundtrip per replay; a big library walked sequentially
 // turns every dashboard open into tens of seconds of IPC. Bounded concurrency
@@ -36,6 +56,9 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
   // Phase 2: materialize File objects with bounded concurrency. A getFile()
   // failure (typically the replay Slippi is writing right now) skips that
   // file instead of aborting the whole scan — it'll be picked up next visit.
+  // The size/mtime captured here is only a pre-filter against the cache: by
+  // the time the pipeline reads a file the snapshot may be stale, so it
+  // re-stats through the handle first (see runParsePipeline).
   const out: (DiscoveredFile | null)[] = new Array(found.length).fill(null);
   let next = 0;
   const lane = async () => {
@@ -44,7 +67,7 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
       const entry = found[i]!;
       try {
         const file = await entry.handle.getFile();
-        out[i] = { id: fileId(entry.path, file), path: entry.path, file };
+        out[i] = { id: fileId(entry.path, file), path: entry.path, file, handle: entry.handle };
       } catch {
         // skip: locked or vanished mid-scan
       }
@@ -106,6 +129,7 @@ export async function runParsePipeline(
     done: files.length - queue.length,
     skippedCached: files.length - queue.length,
     errors: 0,
+    deferred: 0,
   };
   onProgress({ ...progress }, []);
   if (queue.length === 0) return;
@@ -178,17 +202,38 @@ export async function runParsePipeline(
       const job = queue[next++]!;
       slot.job = job;
       inFlight++;
-      job.file
-        .arrayBuffer()
-        .then((buf) => slot.worker.postMessage({ id: job.id, path: job.path, buf }, [buf]))
-        .catch(() => {
-          inFlight--;
-          slot.job = null;
-          progress.done++;
-          progress.errors++;
-          emitUi(); // read failures must still move the bar
-          feed(slot);
-        });
+      // Retire the job without producing a record. Nothing lands in `seen`,
+      // which is precisely what lets the next scan come back for it.
+      const retire = (deferred: boolean) => {
+        inFlight--;
+        slot.job = null;
+        progress.done++;
+        if (deferred) progress.deferred++;
+        else progress.errors++;
+        emitUi(); // read failures must still move the bar
+        feed(slot);
+      };
+      void (async () => {
+        let { file, id } = job;
+        if (job.handle) {
+          // Re-stat immediately before reading. The File from discovery is a
+          // snapshot of size+mtime taken during the walk, and Chrome fails the
+          // read when the file has changed since — which is exactly the replay
+          // of the game you just finished. Re-fetching here shrinks that window
+          // from "however long the scan took" to microseconds, and gives the
+          // record an id that matches the bytes we actually parse.
+          file = await job.handle.getFile();
+          id = fileId(job.path, file);
+          // It moved on since discovery and we already hold this exact version.
+          if (id !== job.id && cached.has(id)) return retire(true);
+          // Deferring is only useful when a rescan can come back for the file.
+          // The webkitdirectory path has no handle and no rescan, so there it
+          // is better to parse what we have than to drop the file silently.
+          if (writtenJustNow(file)) return retire(true);
+        }
+        const buf = await file.arrayBuffer();
+        slot.worker.postMessage({ id, path: job.path, buf }, [buf]);
+      })().catch(() => retire(false));
     };
 
     for (const slot of slots) {
@@ -200,6 +245,12 @@ export async function runParsePipeline(
         if (res.ok && res.record) {
           pendingDb.push(res.record);
           pendingUi.push(res.record);
+        } else if (res.incomplete) {
+          // Read mid-write: the file is fine, we were early. No tombstone —
+          // keeping its id out of `seen` is what lets the next scan pick up
+          // the finished game. Caching the fragment instead would shadow that
+          // game permanently (see IncompleteReplayError in parse.ts).
+          progress.deferred++;
         } else {
           progress.errors++;
           // Store a tombstone so corrupt files are not re-parsed every visit.

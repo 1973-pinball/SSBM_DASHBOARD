@@ -11,6 +11,7 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
         Parsing replays… {p.done.toLocaleString()} / {p.total.toLocaleString()}
         {p.skippedCached > 0 ? ` (${p.skippedCached.toLocaleString()} cached)` : ""}
         {p.errors > 0 ? ` · ${p.errors} unreadable` : ""}
+        {p.deferred > 0 ? ` · ${p.deferred} still being written` : ""}
       </div>
       <div className="progress-track">
         <div className="progress-fill" style={{ width: `${(fraction * 100).toFixed(1)}%` }} />

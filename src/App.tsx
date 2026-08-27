@@ -97,6 +97,16 @@ const navUrl = (tab: Tab, overlay: Overlay = null) => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
+/** Why the last refresh left files unparsed, in the user's terms. */
+function skippedDetail({ errors, deferred }: { errors: number; deferred: number }): string {
+  const parts: string[] = [];
+  if (deferred > 0) {
+    parts.push(`${deferred.toLocaleString()} replay${deferred === 1 ? " was" : "s were"} still being written`);
+  }
+  if (errors > 0) parts.push(`${errors.toLocaleString()} couldn't be read`);
+  return `${parts.join(", ")}. Nothing was cached for them — refresh again once Slippi has finished writing and they'll be picked up.`;
+}
+
 export default function App() {
   const [phase, setPhase] = useState<Phase>("landing");
   const [tab, setTab] = useState<Tab>(tabFromUrl);
@@ -116,6 +126,10 @@ export default function App() {
   });
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
+  // What the last refresh chose not to parse. Nothing is cached for these, so
+  // they are genuinely pending rather than lost — but a silent skip is exactly
+  // what makes "my new games didn't show up" impossible to diagnose.
+  const [syncSkipped, setSyncSkipped] = useState<{ errors: number; deferred: number } | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   // Null means idle; a number is the count streamed down so a first visit on a
   // new origin never looks frozen while a large cloud library is restoring.
@@ -244,6 +258,35 @@ export default function App() {
     });
   }, []);
 
+  /**
+   * The user's accounts: local cache first, then the cloud.
+   *
+   * Identity lives in `user_codes`, so a signed-in user arriving here without a
+   * local copy has already told us who they are — on a new device, or on the
+   * same one after "Change folder" cleared kv along with the replay cache.
+   * Prompting them again is asking them to re-type something we hold, and it is
+   * the one step between picking a folder and seeing a dashboard.
+   *
+   * Best-effort by design: offline, cloud sync not configured, or a failed
+   * query all fall through to the identity prompt, which is exactly where the
+   * user would have been anyway. A successful pull is written to kv so the next
+   * load resolves locally and never waits on the network.
+   */
+  const accountsForSession = useCallback(async (): Promise<Account[]> => {
+    const local = await getMyAccounts();
+    if (local.length > 0 || !cloudEnabled) return local;
+    try {
+      if (!(await currentSession())) return local;
+      const remote = await pullMyAccounts();
+      if (!remote?.length) return local;
+      await setMyAccounts(remote);
+      return remote;
+    } catch (err) {
+      console.error(err);
+      return local;
+    }
+  }, []);
+
   // Restore cache on load: if records + identity exist, go straight to
   // dashboard. With an empty cache but a live cloud session (e.g. first visit
   // on a new device, or returning from the OAuth redirect), restore from the
@@ -267,8 +310,11 @@ export default function App() {
         const cached = await pruneDuplicates(raw);
         if (cached.length > 0) {
           setRecords(cached);
-          if (accts.length > 0) {
-            setAccountsState(accts);
+          // kv was already read above; only reach for the cloud if it's empty.
+          const known = accts.length > 0 ? accts : await accountsForSession();
+          if (restoreController.signal.aborted) return;
+          if (known.length > 0) {
+            setAccountsState(known);
             setPhase("dashboard");
           } else {
             setPhase("identity");
@@ -320,7 +366,8 @@ export default function App() {
       }
     })();
     return () => restoreController.abort();
-  }, []);
+    // accountsForSession is stable ([] deps), so this still runs once on mount.
+  }, [accountsForSession]);
 
   const startPipeline = useCallback(
     async (discover: () => Promise<{ id: string; path: string; file: File }[]>) => {
@@ -348,7 +395,10 @@ export default function App() {
         if (generation.current !== gen) return;
         const all = await allRecords();
         setRecords(all);
-        const accts = await getMyAccounts();
+        // A fresh folder pick on a signed-in device lands here with empty kv:
+        // ask the cloud who they are before falling back to the prompt.
+        const accts = await accountsForSession();
+        if (generation.current !== gen) return; // reset while the cloud answered
         if (accts.length > 0) {
           setAccountsState(accts);
           setPhase("dashboard");
@@ -369,7 +419,7 @@ export default function App() {
         if (generation.current === gen) setProgress(null);
       }
     },
-    [appendRecords, markScanned],
+    [appendRecords, markScanned, accountsForSession],
   );
 
   /**
@@ -379,23 +429,40 @@ export default function App() {
    */
   const syncFolder = useCallback(
     async (handle: FileSystemDirectoryHandle) => {
-      setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0 });
+      setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0, deferred: 0 });
+      setSyncSkipped(null);
       setPipelineError(null);
       const gen = generation.current;
       const controller = new AbortController();
       abortRef.current = controller;
+      // Held on an object rather than a plain `let`: the pipeline reports the
+      // final tally through the callback, and we need it after the await.
+      const tally: { last: ParseProgress | null } = { last: null };
       try {
         const files = await discoverFromHandle(handle);
         await runParsePipeline(
           files,
           (p, newRecords) => {
             if (generation.current !== gen) return;
+            tally.last = p;
             setSyncing(p);
             appendRecords(newRecords);
           },
           controller.signal,
         );
         markScanned();
+        const done = tally.last;
+        if (generation.current === gen) {
+          setSyncSkipped(done && done.errors + done.deferred > 0 ? { errors: done.errors, deferred: done.deferred } : null);
+          // Unlike startPipeline, a refresh builds its record state purely from
+          // streamed callbacks, so a delivery lost to a mid-run abort or a dead
+          // worker leaves games sitting in the cache that the dashboard never
+          // shows until the next reload. Reconcile against storage once, and
+          // only when this run actually parsed something — the auto-sync on
+          // every page load normally finds nothing and shouldn't pay for a
+          // full re-read plus the resolve+sort it invalidates.
+          if (done && done.done > done.skippedCached) setRecords(await allRecords());
+        }
       } catch (err) {
         console.error(err);
         if (generation.current !== gen) return;
@@ -618,6 +685,11 @@ export default function App() {
                       : `Parsing ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
                     : folderPermission === "granted" ? "Refresh" : "Reconnect folder"}
                 </button>
+              )}
+              {!isDemo && !syncing && syncSkipped && (
+                <span className="tag" title={skippedDetail(syncSkipped)}>
+                  {(syncSkipped.errors + syncSkipped.deferred).toLocaleString()} pending
+                </span>
               )}
               <CloudSync
                 records={records}

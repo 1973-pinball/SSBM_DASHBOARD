@@ -46,6 +46,36 @@ function preferred(a: GameRecord, b: GameRecord): boolean {
 }
 
 /**
+ * Drop the residue of a replay that was read while Slippi was still writing it.
+ *
+ * Such a read has no metadata block and therefore no `playedAt`, and it was
+ * cached under `path|partialSize|partialMtime`; the finished game then parsed
+ * under a different id off the same file. gameKey() falls back to the file id
+ * when playedAt is null, so the two never collapse — the fragment survives as a
+ * dateless phantom inflating game counts, and no rescan can dislodge it because
+ * its id is still in `seen`.
+ *
+ * The path ties them together: one file on disk has one current state, so a
+ * null-playedAt record for a path that also has a timestamped one is a stale
+ * read of it (a stale tombstone for that path is stale for the same reason).
+ * Records for paths with no timestamped read at all are left alone — that's the
+ * genuine pre-metadata replay of decision 8, not a fragment.
+ *
+ * pool.ts no longer creates these, but caches written before that fix carry them.
+ */
+function dropStalePartials(records: GameRecord[]): GameRecord[] {
+  let anyNull = false;
+  const timestamped = new Set<string>();
+  for (const rec of records) {
+    if (rec.playedAt) timestamped.add(rec.path);
+    else anyNull = true;
+  }
+  if (!anyNull || timestamped.size === 0) return records;
+  const kept = records.filter((rec) => rec.playedAt !== null || !timestamped.has(rec.path));
+  return kept.length === records.length ? records : kept;
+}
+
+/**
  * Collapse records describing the same game down to one apiece.
  *
  * The survivor is chosen deterministically — real record over tombstone, then
@@ -57,11 +87,12 @@ function preferred(a: GameRecord, b: GameRecord): boolean {
  * common case doesn't invalidate every downstream memo.
  */
 export function dedupeRecords(records: GameRecord[]): GameRecord[] {
+  const live = dropStalePartials(records);
   const best = new Map<string, GameRecord>();
-  for (const rec of records) {
+  for (const rec of live) {
     const key = gameKey(rec);
     const cur = best.get(key);
     if (cur === undefined || preferred(rec, cur)) best.set(key, rec);
   }
-  return best.size === records.length ? records : [...best.values()];
+  return best.size === live.length ? live : [...best.values()];
 }

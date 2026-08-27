@@ -4,6 +4,21 @@ import type { GameRecord, GameType, MoveAgg, PlayerSide } from "./types";
 
 const MIN_GAME_SECONDS = 30;
 
+/**
+ * Thrown when the replay was read while Slippi was still writing it. Nothing is
+ * wrong with the file — we were early — so pool.ts must retry it on the next
+ * scan rather than tombstone it, and above all must not cache what it got:
+ * a partial parse has no metadata block and therefore no `playedAt`, and
+ * `gameKey()` falls back to the file id when `playedAt` is null, so the
+ * fragment would never collapse against the finished game.
+ */
+export class IncompleteReplayError extends Error {
+  constructor() {
+    super("replay is still being written");
+    this.name = "IncompleteReplayError";
+  }
+}
+
 function detectGameType(matchId: string | null | undefined): GameType {
   if (!matchId) return "offline";
   if (matchId.includes("mode.ranked")) return "ranked";
@@ -110,7 +125,12 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     throw new Error("no settings block");
   }
 
+  // The metadata block is written when the game ends and the file is closed,
+  // so slippi-js returning nothing here means "severed incomplete file" (its
+  // own words) — i.e. we opened the replay of a game still in progress. Bail
+  // before the expensive stat pass; pool.ts retries it on the next scan.
   const metadata = game.getMetadata();
+  if (!metadata) throw new IncompleteReplayError();
   const gameEnd = game.getGameEnd();
   const stats = game.getStats();
   const latestFrame = game.getLatestFrame();

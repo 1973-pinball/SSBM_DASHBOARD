@@ -230,4 +230,10 @@ export interface ParseProgress {
   done: number;
   skippedCached: number;
   errors: number;
+  /**
+   * Files left unparsed on purpose this run: a replay Slippi was still writing,
+   * or one that changed under the scan. Nothing is cached for them — not even a
+   * tombstone — so the next scan picks them up once the game has finished.
+   */
+  deferred: number;
 }

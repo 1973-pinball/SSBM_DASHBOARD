@@ -202,14 +202,23 @@ export async function clearAll(): Promise<void> {
 /**
  * Drop cached records duplicating a game already held under a different file
  * key — the residue of a copied, moved, or cloud-synced replay folder (see
- * dedupe.ts). Takes the records the caller already read and hands back the
- * survivors, repacking only when there is something to remove, so a clean
- * cache pays one length comparison at startup and no write at all.
+ * dedupe.ts). Hands back the survivors, repacking only when there is something
+ * to remove, so a clean cache pays one length comparison and no write at all.
+ *
+ * The caller's array is a hint, used only for that cheap check. The rewrite
+ * re-reads inside the transaction, because rebuilding every pack from a
+ * snapshot taken before an await is a lost update: a scan flush or a cloud pull
+ * landing in that window would be erased while its ids stayed in `seen`, which
+ * is the one combination that makes a game unrecoverable — parsed, discarded,
+ * and never re-parsed because the cache insists it has seen the file.
  */
 export async function pruneDuplicates(all: GameRecord[]): Promise<GameRecord[]> {
-  const kept = dedupeRecords(all);
-  if (kept.length === all.length) return all;
+  if (dedupeRecords(all).length === all.length) return all;
+  let kept = all;
   await db.transaction("rw", db.packs, async () => {
+    const current = (await db.packs.toArray()).flatMap((p) => p.records);
+    kept = dedupeRecords(current);
+    if (kept.length === current.length) return;
     await db.packs.clear();
     const rows: RecordPack[] = [];
     for (let i = 0; i < kept.length; i += PACK_SIZE) rows.push({ records: kept.slice(i, i + PACK_SIZE) });
