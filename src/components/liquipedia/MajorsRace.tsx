@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type CSSProperties } from "react";
 import type { Major, PlayerMeta } from "../../lib/liquipedia/types";
 import { careerLeaderboard, raceFrames } from "../../lib/liquipedia/select";
 import { shortDate } from "../../lib/format";
@@ -79,7 +79,12 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
         }
       />
 
-      <div className="lq-race" style={{ height: Math.max(visible.length, 1) * ROW_H }}>
+      {/* --lq-step is the real time one frame is on screen; the row slide and
+          bar growth are sized off it so they finish before the next arrives. */}
+      <div
+        className="lq-race"
+        style={{ height: Math.max(visible.length, 1) * ROW_H, "--lq-step": `${PLAY_MS / playback.speed}ms` } as CSSProperties}
+      >
         {visible.map((s, i) => {
           const meta = players[s.player];
           const isNewWin = current.major?.winner === s.player;

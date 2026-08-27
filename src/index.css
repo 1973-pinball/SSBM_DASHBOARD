@@ -586,6 +586,40 @@ tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
 
 /* ---- Matchup matrix ---- */
 .matrix-wrap { overflow-x: auto; }
+/* The twin of the grid's own scrollbar, sitting above it — see MatrixScroll.
+   The explicit height is load-bearing: the only thing inside is a 1px spacer
+   as wide as the grid, and a horizontal scrollbar takes its space from inside
+   the box rather than adding to it, so a content-sized strip leaves the bar
+   nowhere to render. 12px clears a 10px webkit bar and Firefox's thin one. */
+.matrix-scroll-top {
+  overflow-x: auto;
+  overflow-y: hidden;
+  height: 12px;
+  margin-bottom: 8px;
+}
+.matrix-scroll-top > div { height: 1px; }
+/* Both bars, styled the same so the pair reads as one control. Painting them
+   is not decoration: naming ::-webkit-scrollbar opts that scroller out of
+   overlay scrollbars, and an overlay bar over the top strip would be invisible
+   until you happened to scroll — which is the whole affordance it exists to
+   offer. Chromium ignores these pseudo-elements the moment `scrollbar-width`
+   is set on the same element, so the standard properties are quarantined to
+   engines that have no ::-webkit-scrollbar at all (Firefox). */
+.matrix-scroll-top::-webkit-scrollbar,
+.matrix-wrap::-webkit-scrollbar { height: 10px; }
+.matrix-scroll-top::-webkit-scrollbar-track,
+.matrix-wrap::-webkit-scrollbar-track { background: var(--bg-raised); border-radius: 5px; }
+.matrix-scroll-top::-webkit-scrollbar-thumb,
+.matrix-wrap::-webkit-scrollbar-thumb { background: var(--accent-dim); border-radius: 5px; }
+.matrix-scroll-top::-webkit-scrollbar-thumb:hover,
+.matrix-wrap::-webkit-scrollbar-thumb:hover { background: var(--accent); }
+@supports not selector(::-webkit-scrollbar) {
+  .matrix-scroll-top,
+  .matrix-wrap {
+    scrollbar-width: thin;
+    scrollbar-color: var(--accent-dim) var(--bg-raised);
+  }
+}
 /* Narrow viewports: tables scroll inside their panel instead of clipping. */
 .panel:has(table) { overflow-x: auto; }
 .matrix-legend {
@@ -798,6 +832,18 @@ tr.detail-row td {
   border-top: 1px solid var(--line);
   padding-top: 14px;
 }
+/* Capped to the same 640px column as the privacy panel above it, and pulled in
+   tighter than the landing's 20px rhythm so it reads as a footnote to that
+   block rather than a fourth section. Quieter than the privacy text on
+   purpose: worth saying, but not what someone is weighing here. */
+.landing-made-with {
+  margin: -6px 0 0;
+  max-width: 640px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--faint);
+}
+.landing-made-with b { color: var(--muted); font-weight: 600; }
 button.linky {
   background: none;
   border: none;
@@ -929,10 +975,14 @@ button.linky:hover { color: #a094ff; }
 .lq-speed:hover { color: var(--text); background: var(--panel-2); }
 .lq-speed.on { background: var(--accent-dim); color: var(--text); }
 
-/* Reads as an action next to Play, without competing with it. */
+/* Reads as an action next to Play, without competing with it. The min-width
+   holds the widest label ("Send GIF + still ›"), so counting up through
+   "Rendering 7%" … "Rendering 100%" doesn't resize the slider next to it on
+   every progress tick. */
 .lq-share {
   font-size: 12px;
   padding: 6px 12px;
+  min-width: 148px;
   white-space: nowrap;
   border-color: var(--accent-dim);
   color: var(--accent);
@@ -959,11 +1009,23 @@ button.linky:hover { color: #a094ff; }
   .lq-share { padding: 8px 12px; }
   .lq-speed { padding: 8px 7px; }
 }
+/* Always its own line. The caption names the current frame, so its width
+   changed on every step — and since the slider beside it was the flex: 1
+   element absorbing the difference, the scrubber grew and shrank by up to 80px
+   a step while the animation played, dragging the thumb with it. Off the
+   transport row it can be any length without moving anything sideways.
+   Two lines are then reserved outright (min-height = 2 × line-height) so the
+   frames whose event name wraps in a narrow panel don't shove the chart down
+   either — that's the same jump, ninety degrees round. It costs a line of
+   space where the caption fits on one; a chart that holds still is worth it. */
 .lq-frame-label {
+  flex: 1 0 100%;
+  min-width: 0;
+  line-height: 1.5;
+  min-height: 3em;
   font-family: var(--font-data);
   font-size: 12px;
   color: var(--muted);
-  min-width: 240px;
 }
 .lq-frame-label b { color: var(--text); }
 
@@ -978,9 +1040,14 @@ button.linky:hover { color: #a094ff; }
   align-items: center;
   gap: 10px;
   height: 30px;
-  /* Shorter than the fastest step (2× ≈ 220ms) so bars actually arrive
-     instead of chasing a target that keeps moving. */
-  transition: transform 0.28s ease;
+  /* Both this and the bar width below run off --lq-step, which each chart sets
+     from its own frame duration and the selected speed. Fixed durations were
+     wrong at three of the four speeds: 2× is the default and steps every
+     220ms, so the old 0.28s slide and 0.5s bar growth never arrived — rows
+     were permanently mid-flight and a bar was still drawing while the count
+     beside it had moved on two frames. 0.85 leaves each frame a beat to
+     settle. Linear, not ease: back-to-back eased steps read as a stutter. */
+  transition: transform calc(var(--lq-step, 300ms) * 0.85) linear;
 }
 .lq-race-rank {
   font-family: var(--font-data);
@@ -1025,7 +1092,7 @@ button.linky:hover { color: #a094ff; }
   height: 16px;
   border-radius: 0 4px 4px 0;
   background: var(--accent);
-  transition: width 0.5s ease;
+  transition: width calc(var(--lq-step, 300ms) * 0.85) linear;
   min-width: 2px;
 }
 .lq-race-count {
