@@ -25,7 +25,7 @@ const Matchups = lazy(() => import("./components/Views").then((m) => ({ default:
 const Stages = lazy(() => import("./components/Views").then((m) => ({ default: m.Stages })));
 const Opponents = lazy(() => import("./components/Views").then((m) => ({ default: m.Opponents })));
 const Execution = lazy(() => import("./components/Views").then((m) => ({ default: m.Execution })));
-const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: m.GameLog })));
+
 const Community = lazy(() => import("./components/Community").then((m) => ({ default: m.Community })));
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
 
@@ -58,11 +58,12 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-// "sessions" and "records" are gone: the fatigue and tilt tables render inside
-// Insights, and personal bests are a card at the foot of Overview. tabFromUrl
-// validates against TABS, so an old ?view= link for either falls back to
-// overview rather than rendering nothing.
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "log" | "community" | "liquipedia";
+// "sessions", "records" and "log" are gone: the fatigue and tilt tables render
+// inside Insights, personal bests are a card at the foot of Overview, and the
+// game log is a collapsed panel on Opponents. tabFromUrl validates against
+// TABS, so an old ?view= link for any of them falls back to overview rather
+// than rendering nothing.
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "community" | "liquipedia";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -73,7 +74,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "execution", label: "Execution" },
   { id: "insights", label: "Insights" },
 
-  { id: "log", label: "Game log" },
+
   { id: "community", label: "Community" },
   { id: "liquipedia", label: "Liquipedia" },
 ];
@@ -842,6 +843,7 @@ export default function App() {
           {tab === "opponents" && (
             <Opponents
               games={filtered}
+              accounts={accounts}
               onSelect={(code) => {
                 setFilters({ ...filters, opponentCode: code });
                 selectTab("overview");
@@ -852,7 +854,7 @@ export default function App() {
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "insights" && <Insights games={filtered} />}
 
-          {tab === "log" && <GameLog games={filtered} accounts={accounts} />}
+
           {tab === "community" && <Community games={resolved} isDemo={isDemo} onOpenAccount={() => openOverlay("accounts")} />}
           {tab === "liquipedia" && <Liquipedia />}
         </>

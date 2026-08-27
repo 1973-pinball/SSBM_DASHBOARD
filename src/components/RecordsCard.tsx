@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import type { ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { singlesRecords, statCardData, teamsRecords, type GameRef } from "../lib/stats";
 import { duration, int, num, pct, shortDate } from "../lib/format";
@@ -6,24 +6,35 @@ import { charName } from "../lib/melee";
 import { CardActions } from "./CardActions";
 import { useCardExport } from "./useCardExport";
 
-/** "FALC#123 (Falcon), Mar 3, 26" — however much of that the record carries. */
-function refText(r: GameRef): string {
-  const who = r.oppCode ? `${r.oppCode} (${charName(r.oppChar)})` : `vs ${charName(r.oppChar)}`;
-  return r.date ? `${who}, ${shortDate(r.date)}` : who;
+/**
+ * "[icon] FALC#123, Mar 3, 26" — however much of that the record carries.
+ *
+ * The stock sprite replaces the character's name rather than sitting beside it,
+ * so unlike the player card's icons this one carries the name as alt text: it
+ * is the only thing naming the character.
+ */
+function refNode(r: GameRef): ReactNode {
+  return (
+    <>
+      <img className="sc-stock sc-stock-sm" src={`/stock/${r.oppChar}.png`} alt={charName(r.oppChar)} />
+      {r.oppCode ?? "vs"}
+      {r.date ? `, ${shortDate(r.date)}` : ""}
+    </>
+  );
 }
 
 interface Cell {
   label: string;
   value: string;
-  sub?: string;
+  sub?: ReactNode;
 }
 
 /**
- * Three across, against the player card's four. Twelve records fill it exactly
- * as 3x4, and a narrower card suits a list of one-line bests better than the
- * player card's wider frame. Must match .records-card .sc-grid.
+ * Same shape as the player card above it — four across, so twelve records land
+ * as 4x3 with no filler. Must match .sc-grid, which the records card inherits
+ * rather than overriding.
  */
-const COLUMNS = 3;
+const COLUMNS = 4;
 
 /**
  * Personal bests as one shareable card.
@@ -66,14 +77,14 @@ export function RecordsCard({ games, teamGames }: { games: ResolvedGame[]; teamG
     });
   }
   if (r.highestDamage) {
-    cells.push({ label: "Most damage in a game", value: `${int(r.highestDamage.value)}%`, sub: refText(r.highestDamage) });
+    cells.push({ label: "Most damage in a game", value: `${int(r.highestDamage.value)}%`, sub: refNode(r.highestDamage) });
   }
   if (r.fastestWin) {
-    cells.push({ label: "Fastest win", value: duration(r.fastestWin.seconds), sub: refText(r.fastestWin) });
+    cells.push({ label: "Fastest win", value: duration(r.fastestWin.seconds), sub: refNode(r.fastestWin) });
   }
   cells.push({ label: "Perfect wins", value: int(r.perfectWins), sub: "won with 4 stocks left" });
   if (r.longestGame) {
-    cells.push({ label: "Longest game", value: duration(r.longestGame.seconds), sub: refText(r.longestGame) });
+    cells.push({ label: "Longest game", value: duration(r.longestGame.seconds), sub: refNode(r.longestGame) });
   }
   if (r.bestLCancelDay) {
     cells.push({

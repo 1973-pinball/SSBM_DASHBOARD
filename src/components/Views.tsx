@@ -390,7 +390,15 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
   );
 }
 
-export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
+export function Opponents({
+  games,
+  accounts,
+  onSelect,
+}: {
+  games: ResolvedGame[];
+  accounts: Account[];
+  onSelect: (code: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
   const rows = useMemo(() => byOpponent(games), [games]);
@@ -410,6 +418,9 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
   if (rows.length === 0) return <div className="empty-note">No opponents with connect codes in the current filter.</div>;
   return (
     <>
+    {/* Both logs collapsed, so the tab still opens on the sets summary and the
+        opponents table rather than two long tables. */}
+    <GameLog games={games} accounts={accounts} />
     <SetsPanel games={games} onSelect={onSelect} />
     <div className="panel">
       <h2>Opponents</h2>
@@ -1121,8 +1132,12 @@ function GameDetail({ g, colSpan }: { g: ResolvedGame; colSpan: number }) {
   );
 }
 
-export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: Account[] }) {
+/** Rendered inside Opponents, not as its own tab — see the Opponents view. */
+function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: Account[] }) {
   const recent = useMemo(() => [...games].reverse().slice(0, GAME_LOG_ROWS), [games]);
+  // Closed by default: it is the heaviest thing on the tab (every row mounts an
+  // expandable card) and the least likely to be what you came for.
+  const [logOpen, setLogOpen] = useState(false);
   const [openId, setOpenId] = useState<string | null>(null);
   // One account needs no column — every row would say the same thing.
   const showAccount = accounts.length > 1;
@@ -1172,12 +1187,24 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
   if (games.length === 0) return <div className="empty-note">No games match the current filters.</div>;
   return (
     <div className="panel">
-      <h2 className="game-log-head">
-        <span>Game log</span>
-        <button className="ghost" style={{ float: "right", marginTop: -6 }} onClick={exportCsv}>
+      {/* Export sits beside the disclosure rather than inside it: the CSV is the
+          full filtered set and shouldn't need the table opened to reach. */}
+      <div className="panel-disclosure-row">
+        <h2 className="panel-disclosure">
+          <button aria-expanded={logOpen} aria-controls="game-log" onClick={() => setLogOpen((v) => !v)}>
+            Game log
+            <span className="panel-disclosure-meta">
+              latest {Math.min(GAME_LOG_ROWS, games.length).toLocaleString()} of {games.length.toLocaleString()}
+              <span aria-hidden="true">{logOpen ? "▲" : "▼"}</span>
+            </span>
+          </button>
+        </h2>
+        <button className="ghost" onClick={exportCsv}>
           Export CSV ({games.length.toLocaleString()})
         </button>
-      </h2>
+      </div>
+      {logOpen && (
+      <div id="game-log" className="panel-disclosure-body">
       <table className="game-log-table">
         <thead>
           <tr>
@@ -1278,6 +1305,8 @@ export function GameLog({ games, accounts }: { games: ResolvedGame[]; accounts: 
         </div>
       )}
       <div className="hint">Click a game to see the full stat line for both players.</div>
+      </div>
+      )}
     </div>
   );
 }

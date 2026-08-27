@@ -341,7 +341,11 @@ select:disabled { opacity: 0.45; }
   margin-bottom: var(--gap);
   min-width: 0;
 }
-.panel > h2 {
+/* .panel-disclosure-row > h2 is listed too: inside that row the heading is no
+   longer a direct child of .panel, and without this it renders as sentence-case
+   body text beside neighbours that are uppercase. */
+.panel > h2,
+.panel-disclosure-row > h2 {
   font-size: 13px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -358,7 +362,8 @@ select:disabled { opacity: 0.45; }
 /* Collapsible panel heading. The button carries the whole heading row so the
    hit target is the full width, and inherits the h2's type so the closed state
    is indistinguishable from a plain panel title. */
-.panel > h2.panel-disclosure { margin-bottom: 0; }
+.panel > h2.panel-disclosure,
+.panel-disclosure-row > h2.panel-disclosure { margin-bottom: 0; }
 .panel-disclosure > button {
   display: flex;
   align-items: center;
@@ -378,6 +383,14 @@ select:disabled { opacity: 0.45; }
 }
 .panel-disclosure > button:hover { color: var(--text); }
 .panel-disclosure > button[aria-expanded="true"] { margin-bottom: 12px; }
+/* Header that pairs a disclosure with an always-visible action — the game log's
+   CSV export, which covers the whole filtered set and shouldn't need the table
+   opened to reach. */
+.panel-disclosure-row { display: flex; align-items: center; gap: 12px; }
+.panel-disclosure-row .panel-disclosure { flex: 1 1 auto; min-width: 0; }
+.panel-disclosure-row .panel-disclosure > button[aria-expanded="true"] { margin-bottom: 0; }
+.panel-disclosure-row > button { flex: 0 0 auto; font-size: 12px; padding: 5px 11px; }
+.panel-disclosure-body { margin-top: 12px; }
 .panel-disclosure-meta {
   display: inline-flex;
   align-items: center;
@@ -849,6 +862,10 @@ button.linky:hover { color: #a094ff; }
   overflow-wrap: anywhere;
 }
 .sc-stock { width: 22px; height: 22px; image-rendering: pixelated; flex-shrink: 0; }
+/* Inline inside a .sc-sub line, where the sprite stands in for the character's
+   name instead of sitting beside it — so it is sized to the 11px sub text
+   rather than the value row, and nudged onto its baseline. */
+.sc-stock-sm { width: 15px; height: 15px; vertical-align: -3px; margin-right: 4px; }
 .sc-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .sc-foot {
   display: flex;
@@ -860,20 +877,16 @@ button.linky:hover { color: #a094ff; }
 }
 .sc-url { color: var(--accent); }
 .sc-actions { display: flex; align-items: center; gap: 12px; justify-content: center; margin-top: 14px; flex-wrap: wrap; }
-/* The records card is three across, not four — twelve bests land as 3x4, and a
-   narrower frame suits one-line records better than the player card's width.
-   COLUMNS in RecordsCard.tsx pads the last row to match, so keep the two in
-   step. */
-.share-card.records-card { width: 560px; }
-.records-card .sc-grid { grid-template-columns: repeat(3, 1fr); }
+/* .records-card carries no size of its own: the records card is deliberately
+   the same shape as the player card it sits under, so it inherits .share-card's
+   width and four-column grid. The class stays as the hook that tells the two
+   apart in the DOM. Twelve records fill 4x3 exactly — COLUMNS in
+   RecordsCard.tsx must stay 4 or its last row pads against the wrong width. */
 @media (max-width: 760px) {
   .sc-grid { grid-template-columns: repeat(3, 1fr); }
 }
 @media (max-width: 560px) {
   .sc-grid { grid-template-columns: repeat(2, 1fr); }
-  /* Outranks .records-card .sc-grid on specificity alone, so state it here too
-     or the records card would stay at three across on a phone. */
-  .records-card .sc-grid { grid-template-columns: repeat(2, 1fr); }
 }
 
 /* ---- Liquipedia tab ---- */
@@ -1409,8 +1422,8 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 
   .game-log-table { display: none; }
   .game-log-cards { display: grid; gap: 8px; }
-  .game-log-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-  .game-log-head button { float: none !important; margin: 0 !important; }
+  /* The disclosure header wraps instead of squeezing the export button. */
+  .panel-disclosure-row { flex-wrap: wrap; }
 
   .community-hero,
   .panel-heading-row { flex-direction: column; }
