@@ -10,23 +10,23 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Win rate",
-        def: "Wins ÷ decided games. Games under 30 seconds or with no determinable result (some quit-outs) don't count toward the denominator — they show as “n/a” in the game log.",
+        def: "Wins ÷ decided games. Games under 30 seconds, and quit-outs with no determinable result, stay out of the denominator — they read “n/a” in the game log.",
       },
       {
         term: "Your accounts",
-        def: "Every connect code you've entered counts as you, and all of them are pooled into the numbers here by default. Use the Account filter to see one on its own, or the “By account” table on Overview to compare them side by side. A game where two of your own accounts met carries no result either way — it's badged “self” in the game log and left out of win rates and opponent tables.",
+        def: "Every connect code you've entered counts as you, pooled by default. Split them with the Account filter, or compare them in Overview's “By account” table. A game between two of your own accounts carries no result: badged “self” in the log, out of win rates and opponent tables.",
       },
       {
         term: "Kills / deaths per game",
-        def: "Stocks you took (or lost) per game, averaged over the filtered set. 4–0 sweeps and last-stock nail-biters weigh the same.",
+        def: "Stocks taken (or lost) per game, averaged over the filtered set. A 4–0 and a last-stock game weigh the same.",
       },
       {
         term: "Damage per game",
-        def: "Total percent you dealt per game, averaged over the filtered set. Includes damage on stocks you didn't close out.",
+        def: "Total percent dealt per game, averaged over the filtered set — including damage on stocks you didn't close out.",
       },
       {
         term: "Streak",
-        def: "Current run of consecutive wins (W) or losses (L) over decided games, most recent first.",
+        def: "Your current run of consecutive wins (W) or losses (L) across decided games.",
       },
     ],
   },
@@ -35,27 +35,27 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Opening (conversion)",
-        def: "Counted every time you start a punish: you hit the opponent out of neutral — a clean neutral win, a counter-attack while escaping their punish, or a trade. The opening ends when they regain control and hit you back, or when they die. You usually get several openings per stock.",
+        def: "Every time you start a punish — a clean neutral win, a counter-attack while escaping theirs, or a trade. It ends when they hit you back or die. Usually several per stock.",
       },
       {
         term: "Openings per kill",
-        def: "Openings started ÷ kills. Lower is better: 3.0 means you win neutral three times for every stock you actually take — the other two punishes got dropped. Even top players usually sit around 2–3.",
+        def: "Openings ÷ kills, and lower is better: 3.0 means three neutral wins per stock you actually take, so two punishes got dropped. Even top players sit around 2–3.",
       },
       {
         term: "Damage per opening",
-        def: "Total damage dealt ÷ openings. How much each neutral win costs the opponent on average. Low DPO with a decent win rate = you win neutral a lot but drop punishes; high DPO = when you get in, you make it count.",
+        def: "Damage dealt ÷ openings — what each neutral win costs them. Low DPO alongside a decent win rate means you win neutral but drop punishes; high means you make it count.",
       },
       {
         term: "Neutral wins",
-        def: "Openings that started from a clean neutral exchange only — counter-attacks and trades excluded. The share % is your count ÷ the game total, so over 50% means you won neutral more often than they did.",
+        def: "Openings from a clean neutral exchange only, excluding counter-hits and trades. The share % is your count ÷ the game total, so over 50% means you won neutral more often than they did.",
       },
       {
         term: "Counter hits",
-        def: "Openings you earned by hitting the opponent during their punish on you — escaping pressure and turning it around, rather than winning a clean neutral exchange.",
+        def: "Openings earned by hitting the opponent during their punish on you — turning pressure around rather than winning neutral outright.",
       },
       {
         term: "Beneficial trades",
-        def: "Both players hit each other at once, and the trade favored you — either your hit killed and theirs didn't, or yours simply dealt more damage.",
+        def: "You both hit at once and the trade favored you: your hit killed and theirs didn't, or yours simply dealt more.",
       },
     ],
   },
@@ -64,19 +64,19 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "L-cancel %",
-        def: "Successful L-cancels ÷ attempts. An attempt is any aerial landing where an L-cancel was possible; success halves your landing lag.",
+        def: "Successful L-cancels ÷ attempts, where an attempt is any aerial landing that allowed one. Success halves your landing lag.",
       },
       {
         term: "Inputs per minute",
-        def: "Total controller inputs (buttons, sticks, triggers) per minute of game time. A speed gauge, not a quality one — high IPM with low damage per opening is just noise.",
+        def: "Controller inputs per minute of game time. A speed gauge, not a quality one — high IPM with low damage per opening is just noise.",
       },
       {
         term: "Actions per game",
-        def: "Counts of detected movement and defensive actions — rolls, air dodges, spot dodges, wavedashes, wavelands, dash dances, ledge grabs, grabs. High roll counts usually signal panic options; wavedash/dash-dance volume tracks movement-heavy play. The per-minute column is fairer when comparing filters with different game lengths.",
+        def: "Detected movement and defensive actions: rolls, air dodges, spot dodges, wavedashes, wavelands, dash dances, ledge grabs, grabs. High roll counts usually signal panic options; wavedash and dash-dance volume tracks movement-heavy play. Compare filters of differing length by the per-minute column.",
       },
       {
         term: "Grabs",
-        def: "All grab attempts (landed + whiffed) — standing, dash, and out-of-shield together. Replay stats can't isolate shield grabs specifically; that needs frame-level analysis, which is a possible future opt-in feature. The game log drill-down shows landed/attempts with the success rate.",
+        def: "All grab attempts, landed and whiffed — standing, dash and out-of-shield together. Shield grabs can't be isolated without frame-level data, a possible future opt-in. The game log drill-down shows landed/attempts with the success rate.",
       },
     ],
   },
@@ -85,23 +85,23 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Odds × per +1 SD",
-        def: "From a logistic regression fit on your filtered games. Each row: a game where that metric is one standard deviation above your average has this many times the odds of being a win, holding the other metrics in the table fixed. Values above 1× pull toward wins, below 1× toward losses. The shift columns translate the same effect into percentage points near an even game.",
+        def: "From a logistic regression on your filtered games: one standard deviation above your average on that metric multiplies the odds of a win by this much, holding the other rows fixed. Above 1× favours wins, below 1× losses. The shift columns restate it in percentage points near an even game.",
       },
       {
         term: "Raw vs adjusted shift",
-        def: "Raw is the simple association across all filtered games. Adjusted re-fits the model with fixed effects for the opponent (regulars with 15+ games), your character, the stage, and a time trend — so it asks whether more of the metric came with more wins within the same context. When a raw effect collapses after adjustment, the metric was riding along with context (you improved over time, or move more against certain opponents) rather than driving wins. The adjusted column is the one that answers 'what should I practice'.",
+        def: "Raw is the plain association. Adjusted re-fits with fixed effects for the opponent (regulars with 15+ games), your character, the stage and a time trend, so it asks whether the metric mattered within one context. An effect that collapses under adjustment rode on context rather than driving wins — adjusted is the column that answers “what should I practice”.",
       },
       {
         term: "Evidence",
-        def: "How distinguishable the effect is from noise at your sample size (strong ≈ p<0.01, moderate ≈ p<0.05, weak ≈ p<0.1). Faded rows could easily be chance — more games sharpen these.",
+        def: "How distinguishable the effect is from noise at your sample size: strong ≈ p<0.01, moderate ≈ p<0.05, weak ≈ p<0.1. Faded rows could easily be chance — more games sharpen them.",
       },
       {
         term: "Win rate by quartile",
-        def: "The model-free cross-check: games sorted by the metric, cut into four equal buckets, win rate per bucket. If the regression and the quartiles disagree, the effect usually belongs to a correlated metric the regression is controlling for.",
+        def: "The model-free cross-check: games sorted by the metric, cut into four buckets, win rate for each. Disagreement with the regression usually means the effect belongs to a correlated metric the model controls for.",
       },
       {
         term: "Habits vs outcome-linked",
-        def: "Habits (L-cancel %, movement per minute) are things you can practice. Outcome-linked stats (openings/kill, neutral-win share) partly ARE the win, so they dominate any model without saying what to change — that's why they're off by default. All of it is correlation across your games, not causation, and none of it controls for how strong the opponent was.",
+        def: "Habits (L-cancel %, movement per minute) are practicable. Outcome-linked stats (openings/kill, neutral-win share) partly are the win, so they dominate any model without saying what to change — hence off by default. All of it is correlation across your own games, and none of it accounts for opponent strength.",
       },
     ],
   },
@@ -110,11 +110,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Team win rate",
-        def: "Win/loss is decided per team, not per player — there is no individual result in doubles. The same 30-second / indeterminate rules apply.",
+        def: "Decided per team, not per player — doubles has no individual result. The same 30-second and indeterminate rules apply.",
       },
       {
         term: "Stocks taken / lost",
-        def: "Your duo's combined stocks taken from (or lost to) the enemy team, from end-of-game state. The Damage & FF tab splits captures per player. Self-destructs count as stocks taken by the other team.",
+        def: "Your duo's combined stocks taken from (or lost to) the enemy team, from end-of-game state. Self-destructs count for the other team; the Damage & FF tab splits captures per player.",
       },
       {
         term: "Enemy team includes",
@@ -127,27 +127,27 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Damage attribution",
-        def: "Slippi's own stat engine computes nothing for 4-player games, so this dashboard does its own frame pass: every point of damage (and every stock loss) is credited to the victim's last-hit-by player — the same convention other Slippi tools use. Self-destructs credit no one. Attribution can very occasionally be wrong when someone dies without being touched recently.",
+        def: "Slippi's stat engine computes nothing for 4-player games, so this dashboard runs its own frame pass, crediting damage and stock losses to the victim's last-hit-by player — the convention other Slippi tools use. Self-destructs credit no one, and attribution can be wrong when someone dies without being touched recently.",
       },
       {
         term: "My / teammate damage per game",
-        def: "Damage dealt to the enemy team only — friendly fire is tracked separately, never mixed in. Kills per game are enemy stocks captured, same rule.",
+        def: "Damage dealt to the enemy team only — friendly fire is tracked separately and never mixed in. Kills per game are enemy stocks captured, same rule.",
       },
       {
         term: "Damage share / kill share",
-        def: "Your slice of the duo's total enemy damage (or captures). 50% is an even carry; consistently above means you're the engine, below means you're the passenger — though roles (support Puff vs closer Fox) legitimately skew this.",
+        def: "Your slice of the duo's enemy damage (or captures). 50% is an even carry; above means you're the engine, below the passenger — though roles like support Puff versus closer Fox legitimately skew it.",
       },
       {
         term: "Friendly fire (FF)",
-        def: "Damage dealt to your own teammate, shown per game in both directions — what you did to them and what they did to you. FF kills are the times a teammate's hit took the partner's stock. These come from same-team cells of the damage matrix.",
+        def: "Damage dealt to your own teammate, shown per game in both directions. FF kills are the times one of you took the other's stock. Both come from the same-team cells of the damage matrix.",
       },
       {
         term: "Enemy focus on me",
-        def: "Of all the damage the enemy team dealt to your duo, the share aimed at you. Above 50% means they target you; useful for judging whether your teammate is getting camped or napping.",
+        def: "Of all the damage the enemy team dealt your duo, the share aimed at you. Above 50% means they're targeting you.",
       },
       {
         term: "Execution — me vs teammate",
-        def: "L-cancel %, inputs/min and movement counts computed per player in doubles by running the singles stat machinery pairwise across teams. 'Teammate' aggregates whoever you queued with under the current filters.",
+        def: "L-cancel %, inputs/min and movement counts per player, from running the singles machinery pairwise across teams. “Teammate” aggregates whoever you queued with under the current filters.",
       },
     ],
   },
@@ -156,11 +156,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Stage × opponent character",
-        def: "Your win rate on each stage against each opponent character. Read it as a counterpick sheet: within a character's column, green stages are picks and red ones are bans. Faded cells are below the sample threshold — treat them as anecdotes, not data.",
+        def: "Your win rate on each stage against each opponent character — a counterpick sheet: within a character's column, green stages are picks and red are bans. Faded cells are below the sample threshold; treat them as anecdotes.",
       },
       {
         term: "My character × stage",
-        def: "The same grid keyed on your own character — where each of your characters over- or under-performs. Clicking any cell in either grid scopes the whole dashboard to that stage + character.",
+        def: "The same grid keyed on your own character, showing where each of yours over- or under-performs. Clicking any cell in either grid scopes the whole dashboard to that stage and character.",
       },
     ],
   },
@@ -169,19 +169,19 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Session",
-        def: "A run of consecutive games where each game starts within 30 minutes of the previous game ending. A gap longer than 30 minutes starts a new session. So a night of ranked with drink breaks is one session; morning and evening play on the same day are two. Sessions are about time at the setup, not about which account you were on — swapping between your accounts mid-evening keeps it one session, which is what you want for the fatigue and tilt tables.",
+        def: "A run of games where each starts within 30 minutes of the previous one ending; a longer gap starts a new one. So ranked with drink breaks is a single session, morning and evening play two. It tracks time at the setup, not the account — swapping accounts mid-evening keeps it one.",
       },
       {
         term: "Win rate by position in session",
-        def: "All sessions stacked up: your record in games 1–5 of a session, 6–10, and so on, compared against your baseline win rate. A red tail means your marathon sessions are donating rating.",
+        def: "Every session stacked up: your record in games 1–5, 6–10 and so on, against your baseline. A red tail means marathon sessions are donating rating.",
       },
       {
         term: "Tilt check",
-        def: "Win rate conditioned on the streak you were on entering the game, within the same session — after a win, after 2+ wins, after a loss, after 2 losses, after 3+ losses. 'After 3+ losses' sitting far below baseline is the statistical signature of tilt. Streaks reset between sessions, and indeterminate games neither extend nor break a streak.",
+        def: "Win rate by the streak you entered on, within one session: after a win, 2+ wins, a loss, 2 losses, 3+ losses. “After 3+ losses” far below baseline is the signature of tilt. Streaks reset between sessions; indeterminate games neither extend nor break one.",
       },
       {
         term: "Baseline",
-        def: "Your overall win rate across all decided games in the current filter — the reference point the 'vs baseline' columns compare against.",
+        def: "Your overall win rate across decided games in the current filter — what the “vs baseline” columns compare against.",
       },
     ],
   },
@@ -190,11 +190,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
     items: [
       {
         term: "Streaks & bests",
-        def: "All records respect the current filters, so you can ask for your best streak with one character or in one time range. Dates shown are when the record was set (streaks: when the run ended).",
+        def: "Every record respects the current filters, so you can ask for your best streak on one character or in one time range. Dates are when the record was set — for streaks, when the run ended.",
       },
       {
         term: "Perfect win",
-        def: "A win with all 4 of your stocks intact — the opponent never took one.",
+        def: "A win with all 4 of your stocks intact.",
       },
       {
         term: "Best L-cancel day",
@@ -202,11 +202,11 @@ const SECTIONS: { title: string; items: { term: string; def: string }[] }[] = [
       },
       {
         term: "Nemesis / favorite victim",
-        def: "The opponent (by connect code) you've lost to the most, and the one you've beaten the most. Raw counts, not rates — your nemesis is usually just whoever you play the most.",
+        def: "The opponent (by connect code) you've lost to most, and the one you've beaten most. Raw counts, not rates — your nemesis is usually just whoever you play most.",
       },
       {
         term: "FF grudge",
-        def: "The teammate who friendly-fires you the hardest per game, and the one you damage most, each needing at least 5 games together so a single Falco-dair accident doesn't define a friendship.",
+        def: "The teammate who friendly-fires you hardest per game, and the one you damage most — each needing at least 5 games together, so a single Falco dair doesn't define a friendship.",
       },
     ],
   },

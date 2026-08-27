@@ -3,7 +3,7 @@ import type { Major, PlayerMeta } from "../../lib/liquipedia/types";
 import { careerLeaderboard, raceFrames } from "../../lib/liquipedia/select";
 import { shortDate } from "../../lib/format";
 import { charId } from "../../lib/liquipedia/chars";
-import { Playbar } from "./Playback";
+import { Playbar, type SliderTick } from "./Playback";
 import { usePlayback } from "./usePlayback";
 import { loadIcons } from "./gifShare";
 import { useShareGif } from "./useShareGif";
@@ -24,6 +24,18 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
   const frames = useMemo(() => raceFrames(majors), [majors]);
   const leaderboard = useMemo(() => careerLeaderboard(majors, players), [majors, players]);
   const playback = usePlayback(frames.length, PLAY_MS);
+  // A notch per year rather than per major: 200-plus frames of notches is a
+  // solid line. Placed on each year first major, so clicking between two
+  // notches lands inside that year, and the scrubber reads as a timeline.
+  const ticks = useMemo(() => {
+    const out: SliderTick[] = [];
+    frames.forEach((f, i) => {
+      if (f.major === null) return;
+      const label = String(f.major.year);
+      if (label !== out[out.length - 1]?.label) out.push({ value: i, label });
+    });
+    return out;
+  }, [frames]);
   const share = useShareGif();
 
   // Frame 0 is the empty "before any major" state; the GIF starts at the first
@@ -65,6 +77,7 @@ export function MajorsRace({ majors, players }: { majors: Major[]; players: Reco
         shareState={share.state}
         onSpeedChange={share.reset}
         sliderLabel="Timeline position (one step per major)"
+        ticks={ticks}
         valueText={
           current.major ? `${current.major.name}, ${shortDate(current.major.date)}, won by ${current.major.winner}` : "Before the first major"
         }
