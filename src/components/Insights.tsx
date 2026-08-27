@@ -284,7 +284,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
     return (
       <>
         <CoachPanel games={games} />
-        <Sessions games={games} />
+
         <div className="panel">
           <h2>What predicts your wins</h2>
           {toggle}
@@ -303,6 +303,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
           )}
         </div>
         {quartilePanel}
+        <Sessions games={games} />
       </>
     );
   }
@@ -310,7 +311,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
   return (
     <>
       <CoachPanel games={games} />
-      <Sessions games={games} />
+
       <div className="panel">
         <h2>What would help you win — logistic regression</h2>
         {toggle}
@@ -414,6 +415,10 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
           )}
         </div>
       </div>
+      {/* Fatigue and tilt come last: the model panels are what the coach list
+          at the top is drawn from, and "Reading this honestly" is the caveat
+          for them, so those three stay adjacent. */}
+      <Sessions games={games} />
     </>
   );
 }

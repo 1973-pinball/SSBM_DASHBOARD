@@ -18,8 +18,12 @@ interface Cell {
   sub?: string;
 }
 
-/** Matches .sc-grid, which is four across above 760px. */
-const COLUMNS = 4;
+/**
+ * Three across, against the player card's four. Twelve records fill it exactly
+ * as 3x4, and a narrower card suits a list of one-line bests better than the
+ * player card's wider frame. Must match .records-card .sc-grid.
+ */
+const COLUMNS = 3;
 
 /**
  * Personal bests as one shareable card.
@@ -38,14 +42,22 @@ export function RecordsCard({ games, teamGames }: { games: ResolvedGame[]; teamG
     `ssbm-records-${(d.code ?? "player").replace(/[^A-Za-z0-9#-]/g, "")}.png`,
   );
 
+  // Nothing here may repeat the player card above it — the two sit on the same
+  // tab, and a figure shown twice reads as two findings. `bestWinStreak` is
+  // deliberately absent: that is the player card's "Longest heater".
+  //
+  // Nemesis (most-losses-to) is gone for the same reason even though it is not
+  // literally the same figure: for anyone with a regular opponent it resolves
+  // to the card's Sworn rival, and the same code on both cards reads as a
+  // repeat rather than a second finding.
+  //
+  // The remaining near-misses stay, because they answer different questions and
+  // do not collapse onto the card's answer:
+  //   - Favourite victim is most-wins-against; Sworn rival is most-played.
+  //   - Best L-cancel day is a single day's peak; the card's "The hands" is a
+  //     rolling average over the last 100 games.
+  //   - Longest game is the maximum; the card's Average match is the mean.
   const cells: Cell[] = [];
-  if (r.bestWinStreak) {
-    cells.push({
-      label: "Best win streak",
-      value: `${r.bestWinStreak.length} wins`,
-      sub: r.bestWinStreak.end ? `ended ${shortDate(r.bestWinStreak.end)}` : undefined,
-    });
-  }
   if (r.worstLossStreak) {
     cells.push({
       label: "Worst loss streak",
@@ -76,9 +88,7 @@ export function RecordsCard({ games, teamGames }: { games: ResolvedGame[]; teamG
   if (r.longestSession) {
     cells.push({ label: "Longest session", value: `${r.longestSession.games} games`, sub: shortDate(r.longestSession.start) });
   }
-  if (r.nemesis) {
-    cells.push({ label: "Nemesis", value: r.nemesis.code, sub: `${r.nemesis.wins}–${r.nemesis.losses} against them` });
-  }
+
   if (r.victim) {
     cells.push({ label: "Favourite victim", value: r.victim.code, sub: `${r.victim.wins}–${r.victim.losses} against them` });
   }
@@ -115,7 +125,7 @@ export function RecordsCard({ games, teamGames }: { games: ResolvedGame[]; teamG
   return (
     <div className="panel">
       <div className="sc-wrap">
-        <div className="share-card" ref={cardRef}>
+        <div className="share-card records-card" ref={cardRef}>
           <div className="sc-head">
             <div>
               <div className="sc-tag">{d.name ?? d.code ?? "Melee player"}</div>

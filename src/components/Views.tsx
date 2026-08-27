@@ -299,9 +299,10 @@ export function Stages({
 // ---------------- Opponents ----------------
 
 /**
- * Rows shown before the list is cut off. Sorted by games played, so the tail is
- * mostly one-off netplay encounters — 100 of them buried the panels underneath
- * without telling anyone anything. Search reaches the rest.
+ * Opponents per page. The list is sorted by games played, so page 1 is the
+ * people you actually play and the tail is one-off netplay encounters — 100 at
+ * once buried the panels underneath without telling anyone anything. Paging
+ * keeps the whole history reachable without putting it all on screen.
  */
 const OPPONENT_ROWS = 25;
 
@@ -313,6 +314,9 @@ const OPPONENT_ROWS = 25;
 function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
   const sets = useMemo(() => computeSets(games), [games]);
   const s = useMemo(() => setsSummary(sets), [sets]);
+  // Closed by default, like the session log: the KPI strip above is the summary
+  // worth landing on, and this table is for when you want to go looking.
+  const [logOpen, setLogOpen] = useState(false);
   if (s.sets === 0) return null;
   const recent = [...sets].reverse().slice(0, 15);
   return (
@@ -334,7 +338,17 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
         />
       </div>
       <div className="panel">
-        <h2>Recent sets</h2>
+        <h2 className="panel-disclosure">
+          <button aria-expanded={logOpen} aria-controls="recent-sets" onClick={() => setLogOpen((v) => !v)}>
+            Recent sets
+            <span className="panel-disclosure-meta">
+              latest {Math.min(recent.length, s.sets).toLocaleString()} of {s.sets.toLocaleString()}
+              <span aria-hidden="true">{logOpen ? "▲" : "▼"}</span>
+            </span>
+          </button>
+        </h2>
+        {logOpen && (
+        <div id="recent-sets">
         <table>
           <thead>
             <tr>
@@ -365,10 +379,12 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
           </tbody>
         </table>
         <div className="hint">
-          A set is a run of consecutive games against the same opponent (20-minute gap starts a new one); the result is
-          the majority of decided games, since ranked sets and long friendly runbacks both live here. Click a row to
-          filter to that opponent.
+          A set is consecutive games against the same opponent, best of three — it ends when someone reaches two wins,
+          and the next game starts a new one. A 20-minute gap also ends it, and a trailing set nobody won is not
+          counted. Click a row to filter to that opponent.
         </div>
+        </div>
+        )}
       </div>
     </>
   );
@@ -376,6 +392,7 @@ function SetsPanel({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code
 
 export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect: (code: string) => void }) {
   const [query, setQuery] = useState("");
+  const [page, setPage] = useState(0);
   const rows = useMemo(() => byOpponent(games), [games]);
   const filtered = useMemo(() => {
     const q = query.toLowerCase();
@@ -383,6 +400,13 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
       (r) => !q || r.code.toLowerCase().includes(q) || (r.displayName ?? "").toLowerCase().includes(q),
     );
   }, [rows, query]);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / OPPONENT_ROWS));
+  // Clamped rather than reset in an effect: a dashboard filter can shrink the
+  // list under whatever page you were on, and deriving the page keeps that from
+  // rendering an empty table for a frame.
+  const current = Math.min(page, pageCount - 1);
+  const start = current * OPPONENT_ROWS;
+  const visible = filtered.slice(start, start + OPPONENT_ROWS);
   if (rows.length === 0) return <div className="empty-note">No opponents with connect codes in the current filter.</div>;
   return (
     <>
@@ -392,7 +416,10 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
       <div style={{ marginBottom: 10 }}>
         <input
           value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setPage(0); // a new search should start at its own first page
+          }}
           placeholder="Search code or name…"
           style={{
             background: "var(--panel-2)",
@@ -419,7 +446,7 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
           </tr>
         </thead>
         <tbody>
-          {filtered.slice(0, OPPONENT_ROWS).map((r) => (
+          {visible.map((r) => (
             <tr key={r.code} className="clickable" role="button" tabIndex={0} aria-label={`Filter to opponent ${r.code}`} onClick={() => onSelect(r.code)} onKeyDown={(e) => activateOnKey(e, () => onSelect(r.code))}>
               <td style={{ fontFamily: "var(--font-data)" }}>{r.code}</td>
               <td>{r.displayName ?? "—"}</td>
@@ -434,10 +461,25 @@ export function Opponents({ games, onSelect }: { games: ResolvedGame[]; onSelect
           ))}
         </tbody>
       </table>
-      {filtered.length > OPPONENT_ROWS && (
-        <div className="hint">Showing top {OPPONENT_ROWS} of {filtered.length.toLocaleString()} — refine with search.</div>
+      {filtered.length === 0 && <div className="empty-note">No opponent matches that search.</div>}
+      {pageCount > 1 && (
+        <div className="pager">
+          <button className="ghost" disabled={current === 0} onClick={() => setPage(current - 1)}>
+            ← Prev
+          </button>
+          <span className="pager-count">
+            {(start + 1).toLocaleString()}–{(start + visible.length).toLocaleString()} of{" "}
+            {filtered.length.toLocaleString()} · page {current + 1} of {pageCount}
+          </span>
+          <button className="ghost" disabled={current >= pageCount - 1} onClick={() => setPage(current + 1)}>
+            Next →
+          </button>
+        </div>
       )}
-      <div className="hint">Click a row to filter the dashboard to that opponent.</div>
+      <div className="hint">
+        Click a row to filter the dashboard to that opponent. Sorted by games played, so later pages are the
+        one-off encounters.
+      </div>
     </div>
     </>
   );
