@@ -16,6 +16,7 @@ import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { moveTabFocus } from "../lib/a11y";
 import { axisStyle, gridStyle, tooltipStyle } from "./chartStyle";
 import { Kpi } from "./Kpi";
+import { CommunityConsent } from "./CommunityConsent";
 
 type CommunityView = "matchups" | "benchmarks" | "moves" | "stages" | "pulse";
 
@@ -113,6 +114,11 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           <span>Refreshed {shortDate(snapshot.refreshedAt)}</span>
         </div>
       </div>
+
+      {/* Directly under the contributor count, which is the moment the question
+          "am I in this?" actually occurs to someone. It used to live only at
+          the bottom of the My Account dialog. */}
+      <CommunityConsent isDemo={isDemo} variant="feature" />
 
       <div className="tabs community-tabs" role="tablist" aria-label="Community views">
         {VIEWS.map((item) => (

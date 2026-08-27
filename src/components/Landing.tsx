@@ -103,11 +103,23 @@ export function Landing({
         (<span style={{ fontFamily: "var(--font-data)" }}>~/Slippi</span> on Mac/Linux) — the picker opens in Documents
         to get you close.
       </div>
+      {/* This is the claim the whole product rests on, and it was set in 12px
+          --faint under a divider. Sized and split so it can actually be read
+          at the moment someone is deciding whether to sign in. */}
       <div className="privacy">
-        <b>Your replays never leave your machine.</b>{" "}
-        {onCloudSignIn
-          ? "Signing in syncs only parsed stats — never replay files — to your own account. Community contribution is separate, explicit, and off by default. Your email is used only for sign-in—never sold, published, shared, or used for marketing or outreach."
-          : "No uploads, no accounts, no tracking."}
+        <p className="privacy-lead"><b>Your replays never leave your machine.</b></p>
+        {onCloudSignIn ? (
+          <ul className="privacy-points">
+            <li>Signing in syncs <b>only parsed stats</b> — never replay files — to your own private account.</li>
+            <li>
+              <b>Community contribution is a separate opt-in, off by default.</b> Turn it on any time from the{" "}
+              Community tab or My Account to add your anonymised stats to the shared benchmarks.
+            </li>
+            <li>Your email is used only for sign-in — never sold, published, shared, or used for marketing or outreach.</li>
+          </ul>
+        ) : (
+          <p className="privacy-points">No uploads, no accounts, no tracking.</p>
+        )}
       </div>
       {!online && <div className="badge gold">Offline mode · demo, cached stats, and Melee history still work.</div>}
     </div>
