@@ -5,6 +5,9 @@ import type { CoefRow, FeatureDef, WinModel } from "../lib/model";
 import type { ModelWorkerJob, ModelWorkerResult } from "../worker/model.worker";
 import { COACH_MIN_DECIDED, recommendations } from "../lib/coach";
 import { num, pct, winRateColor } from "../lib/format";
+// Statically imported, not lazy: Sessions used to be its own tab and chunk, and
+// now renders inside this one directly under the coach list.
+import { Sessions } from "./Sessions";
 
 /**
  * The IRLS fit is O(iterations · n · k²) — multi-hundred-ms on a big library —
@@ -281,6 +284,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
     return (
       <>
         <CoachPanel games={games} />
+        <Sessions games={games} />
         <div className="panel">
           <h2>What predicts your wins</h2>
           {toggle}
@@ -306,6 +310,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
   return (
     <>
       <CoachPanel games={games} />
+      <Sessions games={games} />
       <div className="panel">
         <h2>What would help you win — logistic regression</h2>
         {toggle}

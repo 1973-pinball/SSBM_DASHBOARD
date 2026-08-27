@@ -1181,26 +1181,38 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   border-radius: 10px;
   background: var(--panel);
 }
-/* Slim strip above the topbar. Same switch as My Account — only the frame
-   around it changes — with room for the one sentence that answers "does this
-   expose my code?" before anyone has to go looking. */
+/* Slim strip under the topbar. Same switch as My Account — only the frame and
+   the scale change — carrying the one sentence that answers "does this expose
+   my code?" before anyone has to go looking. Deliberately quiet: it sits above
+   the filters on every dashboard page, so it has to be findable without
+   competing with them. */
 .community-consent.bar {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 10px;
   flex-wrap: wrap;
-  margin: 0 0 14px;
-  padding: 9px 14px;
+  margin: 0 0 12px;
+  padding: 6px 11px;
   border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
   border-radius: 8px;
-  background: rgba(26, 23, 51, 0.7);
+  background: rgba(26, 23, 51, 0.5);
 }
 /* The dialog copy is width:100% inside a narrow column; in the strip it has to
    size to its own label so the note can sit beside it. */
-.community-consent.bar .consent-switch { margin: 0; width: auto; flex: 0 0 auto; }
-.cc-bar-note { color: var(--muted); font-size: 12px; line-height: 1.45; flex: 1 1 260px; min-width: 0; }
-.cc-bar-note b { color: var(--text); }
+.community-consent.bar .consent-switch {
+  margin: 0;
+  width: auto;
+  flex: 0 0 auto;
+  font-size: 12px;
+  padding: 4px 9px;
+  gap: 7px;
+}
+.community-consent.bar .switch-track { width: 30px; height: 17px; }
+.community-consent.bar .switch-track span { width: 13px; height: 13px; left: 2px; top: 2px; }
+.community-consent.bar .consent-switch.on .switch-track span { transform: translateX(13px); }
+.cc-bar-note { color: var(--faint); font-size: 11px; line-height: 1.45; flex: 1 1 260px; min-width: 0; }
+.cc-bar-note b { color: var(--muted); }
+.cc-bar-note .linky { font-size: inherit; }
 .community-consent.feature h3 { font-size: 18px; }
 .community-consent.feature > p { font-size: 13px; }
 .community-consent.feature .consent-switch { margin-top: 14px; font-size: 14px; }
@@ -1247,7 +1259,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 .site-footer a:hover { color: var(--accent); text-decoration: underline; }
 .footer-link { border: 0; background: transparent; padding: 0; color: var(--muted); font: inherit; text-decoration: underline; }
 .footer-link:hover { color: var(--accent); }
-.footer-build { color: var(--faint); font-family: var(--font-data); }
+
 
 .pwa-toast {
   position: fixed;

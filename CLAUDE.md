@@ -71,7 +71,7 @@ Categorical series colors (the Liquipedia character charts) come from `CHAR_COLO
 Vercel, deploying `main`. Three things to know before touching config:
 
 - **PWA**: `vite-plugin-pwa` precaches the entire shell — all lazy chunks, fonts, icons — so the app works offline. If you add a new asset *type*, check `globPatterns` in `vite.config.ts` covers it. Registration is **manual** (`injectRegister: null` in `vite.config.ts`): `src/main.tsx` registers the SW itself and polls `registration.update()` hourly so a tab left open picks up new deploys — don't re-enable the plugin's auto-registration, which would silently drop that poll.
-- **Build identity**: `__BUILD_ID__` (defined in `vite.config.ts` from the git commit, declared in `src/global.d.ts`) is stamped into the footer in `App.tsx` — the deployed commit is user-visible, which is how you verify a deploy actually rolled.
+- **Build identity**: `__BUILD_ID__` (defined in `vite.config.ts` from the git commit, declared in `src/global.d.ts`) is stamped onto the footer in `App.tsx` as `data-build`. It is no longer printed on the page, but it is still how you verify a deploy actually rolled — `document.querySelector(".site-footer").dataset.build`, or grep the served bundle for the commit. Keep it in the DOM: a deploy you cannot identify is a deploy you cannot debug.
 - **CSP** in `vercel.json` allows connections only to self + `*.supabase.co`. Any new network destination must be added there deliberately — a blocked request in production is the symptom.
 
 ## Commands

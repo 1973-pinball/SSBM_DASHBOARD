@@ -15,6 +15,8 @@ interface Props {
    * place to find the setting again and turn it back off.
    */
   variant?: "inline" | "feature" | "bar";
+  /** Jumps to the Community tab from the strip's copy. `bar` only. */
+  onOpenCommunity?: () => void;
 }
 
 /**
@@ -29,7 +31,7 @@ interface Props {
  * and is never pre-selected here (see decision 6 and the privacy promise). The
  * switch is the only thing that changes it, and it says what it does.
  */
-export function CommunityConsent({ isDemo, variant = "inline" }: Props) {
+export function CommunityConsent({ isDemo, variant = "inline", onOpenCommunity }: Props) {
   const [consent, setConsent] = useState<ConsentState>(isDemo || !cloudEnabled ? "unavailable" : "loading");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -99,8 +101,14 @@ export function CommunityConsent({ isDemo, variant = "inline" }: Props) {
                 so it says so before the toggle is touched, not in a modal. */}
             <span className="cc-bar-note">
               <b>Your connect code, tag, and replay files are never shared.</b> Your stats are pooled into
-              anonymous aggregates only — never published as rows, and only above contributor and game-count
-              thresholds. Off by default, reversible any time.
+              anonymous aggregates only on the{" "}
+              {onOpenCommunity ? (
+                <button type="button" className="linky" onClick={onOpenCommunity}>Community tab</button>
+              ) : (
+                "Community tab"
+              )}{" "}
+              — never published as rows, and only above contributor and game-count thresholds. Off by default,
+              reversible any time.
             </span>
           </>
         )}

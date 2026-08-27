@@ -28,7 +28,7 @@ const Execution = lazy(() => import("./components/Views").then((m) => ({ default
 const GameLog = lazy(() => import("./components/Views").then((m) => ({ default: m.GameLog })));
 const Community = lazy(() => import("./components/Community").then((m) => ({ default: m.Community })));
 const Insights = lazy(() => import("./components/Insights").then((m) => ({ default: m.Insights })));
-const Sessions = lazy(() => import("./components/Sessions").then((m) => ({ default: m.Sessions })));
+
 const Records = lazy(() => import("./components/Records").then((m) => ({ default: m.Records })));
 const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
 const AccountsEditor = lazy(() => import("./components/AccountsEditor").then((m) => ({ default: m.AccountsEditor })));
@@ -58,14 +58,17 @@ class ViewErrorBoundary extends Component<{ children: ReactNode }, { failed: boo
 }
 
 type Phase = "landing" | "parsing" | "identity" | "dashboard";
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "sessions" | "execution" | "insights" | "records" | "log" | "community" | "liquipedia";
+// "sessions" is gone: the fatigue and tilt tables render inside Insights now.
+// tabFromUrl validates against TABS, so an old ?view=sessions link falls back
+// to overview rather than rendering nothing.
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "records" | "log" | "community" | "liquipedia";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "matchups", label: "Matchups" },
   { id: "stages", label: "Stages" },
   { id: "opponents", label: "Opponents" },
-  { id: "sessions", label: "Sessions" },
+
   { id: "execution", label: "Execution" },
   { id: "insights", label: "Insights" },
   { id: "records", label: "Records" },
@@ -488,7 +491,7 @@ export default function App() {
       void import("./components/Views");
       void import("./components/Teams");
       void import("./components/Insights");
-      void import("./components/Sessions");
+
       void import("./components/Records");
       void import("./components/MetricsGuide");
       void import("./components/AccountsEditor");
@@ -651,10 +654,6 @@ export default function App() {
 
   return (
     <div className="shell">
-      {/* Above the topbar rather than inside a settings dialog: the opt-in only
-          works if the people who'd say yes ever see it. Renders nothing in demo
-          or a local-only build. */}
-      {phase === "dashboard" && <CommunityConsent isDemo={isDemo} variant="bar" />}
       {(publicView || phase !== "landing") && (
         <div className="topbar">
           <div className="brand">
@@ -718,6 +717,13 @@ export default function App() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Under the topbar, not above the brand: the opt-in has to be seen to
+          work, but it is not the masthead. Renders nothing in demo or a
+          local-only build. */}
+      {phase === "dashboard" && (
+        <CommunityConsent isDemo={isDemo} variant="bar" onOpenCommunity={() => selectTab("community")} />
       )}
 
       {pipelineError && (
@@ -841,7 +847,7 @@ export default function App() {
               }}
             />
           )}
-          {tab === "sessions" && <Sessions games={filtered} />}
+
           {tab === "execution" && <Execution games={filtered} />}
           {tab === "insights" && <Insights games={filtered} />}
           {tab === "records" && <Records games={filtered} teamGames={filteredTeams} />}
@@ -879,12 +885,15 @@ export default function App() {
         </Suspense>
       )}
 
-      <footer className="site-footer">
+      {/* The build id is no longer printed, but it stays in the DOM as a data
+          attribute so a deploy can still be verified — read it with
+          document.querySelector(".site-footer").dataset.build, or grep the
+          served bundle for the commit. */}
+      <footer className="site-footer" data-build={__BUILD_ID__}>
         <span>Brought to you by Studio Pinball · © 2026</span>
         <a href="https://ssbmstats.com/">ssbmstats.com</a>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
-        <span className="footer-build" title="Deployed source revision">build {__BUILD_ID__}</span>
       </footer>
 
       {updateReady && (
