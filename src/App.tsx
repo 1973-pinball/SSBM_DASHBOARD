@@ -103,14 +103,37 @@ const navUrl = (tab: Tab, overlay: Overlay = null) => {
   return `${url.pathname}${url.search}${url.hash}`;
 };
 
-/** Why the last refresh left files unparsed, in the user's terms. */
-function skippedDetail({ errors, deferred }: { errors: number; deferred: number }): string {
-  const parts: string[] = [];
+/**
+ * The three ways a scan can leave a file unparsed. Two are retryable and one
+ * is not, which is the whole point of keeping them apart.
+ */
+type SkipTally = Pick<ParseProgress, "failed" | "unreadable" | "deferred">;
+
+/**
+ * Why the last refresh left files unparsed, in the user's terms.
+ *
+ * The retryable and the permanent are described in separate sentences and never
+ * summed. They used to share one counter under one sentence promising a refresh
+ * would pick everything up, which is false for a replay that parsed and failed:
+ * that one is tombstoned and its id is in `seen`, so no refresh will revisit it.
+ */
+function skippedDetail({ failed, unreadable, deferred }: SkipTally): string {
+  const retryable: string[] = [];
   if (deferred > 0) {
-    parts.push(`${deferred.toLocaleString()} replay${deferred === 1 ? " was" : "s were"} still being written`);
+    retryable.push(`${deferred.toLocaleString()} replay${deferred === 1 ? " was" : "s were"} still being written`);
   }
-  if (errors > 0) parts.push(`${errors.toLocaleString()} couldn't be read`);
-  return `${parts.join(", ")}. Nothing was cached for them — refresh again once Slippi has finished writing and they'll be picked up.`;
+  if (unreadable > 0) retryable.push(`${unreadable.toLocaleString()} couldn't be opened`);
+
+  const sentences: string[] = [];
+  if (retryable.length > 0) {
+    sentences.push(`${retryable.join(", ")}. Nothing was cached for them — refresh once Slippi has finished writing and they'll be picked up.`);
+  }
+  if (failed > 0) {
+    sentences.push(
+      `${failed.toLocaleString()} couldn't be parsed and ${failed === 1 ? "was" : "were"} set aside — ${failed === 1 ? "it" : "they"} won't be retried, so refreshing won't change this.`,
+    );
+  }
+  return sentences.join(" ");
 }
 
 export default function App() {
@@ -135,7 +158,7 @@ export default function App() {
   // What the last refresh chose not to parse. Nothing is cached for these, so
   // they are genuinely pending rather than lost — but a silent skip is exactly
   // what makes "my new games didn't show up" impossible to diagnose.
-  const [syncSkipped, setSyncSkipped] = useState<{ errors: number; deferred: number } | null>(null);
+  const [syncSkipped, setSyncSkipped] = useState<SkipTally | null>(null);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
   // Null means idle; a number is the count streamed down so a first visit on a
   // new origin never looks frozen while a large cloud library is restoring.
@@ -467,7 +490,7 @@ export default function App() {
       if (scanBusy.current) return;
       scanBusy.current = true;
       lastFolderSyncAt.current = Date.now();
-      setSyncing({ pass: "full", total: 0, done: 0, skippedCached: 0, errors: 0, deferred: 0 });
+      setSyncing({ pass: "full", total: 0, done: 0, skippedCached: 0, failed: 0, unreadable: 0, deferred: 0 });
       setSyncSkipped(null);
       setPipelineError(null);
       const gen = generation.current;
@@ -491,7 +514,11 @@ export default function App() {
         markScanned();
         const done = tally.last;
         if (generation.current === gen) {
-          setSyncSkipped(done && done.errors + done.deferred > 0 ? { errors: done.errors, deferred: done.deferred } : null);
+          setSyncSkipped(
+            done && done.failed + done.unreadable + done.deferred > 0
+              ? { failed: done.failed, unreadable: done.unreadable, deferred: done.deferred }
+              : null,
+          );
           // Unlike startPipeline, a refresh builds its record state purely from
           // streamed callbacks, so a delivery lost to a mid-run abort or a dead
           // worker leaves games sitting in the cache that the dashboard never
@@ -837,7 +864,7 @@ export default function App() {
               />
               {!isDemo && !syncing && syncSkipped && (
                 <span className="tag" title={skippedDetail(syncSkipped)}>
-                  {(syncSkipped.errors + syncSkipped.deferred).toLocaleString()} pending
+                  {(syncSkipped.failed + syncSkipped.unreadable + syncSkipped.deferred).toLocaleString()} skipped
                 </span>
               )}
               <CloudSync

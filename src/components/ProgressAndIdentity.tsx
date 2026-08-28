@@ -11,7 +11,8 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
         {p.pass === "header" ? "Reading game headers…" : "Parsing replays…"} {p.done.toLocaleString()} /{" "}
         {p.total.toLocaleString()}
         {p.skippedCached > 0 ? ` (${p.skippedCached.toLocaleString()} cached)` : ""}
-        {p.errors > 0 ? ` · ${p.errors} unreadable` : ""}
+        {p.failed > 0 ? ` · ${p.failed} couldn't be parsed` : ""}
+        {p.unreadable > 0 ? ` · ${p.unreadable} couldn't be opened` : ""}
         {p.deferred > 0 ? ` · ${p.deferred} still being written` : ""}
       </div>
       <div className="progress-track">

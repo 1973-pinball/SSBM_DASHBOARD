@@ -163,7 +163,8 @@ export async function runParsePipeline(
     total: willPreview ? queue.length : files.length,
     done: willPreview ? 0 : files.length - queue.length,
     skippedCached: files.length - queue.length,
-    errors: 0,
+    failed: 0,
+    unreadable: 0,
     deferred: 0,
   };
   // This emit is what the bar paints before a single worker starts, so it has to
@@ -276,8 +277,10 @@ export async function runParsePipeline(
           inFlight--;
           slot.job = null;
           progress.done++;
+          // The non-deferred path here is a getFile() throw: the file could not
+          // be opened at all, so nothing was cached and the next scan retries it.
           if (deferred) progress.deferred++;
-          else progress.errors++;
+          else progress.unreadable++;
           emitUi(); // read failures must still move the bar
           feed(slot);
         };
@@ -321,9 +324,9 @@ export async function runParsePipeline(
             pendingUi.push(res.record);
           } else if (res.readFailed) {
             // The read is the worker's job now, so its failures arrive here
-            // rather than as a rejected promise on the feed path. Same treatment
-            // as before: counted, but never cached, so the file stays eligible.
-            progress.errors++;
+            // rather than as a rejected promise on the feed path. Counted, but
+            // never cached, so the file stays eligible for the next scan.
+            progress.unreadable++;
           } else if (res.incomplete) {
             // Read mid-write: the file is fine, we were early. No tombstone —
             // keeping its id out of `seen` is what lets the next scan pick up
@@ -331,7 +334,11 @@ export async function runParsePipeline(
             // game permanently (see IncompleteReplayError in parse.ts).
             progress.deferred++;
           } else {
-            progress.errors++;
+            // Parsed and failed. Unlike the two above this one IS cached, as a
+            // tombstone whose id goes into `seen`, so no later scan will return
+            // to it. Counted separately so the UI does not tell the user to
+            // refresh for a file that a refresh cannot help.
+            progress.failed++;
             // Store a tombstone so corrupt files are not re-parsed every visit.
             if (persist) {
               const tombstone: GameRecord = {
@@ -392,7 +399,8 @@ export async function runParsePipeline(
       drainUi();
       // Errors and deferrals here were provisional — the full pass re-decides
       // every one of them — so they start clean rather than being counted twice.
-      progress.errors = 0;
+      progress.failed = 0;
+      progress.unreadable = 0;
       progress.deferred = 0;
     }
 

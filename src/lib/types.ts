@@ -262,10 +262,22 @@ export interface ParseProgress {
   total: number;
   done: number;
   skippedCached: number;
-  errors: number;
   /**
-   * Files left unparsed on purpose this run: a replay Slippi was still writing,
-   * or one that changed under the scan. Nothing is cached for them — not even a
+   * Parsed and failed. A tombstone was cached and its id is in `seen`, so these
+   * files are skipped by every future scan — a refresh will never pick them up.
+   * Kept apart from `unreadable` and `deferred` for exactly that reason: the
+   * three used to share one counter, and the UI told the user to refresh over
+   * the sum of them, which is false for this one.
+   */
+  failed: number;
+  /**
+   * Could not be opened or read this time — locked, or gone since discovery.
+   * Nothing was cached, so the next scan comes back for them.
+   */
+  unreadable: number;
+  /**
+   * Left unparsed on purpose this run: a replay Slippi was still writing, or one
+   * that changed under the scan. Nothing is cached for them — not even a
    * tombstone — so the next scan picks them up once the game has finished.
    */
   deferred: number;
