@@ -70,7 +70,9 @@ export function PrivacyPromise({ onClose }: { onClose: () => void }) {
           </section>
           <section>
             <h3>Don't take our word for it</h3>
-            <p>Everything above is a claim about what the code does. The code is public, so you can check it rather than trust it: <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">github.com/1973-pinball/SSBM_DASHBOARD</a>. You can also run it yourself — a self-hosted build with no cloud credentials configured has no sync and no community contribution at all.</p>
+            <p>Everything above is a claim about what the code does, and the code is public: <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">github.com/1973-pinball/SSBM_DASHBOARD</a>, MIT licensed.</p>
+            <p>Be clear about what that settles. Reading the source tells you what the code does — not that this server is running exactly that code. These builds aren't reproducible, so nobody can diff what's served against what's published, and you should not accept "it's open source" as proof on its own.</p>
+            <p>The check that needs no trust at all is your own browser. Open the network panel while a folder is parsing and watch: no request carries replay bytes. That is the promise at the top of this page, and you can verify it yourself, right now, without believing anything we say. Running your own build is the other route — a self-hosted copy with no cloud credentials configured has no sync and no community contribution at all.</p>
           </section>
         </div>
       </div>
