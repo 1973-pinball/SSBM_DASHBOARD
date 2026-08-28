@@ -21,9 +21,16 @@ function mkMoveStats(rand: () => number, minutes: number, kills: number, totalDa
     [14, 1.2, 8], // fair
     [15, 2.2, 12], // bair
     [16, 1.1, 10], // uair
-    [17, isMe ? (iWin ? 3.4 : 2.4) : 2.0, 12], // dair — carries wins
+    // dair carries wins and side-b is the loss habit, but only by enough that
+    // the per-game jitter below still overlaps the two halves. Wider splits
+    // than this (they were 3.4/2.4 and 0.7/2.6) separate so cleanly that the
+    // median split lands on 100% and 13% win rates, which is a number real
+    // replays cannot produce and reads as a broken stat rather than a planted
+    // one. The signal has to survive the coach's gates without announcing that
+    // it was written rather than played.
+    [17, isMe ? (iWin ? 2.9 : 2.5) : 2.0, 12], // dair — carries wins
     [18, isMe ? 5.5 : 2.5, 3], // neutral-b (laser: lots of hits, tiny damage)
-    [19, isMe ? (iWin ? 0.7 : 2.6) : 1.0, 9], // side-b — the loss habit
+    [19, isMe ? (iWin ? 1.85 : 2.15) : 1.0, 9], // side-b — the loss habit
     [53, 0.5, 5], // fthrow
     [55, 0.7, 5], // uthrow
     [56, 0.9, 6], // dthrow
