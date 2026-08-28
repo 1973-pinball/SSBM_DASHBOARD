@@ -54,13 +54,13 @@
         "name": "SSBM Stats",
         "url": "https://ssbmstats.com/",
         "applicationCategory": "GameApplication",
-        "operatingSystem": "Any modern web browser",
         "browserRequirements": "Requires JavaScript and a File System Access or folder-upload capable browser",
         "description": "Private Slippi replay analytics for Super Smash Bros. Melee. Replays are parsed in your browser and never uploaded.",
         "inLanguage": "en-US",
         "isAccessibleForFree": true,
         "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-        "author": { "@type": "Organization", "name": "Studio Pinball" }
+        "codeRepository": "https://github.com/1973-pinball/SSBM_DASHBOARD",
+        "author": { "@type": "Organization", "@id": "https://ssbmstats.com/#studio-pinball", "name": "Studio Pinball" }
       }
     </script>
 
@@ -74,31 +74,51 @@
     <style>
       html, body { margin: 0; background: #121022; color: #ece9f8;
                    font-family: Inter, system-ui, sans-serif; font-size: 14px; }
-      #static-nav { display: flex; flex-wrap: wrap; justify-content: center;
-                    gap: 10px; padding: 18px; font-size: 12px; color: #8981ae; }
-      #static-nav a { color: #aaa3c9; }
+      #static-shell { max-width: 640px; margin: 0 auto; padding: 40px 20px;
+                      text-align: center; }
+      #static-shell h1 { font-family: "Chakra Petch", system-ui, sans-serif;
+                         font-size: clamp(24px, 5vw, 34px); line-height: 1.15;
+                         margin: 0 0 14px; }
+      #static-shell p { color: #aaa3c9; font-size: 15px; line-height: 1.6;
+                        margin: 0 0 22px; }
+      #static-shell nav { display: flex; flex-wrap: wrap; justify-content: center;
+                          gap: 14px; font-size: 13px; }
+      #static-shell nav a { color: #aaa3c9; }
     </style>
   </head>
   <body>
     <div id="root"></div>
 
     <!--
-      The only crawlable path from / to the static pages. Googlebot's first pass
-      parses this HTML without running JavaScript, and #root is empty until React
-      mounts, so without this a crawler landing on the homepage finds no links at
-      all: /about, /metrics and /melee-majors would be reachable only through
+      Everything a crawler gets at /. Googlebot's first pass parses this HTML
+      without running JavaScript, and #root is empty until React mounts, so
+      without this block the homepage has no heading, no prose, and no links:
+      /about, /metrics and /melee-majors would be reachable only through
       sitemap.xml, and the homepage would pass them nothing.
 
-      It mirrors App.tsx's <footer class="site-footer">, and main.tsx removes it
-      as it mounts, so the two are never on screen together.
+      The heading and paragraph are Landing.tsx's own copy, word for word, and
+      must stay that way. Rewriting them here to chase a keyword would leave the
+      static text saying something the rendered page does not — which is the
+      actual definition of cloaking, and a much worse problem than the ranking
+      it would be trying to buy.
+
+      main.tsx removes this as React mounts, so it is never on screen beside the
+      real landing page.
     -->
-    <footer id="static-nav">
-      <span>SSBM Stats — Slippi replay analytics, parsed in your browser.</span>
-      <a href="/about">About</a>
-      <a href="/metrics">Metrics reference</a>
-      <a href="/melee-majors">Melee majors</a>
-      <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">Source</a>
-    </footer>
+    <div id="static-shell">
+      <h1>Slippi replay stats, parsed in your browser</h1>
+      <p>
+        Point this page at your Slippi replay folder and get a full statistical readout of your
+        play: win rates by opponent, matchup, and stage, kill stats, and execution trends.
+        Everything is parsed in your browser.
+      </p>
+      <nav>
+        <a href="/about">How it works</a>
+        <a href="/metrics">Melee metrics reference</a>
+        <a href="/melee-majors">Every Melee major since 2003</a>
+        <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">Source</a>
+      </nav>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

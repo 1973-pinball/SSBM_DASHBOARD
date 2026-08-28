@@ -3,13 +3,25 @@ import { createRoot } from 'react-dom/client'
 import { registerSW } from 'virtual:pwa-register'
 import { Analytics } from '@vercel/analytics/react'
 // Self-hosted fonts (was Google Fonts): same-origin, hashed, immutable-cached.
-import '@fontsource/chakra-petch/500.css'
-import '@fontsource/chakra-petch/600.css'
-import '@fontsource/ibm-plex-mono/400.css'
-import '@fontsource/ibm-plex-mono/600.css'
-import '@fontsource/inter/400.css'
-import '@fontsource/inter/500.css'
-import '@fontsource/inter/600.css'
+//
+// Subset imports, not the bare weight files. `@fontsource/inter/400.css` ships
+// every subset the family publishes — cyrillic, greek, vietnamese, thai — and
+// all of it lands in the render-blocking stylesheet on a site that is
+// `lang="en"`. latin-ext stays because player tags carry accented characters.
+import '@fontsource/chakra-petch/latin-500.css'
+import '@fontsource/chakra-petch/latin-ext-500.css'
+import '@fontsource/chakra-petch/latin-600.css'
+import '@fontsource/chakra-petch/latin-ext-600.css'
+import '@fontsource/ibm-plex-mono/latin-400.css'
+import '@fontsource/ibm-plex-mono/latin-ext-400.css'
+import '@fontsource/ibm-plex-mono/latin-600.css'
+import '@fontsource/ibm-plex-mono/latin-ext-600.css'
+import '@fontsource/inter/latin-400.css'
+import '@fontsource/inter/latin-ext-400.css'
+import '@fontsource/inter/latin-500.css'
+import '@fontsource/inter/latin-ext-500.css'
+import '@fontsource/inter/latin-600.css'
+import '@fontsource/inter/latin-ext-600.css'
 import './index.css'
 import App from './App.tsx'
 
@@ -57,10 +69,11 @@ registerSW({
   },
 })
 
-// index.html ships a static footer so a crawler that never runs this bundle
-// still finds the /about, /metrics and /melee-majors links. App renders its own
-// footer, so the placeholder goes as React takes over.
-document.getElementById('static-nav')?.remove()
+// index.html ships a static heading, lede and nav so a crawler that never runs
+// this bundle still gets prose and the /about, /metrics and /melee-majors
+// links. Landing renders the real thing, so the placeholder goes as React
+// takes over.
+document.getElementById('static-shell')?.remove()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
