@@ -119,7 +119,12 @@ export function Landing({
             <li>Your email is used only for sign-in — never sold, published, shared, or used for marketing or outreach.</li>
           </ul>
         ) : (
-          <p className="privacy-points">No uploads, no accounts, no tracking.</p>
+          // Deliberately not "no tracking": this branch renders whenever cloud
+          // sync is unconfigured, but the analytics mount in main.tsx is
+          // unconditional, so a Vercel deploy without Supabase would have been
+          // asserting something untrue. Gating copy on the wrong feature is how
+          // that happened.
+          <p className="privacy-points">No uploads and no accounts. Aggregate, cookieless visit counting is the only thing recorded, and it never touches replay data.</p>
         )}
       </div>
       {/* Below the privacy panel on purpose: worth saying plainly, but it is

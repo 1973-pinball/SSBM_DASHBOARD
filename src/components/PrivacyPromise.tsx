@@ -57,6 +57,10 @@ export function PrivacyPromise({ onClose }: { onClose: () => void }) {
             <p>Public Community views contain only thresholded aggregates. They never publish connect codes, display names, replay paths, exact activity timelines, geographic inference, or downloadable row-level data.</p>
           </section>
           <section>
+            <h3>Visit counting</h3>
+            <p>The hosted site counts page views with Vercel Web Analytics: cookieless, no identifier, and limited to page views, referrers and country. It never touches replay data or anything derived from it, and it is the only exception to the no-telemetry rule above. A self-hosted build carries the mount inertly and transmits nothing.</p>
+          </section>
+          <section>
             <h3>Your email</h3>
             <p>Your email is used only by the authentication system to operate your sign-in. We never sell it, publish it, use it for marketing, or share it for outreach.</p>
           </section>

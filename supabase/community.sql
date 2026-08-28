@@ -85,7 +85,13 @@ set search_path = public, pg_temp
 as $$
 with
 params as (
-  select 25::int as min_contributors, 100::int as min_games
+  -- consent_version must match COMMUNITY_CONSENT_VERSION in src/lib/community.ts.
+  -- Consent is gathered under specific published terms, so a row agreed under
+  -- superseded terms must stop contributing until the user agrees again. Bump
+  -- both constants together when the terms change; contributions then fail
+  -- closed until each user re-consents, which is the safe direction.
+  select 25::int as min_contributors, 100::int as min_games,
+         '2026-08-24'::text as consent_version
 ),
 eligible as (
   select
@@ -102,7 +108,11 @@ eligible as (
     own.ord - 1 as own_index,
     opp.side as opp_side
   from public.game_records g
-  join public.community_consent consent on consent.user_id = g.user_id and consent.enabled
+  cross join params
+  join public.community_consent consent
+    on consent.user_id = g.user_id
+   and consent.enabled
+   and consent.consent_version = params.consent_version
   cross join lateral (
     select p.side, p.ord
     from jsonb_array_elements(g.data->'players') with ordinality p(side, ord)
@@ -158,7 +168,18 @@ base as (
   from deduped
 ),
 active as (
-  select count(distinct user_id)::int as contributors, count(*)::bigint as player_games
+  -- player_games is bucketed for the same reason every cell inside the payload
+  -- is. These two columns are published even when the payload is empty (below
+  -- min_contributors), so with a handful of contributors they were the ONLY
+  -- thing on the wire -- and an exact pair is a differencing oracle: archive
+  -- the snapshot every refresh, watch contributors go n -> n+1, and the
+  -- player_games delta is that person's exact lifetime game count. Bucketing
+  -- the count puts one contributor beneath the resolution of the number, which
+  -- is the principle stated at the top of this file. contributor_count stays
+  -- exact on purpose: alone it identifies nobody, and the Community tab renders
+  -- it as an "n of 25 contributors" progress bar.
+  select count(distinct user_id)::int as contributors,
+         public.pub_bucket(count(*), 500)::bigint as player_games
   from base
 ),
 matchup_rollup as (

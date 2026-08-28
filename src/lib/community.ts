@@ -149,10 +149,16 @@ export async function getCommunityConsent(): Promise<boolean | null> {
   if (!sessionData.session) return null;
   const { data, error } = await supabase
     .from("community_consent")
-    .select("enabled")
+    .select("enabled, consent_version")
     .maybeSingle();
   if (error) throw error;
-  return Boolean(data?.enabled);
+  // Consent agreed under superseded terms reads as off, because that is what it
+  // now is: refresh_community_snapshot gates on this same version, so those rows
+  // stopped contributing the moment the constant moved. Reporting it as still on
+  // would show a switch that does not match what the aggregate actually does.
+  // Flipping the toggle back on re-consents under the current terms.
+  if (data?.consent_version !== COMMUNITY_CONSENT_VERSION) return false;
+  return Boolean(data.enabled);
 }
 
 export async function setCommunityConsent(enabled: boolean): Promise<void> {
