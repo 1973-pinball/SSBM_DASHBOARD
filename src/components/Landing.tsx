@@ -39,8 +39,9 @@ export function Landing({
         <img src="/favicon.svg" alt="" aria-hidden="true" />
         <span>SSBM Stats</span>
       </div>
+      <p className="landing-eyebrow">Ready? Go!</p>
       <h1>
-        Ready? <span className="accent">Go!</span>
+        Slippi replay stats, <span className="accent">parsed in your browser</span>
       </h1>
       <p className="sub">
         Point this page at your Slippi replay folder and get a full statistical readout of your play: win rates by

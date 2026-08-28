@@ -1038,6 +1038,9 @@ export default function App() {
       <footer className="site-footer" data-build={__BUILD_ID__}>
         <span>Brought to you by Studio Pinball · © 2026</span>
         <a href="https://ssbmstats.com/">ssbmstats.com</a>
+        <a href="/about">About</a>
+        <a href="/metrics">Metrics</a>
+        <a href="/melee-majors">Melee majors</a>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
       </footer>

@@ -40,6 +40,29 @@
     <meta name="twitter:description" content="Your Slippi replays parsed in the browser, plus every Melee major since 2003 and the top 100 by character." />
     <meta name="twitter:image" content="https://ssbmstats.com/share/melee-majors-race.png" />
     <meta name="twitter:image:alt" content="An all-time chart of Super Smash Bros. Melee major titles." />
+
+    <!--
+      Structured data. The app is a free, install-free web tool; this is what
+      says so to a crawler, which otherwise has only the empty #root to go on.
+      A ld+json block is data, never executed, so script-src 'self' does not
+      apply — but re-check with Google's Rich Results Test after any CSP change.
+    -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "WebApplication",
+        "name": "SSBM Stats",
+        "url": "https://ssbmstats.com/",
+        "applicationCategory": "GameApplication",
+        "operatingSystem": "Any modern web browser",
+        "browserRequirements": "Requires JavaScript and a File System Access or folder-upload capable browser",
+        "description": "Private Slippi replay analytics for Super Smash Bros. Melee. Replays are parsed in your browser and never uploaded.",
+        "inLanguage": "en-US",
+        "isAccessibleForFree": true,
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+        "author": { "@type": "Organization", "name": "Studio Pinball" }
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

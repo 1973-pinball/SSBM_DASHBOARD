@@ -76,6 +76,13 @@ export default defineConfig({
         // running the app, so they stay out of the offline bundle.
         globIgnores: ['**/share/**'],
         navigateFallback: '/index.html',
+        // The static pages rendered by scripts/render-seo-pages.mjs are real
+        // documents at their own URLs. Without this the service worker answers
+        // those navigations from the precached app shell, so anyone who has
+        // already loaded the site would get the SPA instead of the page. The
+        // .html form is covered too: cleanUrls 308s it to the extensionless
+        // URL, but the worker answers from cache before any redirect happens.
+        navigateFallbackDenylist: [/^\/(about|metrics|melee-majors)(\.html)?$/],
       },
     }),
   ],
