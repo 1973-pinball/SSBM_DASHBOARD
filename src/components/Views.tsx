@@ -2,7 +2,7 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } 
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, lCancelSeries, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, GameSet, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -592,14 +592,14 @@ const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color:
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
 ];
 
-/** Rolling 50-game average of a single execution metric, chosen via chips. */
+/** Rolling ROLLING_WINDOW-game average of a single execution metric, chosen via chips. */
 function RollingExecChart({ games }: { games: ResolvedGame[] }) {
   const [metric, setMetric] = useState<ExecMetricKey>("lCancel");
   const def = ROLLING_METRICS.find((m) => m.key === metric)!;
   const data = useMemo(() => rollingExecutionSeries(games, metric), [games, metric]);
   return (
     <div className="panel">
-      <h2>Rolling 50-game average</h2>
+      <h2>Rolling {ROLLING_WINDOW}-game average</h2>
       <div className="chip-row">
         {ROLLING_METRICS.map((m) => {
           const on = m.key === metric;
@@ -642,7 +642,7 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
         </LineChart>
       </ResponsiveContainer>
       <div className="hint">
-        Each point averages the previous 50 games{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
+        Each point averages the previous {ROLLING_WINDOW} games{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
       </div>
     </div>
   );
@@ -809,7 +809,6 @@ function PerGameMetricChart({
 export function Execution({ games }: { games: ResolvedGame[] }) {
   const points = useMemo(() => executionTrend(games), [games]);
   const summary = useMemo(() => executionSummary(games), [games]);
-  const lcVolume = useMemo(() => lCancelSeries(games), [games]);
   const actions = useMemo(() => actionAverages(games), [games]);
   const neutral = useMemo(() => neutralSummary(games), [games]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
@@ -825,7 +824,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
       <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
         {EXEC_CHARTS.map((c) => (
           <div className="panel" key={c.key}>
-            <h2>{c.label}</h2>
+            <h2>{c.label} — {ROLLING_WINDOW}-game rolling average</h2>
             <ResponsiveContainer width="100%" height={180}>
               <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
                 <CartesianGrid {...gridStyle} />
@@ -864,44 +863,6 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
       </div>
 
       <RollingExecChart games={games} />
-
-      <div className="panel">
-        <h2>L-cancel volume — per game, {ROLLING_WINDOW}-game rolling average</h2>
-        <ResponsiveContainer width="100%" height={220}>
-          <LineChart data={lcVolume} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-            <CartesianGrid {...gridStyle} />
-            {/* The axis must key on the unique game index — keying on `date` makes
-                recharts treat same-day games as one category, so every hover
-                resolves to the first game of that day. Ticks still render dates. */}
-            <XAxis
-              dataKey="index"
-              tick={axisStyle}
-              tickLine={false}
-              axisLine={{ stroke: "var(--line)" }}
-              minTickGap={48}
-              tickFormatter={(v: number) => dayTick(lcVolume[v - lcVolume[0]!.index]?.date)} // ticks only exist when data is non-empty
-            />
-            {/* Decimals allowed: these are rolling averages of counts, not counts. */}
-            <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
-            <Tooltip
-              {...tooltipStyle}
-              labelFormatter={(v, payload) => {
-                const d = payload?.[0]?.payload?.date;
-                return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
-              }}
-              formatter={(v, name) => [num(Number(v), 1), name]}
-            />
-            <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
-            <Line type="monotone" dataKey="attempts" name="Attempts" stroke="var(--accent)" strokeWidth={1.5} dot={false} />
-            <Line type="monotone" dataKey="success" name="Successful" stroke="#3fcf8e" strokeWidth={1.5} dot={false} />
-          </LineChart>
-        </ResponsiveContainer>
-        <div className="hint">
-          Each point averages the previous {ROLLING_WINDOW} games
-          {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}. The gap between the
-          lines is your missed L-cancels; the attempts line alone tracks how aerial-heavy your play is.
-        </div>
-      </div>
 
       <PerGameMetricChart
         title={`Neutral exchanges — per game, ${ROLLING_WINDOW}-game rolling average`}

@@ -4,7 +4,7 @@ import {
 } from "recharts";
 import type { Account, Filters, GameType, ResolvedGame, ResolvedTeamGame } from "../lib/types";
 import { codeLabel } from "../lib/types";
-import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, byAccount, applyFilters } from "../lib/stats";
+import { overview, rollingWinRate, byMyCharacter, gamesPerWeek, byMode, byAccount, applyFilters, ROLLING_WINDOW } from "../lib/stats";
 import { pct, num, int, duration, winRateColor, shortDate, hoursLabel } from "../lib/format";
 import { charName } from "../lib/melee";
 import { Kpi } from "./Kpi";
@@ -46,7 +46,7 @@ export function Overview({
   const delta =
     stats.prevWinRate !== null && stats.winRate !== null ? (stats.winRate - stats.prevWinRate) * 100 : null;
   const rollingLatest = rolling.at(-1);
-  const rollingPrior = rolling.length > 50 ? rolling[rolling.length - 51] : rolling[0];
+  const rollingPrior = rolling.length > ROLLING_WINDOW ? rolling[rolling.length - (ROLLING_WINDOW + 1)] : rolling[0];
   const rollingChange = rollingLatest && rollingPrior ? rollingLatest.winRate - rollingPrior.winRate : null;
   const latestWeek = weeks.at(-1);
   const priorWeek = weeks.length > 1 ? weeks[weeks.length - 2] : null;
@@ -187,7 +187,7 @@ export function Overview({
 
       <div className="grid-2">
         <div className="panel">
-          <h2>Win rate — rolling 50 games</h2>
+          <h2>Win rate — rolling {ROLLING_WINDOW} games</h2>
           {rolling.length < 2 ? (
             <div className="empty-note">Not enough decided games yet.</div>
           ) : (
@@ -219,7 +219,7 @@ export function Overview({
                 <span>Latest <b>{rollingLatest?.winRate.toFixed(1)}%</b></span>
                 {rollingChange !== null && (
                   <span className={rollingChange >= 0 ? "positive" : "negative"}>
-                    {rollingChange >= 0 ? "+" : ""}{rollingChange.toFixed(1)} pts vs 50 games earlier
+                    {rollingChange >= 0 ? "+" : ""}{rollingChange.toFixed(1)} pts vs {ROLLING_WINDOW} games earlier
                   </span>
                 )}
               </div>

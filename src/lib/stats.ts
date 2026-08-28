@@ -28,6 +28,14 @@ function localWeekStart(date: Date): string {
   return localDay(d);
 }
 
+/**
+ * Smoothing window shared by every rolling chart in the app — the Overview
+ * win-rate curve and every trend on the Execution tab, player and opponent
+ * lines alike — and by the titles that name it. One knob: widen it here and
+ * they all widen together, which is the only reason they stay consistent.
+ */
+export const ROLLING_WINDOW = 100;
+
 // ---------- Identity ----------
 
 /**
@@ -324,7 +332,7 @@ export interface RollingPoint {
   winRate: number;
 }
 
-export function rollingWinRate(games: ResolvedGame[], window = 50): RollingPoint[] {
+export function rollingWinRate(games: ResolvedGame[], window = ROLLING_WINDOW): RollingPoint[] {
   const decided = games.filter((g) => g.isWin !== null);
   const out: RollingPoint[] = [];
   let wins = 0;
@@ -1312,10 +1320,14 @@ export interface ExecutionPoint {
   oppIpm: number | null;
 }
 
-export function executionTrend(games: ResolvedGame[], window = 30): ExecutionPoint[] {
+export function executionTrend(games: ResolvedGame[], window = ROLLING_WINDOW): ExecutionPoint[] {
+  // Point spacing is deliberately decoupled from the window: widening the
+  // smoothing must not thin the chart out. One point per tenth of a window
+  // keeps the density these charts have always had.
+  const stride = Math.max(1, Math.floor(window / 10));
   const out: ExecutionPoint[] = [];
   for (let i = 0; i < games.length; i++) {
-    if ((i + 1) % Math.max(1, Math.floor(window / 3)) !== 0 && i !== games.length - 1) continue;
+    if ((i + 1) % stride !== 0 && i !== games.length - 1) continue;
     const slice = games.slice(Math.max(0, i - window + 1), i + 1);
     let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0;
     let oLcS = 0, oLcF = 0, oOpkSum = 0, oOpkN = 0, oDpoSum = 0, oDpoN = 0, oIpmSum = 0, oIpmN = 0;
@@ -1387,9 +1399,6 @@ export function executionSummary(games: ResolvedGame[], window = 50): ExecutionS
   };
 }
 
-/** Smoothing window shared by every rolling per-game chart (and their titles). */
-export const ROLLING_WINDOW = 50;
-
 export interface RollingExecutionPoint {
   index: number;
   date: string;
@@ -1429,37 +1438,6 @@ export function rollingExecutionSeries(
     });
   }
   return out;
-}
-
-export interface LCancelPoint {
-  index: number;
-  date: string;
-  attempts: number;
-  success: number;
-}
-
-/**
- * L-cancel volume smoothed the same way as every other per-game count chart —
- * see perGameSeries for the window/cap semantics.
- */
-export function lCancelSeries(games: ResolvedGame[], window = ROLLING_WINDOW, limit = 500): LCancelPoint[] {
-  // This is a volume chart, so a header preview does not cancel out the way it
-  // does in a rate: it enters the window as a genuine-looking zero and drags
-  // the line down.
-  return perGameSeries(
-    games.filter((g) => hasFullStats(g.rec)),
-    [
-      { key: "attempts", value: (g) => g.me.lCancelSuccess + g.me.lCancelFail },
-      { key: "success", value: (g) => g.me.lCancelSuccess },
-    ],
-    window,
-    limit,
-  ).map((p) => ({
-    index: p.index,
-    date: p.date,
-    attempts: p.attempts as number,
-    success: p.success as number,
-  }));
 }
 
 export interface GameSeriesPoint {
