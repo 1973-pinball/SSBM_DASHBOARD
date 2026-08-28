@@ -21,6 +21,11 @@ interface Window {
   }): Promise<FileSystemDirectoryHandle>;
 }
 
+interface Navigator {
+  /** Chromium-only, coarse (rounded down, capped at 8). Absent elsewhere. */
+  readonly deviceMemory?: number;
+}
+
 interface BeforeInstallPromptEvent extends Event {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;

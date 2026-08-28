@@ -89,7 +89,32 @@ export interface GameRecord {
    */
   dmgMatrix?: number[][] | null;
   killMatrix?: number[][] | null;
+  /**
+   * Set only on a record from the fast header pass — everything the replay's
+   * settings, metadata and game-end blocks can answer, and nothing that needs
+   * the frames. Those records are transient: `pool.ts` streams them to the
+   * dashboard as a preview while the real parse runs behind them, never caches
+   * them, and `isSyncable` keeps them off the wire. So `undefined` is the only
+   * value that ever reaches storage, and every cached or cloud row written
+   * before this existed reads as full stats without a migration.
+   */
+  statsLevel?: "header";
   parseError?: string;
+}
+
+/**
+ * True when this record's execution metrics are measurements rather than the
+ * zero placeholders a header-pass record carries.
+ *
+ * Any selector that averages kills, damage, L-cancels, action counts or the
+ * neutral ratios must filter on this. Skipping it doesn't fail loudly — it
+ * quietly drags the average toward zero for as long as the preview is on
+ * screen, which is the same failure decision 3 avoids for schema changes.
+ * The nullable metrics (openings/kill, damage/opening, IPM) are already
+ * null on a preview record and their existing null guards handle them.
+ */
+export function hasFullStats(rec: GameRecord): boolean {
+  return rec.statsLevel === undefined;
 }
 
 /**
@@ -225,7 +250,15 @@ export interface ResolvedTeamGame {
   selfMatch: boolean;
 }
 
+/**
+ * Which pass of the pipeline is running. "header" is the fast preview over a
+ * large library; "full" is the authoritative parse whose records get cached.
+ */
+export type ParsePassMode = "header" | "full";
+
 export interface ParseProgress {
+  /** Counts restart between passes, so read them against `pass`. */
+  pass: ParsePassMode;
   total: number;
   done: number;
   skippedCached: number;

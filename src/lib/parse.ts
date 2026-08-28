@@ -1,5 +1,5 @@
-import { SlippiGame, GameEndMethod, ActionsComputer, InputComputer, calcDamageTaken, didLoseStock } from "@slippi/slippi-js";
-import type { GameStartType } from "@slippi/slippi-js";
+import { SlippiGame, Frames, GameEndMethod, ActionsComputer, InputComputer, calcDamageTaken, didLoseStock } from "@slippi/slippi-js";
+import type { GameEndType, GameStartType } from "@slippi/slippi-js";
 import type { GameRecord, GameType, MoveAgg, PlayerSide } from "./types";
 
 const MIN_GAME_SECONDS = 30;
@@ -27,6 +27,39 @@ function detectGameType(matchId: string | null | undefined): GameType {
   return "unknown";
 }
 
+/**
+ * slippi-js registers six stat computers and runs every one of them over every
+ * frame, but this file reads only three of the results: `overall` (built from
+ * inputs + conversions), `actionCounts`, and `conversions`. Combos, stocks and
+ * target breaks are computed and thrown away — measured at 12–15% of a full
+ * parse across a real library, which on a 20k-game import is minutes of CPU.
+ *
+ * `Stats.allComputers` is a plain array that `register()` pushes onto, so the
+ * cheapest fix is to narrow it. Those are TS-private fields, hence the guard: if
+ * a slippi-js upgrade changes the shape, every computer stays registered and the
+ * parse is merely as slow as it used to be. What makes this safe rather than
+ * merely fast is that ConversionComputer derives stock losses from the frames
+ * itself rather than reading StockComputer, and `generateOverallStats` is handed
+ * only settings/inputs/conversions/playableFrameCount — verified over 49 real
+ * replays, where overall, actionCounts, conversions, lastFrame and
+ * playableFrameCount all came back byte-identical to a stock parse.
+ *
+ * If a future stat needs combos or stocks, add the computer back here.
+ */
+function dropUnreadComputers(game: SlippiGame): void {
+  const g = game as unknown as {
+    statsComputer?: { allComputers?: unknown[] };
+    actionsComputer?: unknown;
+    conversionComputer?: unknown;
+    inputComputer?: unknown;
+  };
+  const stats = g.statsComputer;
+  if (!stats || !Array.isArray(stats.allComputers)) return;
+  const { actionsComputer, conversionComputer, inputComputer } = g;
+  if (!actionsComputer || !conversionComputer || !inputComputer) return;
+  stats.allComputers = [actionsComputer, conversionComputer, inputComputer];
+}
+
 interface TeamsStats {
   dmgMatrix: number[][]; // [attacker][victim] in settings.players order; diagonal = self/unattributed
   killMatrix: number[][]; // same shape; diagonal = self-destructs
@@ -44,7 +77,7 @@ interface TeamsStats {
  * running them pairwise across teams (they only read the opponent's position,
  * for tech direction, which we don't surface).
  */
-function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStats | null {
+function computeTeamsStats(game: SlippiGame, settings: GameStartType, lastFrame: number): TeamsStats | null {
   const players = settings.players;
   if (players.length !== 4) return null;
   const byTeam = new Map<number, number>();
@@ -74,17 +107,31 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStat
   const dmgMatrix = players.map(() => players.map(() => 0));
   const killMatrix = players.map(() => players.map(() => 0));
 
+  // Frames are keyed by frame number from Frames.FIRST upward, so walk the range
+  // numerically rather than materializing and sorting the key set: the old
+  // Object.keys().map(Number).sort() allocated one string plus one number per
+  // frame and cost ~1 ms per six-minute replay, twice over on a teams game.
   const frames = game.getFrames();
-  const frameNums = Object.keys(frames)
-    .map(Number)
-    .sort((a, b) => a - b);
   let prev: (typeof frames)[number] | null = null;
-  for (const fn of frameNums) {
+  for (let fn = Frames.FIRST; fn <= lastFrame; fn++) {
     const frame = frames[fn];
     if (!frame?.players || players.some((p) => !frame.players[p.playerIndex]?.post)) continue;
+    // InputComputer reaches back to frame-1 for each of its two players' `pre`
+    // blocks and does not guard that lookup, so one frame whose predecessor is
+    // missing a player throws straight out of the parse and tombstones the whole
+    // game. That is not hypothetical: it hit 13 of 85 real 2v2 replays here, and
+    // a tombstoned doubles game is simply gone from every teams view. Action
+    // counts and the damage/kill matrices need no predecessor, so only the input
+    // sample is skipped — the cost is a slightly low IPM on a malformed frame
+    // instead of losing the game entirely.
+    const prevFrame = frames[fn - 1];
+    const inputsReady =
+      players.every((p) => frame.players[p.playerIndex]?.pre) &&
+      prevFrame?.players !== undefined &&
+      players.every((p) => prevFrame.players[p.playerIndex]?.pre);
     for (const { actions, inputs } of computers) {
       actions.processFrame(frame);
-      inputs.processFrame(frame, frames);
+      if (inputsReady) inputs.processFrame(frame, frames);
     }
     if (prev?.players) {
       for (const p of players) {
@@ -112,6 +159,119 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStat
 }
 
 /**
+ * Decision 2's win/loss ladder, resolved to a player (singles) and a team
+ * (2v2): valid gameEnd placements, then the stock-out survivor, then the LRAS
+ * initiator taking the loss, with anything under MIN_GAME_SECONDS forced
+ * indeterminate regardless of how it ended.
+ *
+ * Both passes share this one implementation so they cannot drift. The header
+ * pass has no frame data, so it hands over players whose `stocksRemaining` is
+ * null — which the stock-out branches already guard against. That makes the
+ * header verdict a strict subset of the full one: it can leave a result
+ * undetermined, never report a different winner than the full parse will.
+ * Preserve that property. It is what lets the preview's win rates stand on
+ * screen without being corrected out from under the user when the full pass
+ * lands, and a stock-out branch that stopped guarding on null would silently
+ * break it by crediting a win to whoever sorted first.
+ */
+function decideWinner(
+  settings: GameStartType,
+  gameEnd: GameEndType | undefined,
+  players: PlayerSide[],
+  isTeams: boolean,
+  durationFrames: number,
+): { winnerIndex: number | null; winnerTeamId: number | null } {
+  // Placements are only meaningful when the game actually concluded. On a
+  // NO_CONTEST (LRAS quit-out) or UNRESOLVED end the payload can carry stale
+  // placement data — typically position 0 parked on player index 0 — which
+  // would crown the quitter before the LRAS rule below ever runs.
+  const placementsValid =
+    gameEnd?.gameEndMethod === GameEndMethod.TIME ||
+    gameEnd?.gameEndMethod === GameEndMethod.GAME ||
+    gameEnd?.gameEndMethod === GameEndMethod.RESOLVED;
+
+  // --- Win/loss determination (singles only) ---
+  let winnerIndex: number | null = null;
+  if (!isTeams && players.length === 2) {
+    const placements = placementsValid
+      ? gameEnd?.placements?.filter((pl) => pl.position !== null && pl.position !== undefined && pl.position >= 0)
+      : undefined;
+    if (placements && placements.length >= 2) {
+      const first = placements.find((pl) => pl.position === 0);
+      if (first?.playerIndex !== null && first?.playerIndex !== undefined) {
+        winnerIndex = settings.players.findIndex((p) => p.playerIndex === first.playerIndex);
+      }
+    }
+    if (winnerIndex === null || winnerIndex < 0) {
+      if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
+        // Stock-out: survivor wins.
+        const [a, b] = players;
+        if (a && b && a.stocksRemaining !== null && b.stocksRemaining !== null && a.stocksRemaining !== b.stocksRemaining) {
+          winnerIndex = a.stocksRemaining > b.stocksRemaining ? 0 : 1;
+        }
+      } else if (gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST && gameEnd.lrasInitiatorIndex !== null && gameEnd.lrasInitiatorIndex !== undefined && gameEnd.lrasInitiatorIndex >= 0) {
+        // Quit-out: the LRAS initiator takes the loss.
+        const quitter = settings.players.findIndex((p) => p.playerIndex === gameEnd.lrasInitiatorIndex);
+        if (quitter >= 0) winnerIndex = quitter === 0 ? 1 : 0;
+      }
+    }
+    if (winnerIndex !== null && winnerIndex < 0) winnerIndex = null;
+    // Very short games are indeterminate regardless of end method.
+    if (durationFrames < MIN_GAME_SECONDS * 60) winnerIndex = null;
+  }
+
+  // --- Win/loss determination (teams) ---
+  // Same ladder as singles, resolved to a team rather than a player.
+  let winnerTeamId: number | null = null;
+  const teamIds = new Set(players.map((p) => p.teamId).filter((t): t is number => t !== null));
+  if (isTeams && players.length === 4 && teamIds.size === 2) {
+    const teamOfPlayerIndex = (playerIndex: number): number | null => {
+      const idx = settings.players.findIndex((p) => p.playerIndex === playerIndex);
+      return idx >= 0 ? players[idx]!.teamId : null;
+    };
+
+    const first = placementsValid ? gameEnd?.placements?.find((pl) => pl.position === 0) : undefined;
+    if (first && first.playerIndex !== null && first.playerIndex !== undefined) {
+      winnerTeamId = teamOfPlayerIndex(first.playerIndex);
+    }
+    if (winnerTeamId === null) {
+      if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
+        // Stock-out: the team with stocks left wins.
+        const stocks = new Map<number, number>();
+        let complete = true;
+        for (const p of players) {
+          if (p.teamId === null || p.stocksRemaining === null) {
+            complete = false;
+            break;
+          }
+          stocks.set(p.teamId, (stocks.get(p.teamId) ?? 0) + p.stocksRemaining);
+        }
+        if (complete && stocks.size === 2) {
+          const entries = Array.from(stocks.entries());
+          const [tA, sA] = entries[0]!;
+          const [tB, sB] = entries[1]!;
+          if (sA !== sB) winnerTeamId = sA > sB ? tA : tB;
+        }
+      } else if (
+        gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST &&
+        gameEnd.lrasInitiatorIndex !== null &&
+        gameEnd.lrasInitiatorIndex !== undefined &&
+        gameEnd.lrasInitiatorIndex >= 0
+      ) {
+        // Quit-out: the quitter's team takes the loss.
+        const quitterTeam = teamOfPlayerIndex(gameEnd.lrasInitiatorIndex);
+        if (quitterTeam !== null) {
+          winnerTeamId = Array.from(teamIds).find((t) => t !== quitterTeam) ?? null;
+        }
+      }
+    }
+    if (durationFrames < MIN_GAME_SECONDS * 60) winnerTeamId = null;
+  }
+
+  return { winnerIndex, winnerTeamId };
+}
+
+/**
  * Parse a single replay into a GameRecord. Stats-only: frame data is used
  * transiently by slippi-js to compute stats, then everything is discarded
  * except the summary row — ~5 KB for a singles game (p50 4.7, p90 5.6 over a
@@ -120,6 +280,7 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType): TeamsStat
  */
 export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRecord {
   const game = new SlippiGame(buf);
+  dropUnreadComputers(game);
   const settings = game.getSettings();
   if (!settings || !settings.players || settings.players.length === 0) {
     throw new Error("no settings block");
@@ -211,10 +372,9 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   if (!isTeams && settings.players.length === 2) {
     const LANDING_TO_MOVE: Record<number, number> = { 0x46: 13, 0x47: 14, 0x48: 15, 0x49: 16, 0x4a: 17 };
     const frames = game.getFrames();
-    const frameNums = Object.keys(frames).map(Number).sort((a, b) => a - b);
     const prevAnim: (number | null)[] = [null, null];
     const prevCounter: (number | null)[] = [null, null];
-    for (const fn of frameNums) {
+    for (let fn = Frames.FIRST; fn <= durationFrames; fn++) {
       const frame = frames[fn];
       if (!frame?.players) continue;
       settings.players.forEach((p, i) => {
@@ -270,7 +430,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   // Doubles: slippi-js left every stat field zeroed, so fill them from our
   // own frame pass. kills/totalDamage keep singles semantics (enemies only);
   // friendly fire lives in the matrices.
-  const teamsStats = isTeams ? computeTeamsStats(game, settings) : null;
+  const teamsStats = isTeams ? computeTeamsStats(game, settings, durationFrames) : null;
   if (teamsStats) {
     const minutes = durationFrames / 3600;
     settings.players.forEach((p, i) => {
@@ -305,92 +465,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     });
   }
 
-  // Placements are only meaningful when the game actually concluded. On a
-  // NO_CONTEST (LRAS quit-out) or UNRESOLVED end the payload can carry stale
-  // placement data — typically position 0 parked on player index 0 — which
-  // would crown the quitter before the LRAS rule below ever runs.
-  const placementsValid =
-    gameEnd?.gameEndMethod === GameEndMethod.TIME ||
-    gameEnd?.gameEndMethod === GameEndMethod.GAME ||
-    gameEnd?.gameEndMethod === GameEndMethod.RESOLVED;
-
-  // --- Win/loss determination (singles only) ---
-  let winnerIndex: number | null = null;
-  if (!isTeams && players.length === 2) {
-    const placements = placementsValid
-      ? gameEnd?.placements?.filter((pl) => pl.position !== null && pl.position !== undefined && pl.position >= 0)
-      : undefined;
-    if (placements && placements.length >= 2) {
-      const first = placements.find((pl) => pl.position === 0);
-      if (first?.playerIndex !== null && first?.playerIndex !== undefined) {
-        winnerIndex = settings.players.findIndex((p) => p.playerIndex === first.playerIndex);
-      }
-    }
-    if (winnerIndex === null || winnerIndex < 0) {
-      if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
-        // Stock-out: survivor wins.
-        const [a, b] = players;
-        if (a && b && a.stocksRemaining !== null && b.stocksRemaining !== null && a.stocksRemaining !== b.stocksRemaining) {
-          winnerIndex = a.stocksRemaining > b.stocksRemaining ? 0 : 1;
-        }
-      } else if (gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST && gameEnd.lrasInitiatorIndex !== null && gameEnd.lrasInitiatorIndex !== undefined && gameEnd.lrasInitiatorIndex >= 0) {
-        // Quit-out: the LRAS initiator takes the loss.
-        const quitter = settings.players.findIndex((p) => p.playerIndex === gameEnd.lrasInitiatorIndex);
-        if (quitter >= 0) winnerIndex = quitter === 0 ? 1 : 0;
-      }
-    }
-    if (winnerIndex !== null && winnerIndex < 0) winnerIndex = null;
-    // Very short games are indeterminate regardless of end method.
-    if (durationFrames < MIN_GAME_SECONDS * 60) winnerIndex = null;
-  }
-
-  // --- Win/loss determination (teams) ---
-  // Same ladder as singles, resolved to a team rather than a player.
-  let winnerTeamId: number | null = null;
-  const teamIds = new Set(players.map((p) => p.teamId).filter((t): t is number => t !== null));
-  if (isTeams && players.length === 4 && teamIds.size === 2) {
-    const teamOfPlayerIndex = (playerIndex: number): number | null => {
-      const idx = settings.players.findIndex((p) => p.playerIndex === playerIndex);
-      return idx >= 0 ? players[idx]!.teamId : null;
-    };
-
-    const first = placementsValid ? gameEnd?.placements?.find((pl) => pl.position === 0) : undefined;
-    if (first && first.playerIndex !== null && first.playerIndex !== undefined) {
-      winnerTeamId = teamOfPlayerIndex(first.playerIndex);
-    }
-    if (winnerTeamId === null) {
-      if (gameEnd?.gameEndMethod === GameEndMethod.GAME) {
-        // Stock-out: the team with stocks left wins.
-        const stocks = new Map<number, number>();
-        let complete = true;
-        for (const p of players) {
-          if (p.teamId === null || p.stocksRemaining === null) {
-            complete = false;
-            break;
-          }
-          stocks.set(p.teamId, (stocks.get(p.teamId) ?? 0) + p.stocksRemaining);
-        }
-        if (complete && stocks.size === 2) {
-          const entries = Array.from(stocks.entries());
-          const [tA, sA] = entries[0]!;
-          const [tB, sB] = entries[1]!;
-          if (sA !== sB) winnerTeamId = sA > sB ? tA : tB;
-        }
-      } else if (
-        gameEnd?.gameEndMethod === GameEndMethod.NO_CONTEST &&
-        gameEnd.lrasInitiatorIndex !== null &&
-        gameEnd.lrasInitiatorIndex !== undefined &&
-        gameEnd.lrasInitiatorIndex >= 0
-      ) {
-        // Quit-out: the quitter's team takes the loss.
-        const quitterTeam = teamOfPlayerIndex(gameEnd.lrasInitiatorIndex);
-        if (quitterTeam !== null) {
-          winnerTeamId = Array.from(teamIds).find((t) => t !== quitterTeam) ?? null;
-        }
-      }
-    }
-    if (durationFrames < MIN_GAME_SECONDS * 60) winnerTeamId = null;
-  }
+  const { winnerIndex, winnerTeamId } = decideWinner(settings, gameEnd, players, isTeams, durationFrames);
 
   return {
     id,
@@ -405,5 +480,85 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
     winnerTeamId,
     dmgMatrix: teamsStats?.dmgMatrix ?? null,
     killMatrix: teamsStats?.killMatrix ?? null,
+  };
+}
+
+/**
+ * The fast pass: everything a replay's settings, metadata and game-end blocks
+ * can answer, and nothing that needs the frames.
+ *
+ * `getSettings()` stops iterating at the first post-frame update, while
+ * `getMetadata()` and `getGameEnd({ skipProcessing: true })` seek to their own
+ * blocks and read them directly. So this never materializes a frame — which is
+ * where essentially the whole cost of a parse lives, between slippi-js's frame
+ * assembly and the six stat computers it runs over every one of them.
+ *
+ * What it therefore cannot produce is any execution metric: kills, damage,
+ * openings, L-cancels, action counts and the per-move table all come out of the
+ * frame pass. Those fields are left at their zero/null values and the record is
+ * flagged `statsLevel: "header"`, which `hasFullStats` reads and every averaging
+ * selector filters on. It also cannot see the final frame, so `stocksRemaining`
+ * is null and the ladder's stock-out branch declines to guess — see decideWinner
+ * for why that subset property matters.
+ *
+ * Records from here are a preview. pool.ts streams them to the dashboard and
+ * never caches them; the full pass follows behind and replaces them in place.
+ */
+export function parseHeader(id: string, path: string, buf: ArrayBuffer): GameRecord {
+  const game = new SlippiGame(buf);
+  const settings = game.getSettings();
+  if (!settings || !settings.players || settings.players.length === 0) {
+    throw new Error("no settings block");
+  }
+
+  // Same "severed incomplete file" check as the full parse, and it matters more
+  // here: this pass is cheap enough to reach a replay Slippi is mid-write on.
+  const metadata = game.getMetadata();
+  if (!metadata) throw new IncompleteReplayError();
+  const gameEnd = game.getGameEnd({ skipProcessing: true });
+
+  const durationFrames = metadata.lastFrame ?? 0;
+  const isTeams = Boolean(settings.isTeams) || settings.players.length > 2;
+
+  const players: PlayerSide[] = settings.players.map((p) => ({
+    port: (p.port ?? p.playerIndex + 1) as number,
+    connectCode: p.connectCode || null,
+    displayName: p.displayName || null,
+    characterId: p.characterId ?? -1,
+    colorId: p.characterColor ?? 0,
+    teamId: isTeams ? p.teamId ?? null : null,
+    // Unknown without the final frame. Left null rather than zeroed: the ladder
+    // treats null as "don't guess" and zero as "lost every stock".
+    stocksRemaining: null,
+    kills: 0,
+    totalDamage: 0,
+    openingsPerKill: null,
+    damagePerOpening: null,
+    inputsPerMinute: null,
+    neutralWins: 0,
+    counterHits: 0,
+    beneficialTrades: 0,
+    lCancelSuccess: 0,
+    lCancelFail: 0,
+    grabSuccess: 0,
+    actions: { rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0 },
+  }));
+
+  const { winnerIndex, winnerTeamId } = decideWinner(settings, gameEnd, players, isTeams, durationFrames);
+
+  return {
+    id,
+    path,
+    playedAt: metadata.startAt ?? null,
+    durationFrames,
+    stageId: settings.stageId ?? -1,
+    gameType: detectGameType(settings.matchInfo?.matchId),
+    isTeams,
+    players,
+    winnerIndex,
+    winnerTeamId,
+    dmgMatrix: null,
+    killMatrix: null,
+    statsLevel: "header",
   };
 }
