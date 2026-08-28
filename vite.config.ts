@@ -82,7 +82,17 @@ export default defineConfig({
         // already loaded the site would get the SPA instead of the page. The
         // .html form is covered too: cleanUrls 308s it to the extensionless
         // URL, but the worker answers from cache before any redirect happens.
-        navigateFallbackDenylist: [/^\/(about|metrics|melee-majors)(\.html)?$/],
+        //
+        // The tail is deliberately loose. Workbox tests this against
+        // `url.pathname + url.search`, not the pathname alone, so anchoring
+        // straight after `.html` covered the bare URL and nothing else: a
+        // shared link carrying `?utm_source=`, `?fbclid=` or Twitter's `?s=20`
+        // — and `/about/` with a trailing slash — fell through to the default
+        // allowlist and got the app shell. Nothing could rescue it either,
+        // since these pages are written after `vite build` and so are absent
+        // from the precache manifest. Invisible to Googlebot, which registers
+        // no worker; it only ever hit returning humans following a link.
+        navigateFallbackDenylist: [/^\/(about|metrics|melee-majors)(\.html)?\/?(\?|$)/],
       },
     }),
   ],
