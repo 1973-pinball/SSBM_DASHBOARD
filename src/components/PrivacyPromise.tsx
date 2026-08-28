@@ -68,6 +68,10 @@ export function PrivacyPromise({ onClose }: { onClose: () => void }) {
             <h3>Your control</h3>
             <p>Turning Community contribution off excludes your private rows from the next aggregate refresh. Questions about this promise can be sent to <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>.</p>
           </section>
+          <section>
+            <h3>Don't take our word for it</h3>
+            <p>Everything above is a claim about what the code does. The code is public, so you can check it rather than trust it: <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">github.com/1973-pinball/SSBM_DASHBOARD</a>. You can also run it yourself — a self-hosted build with no cloud credentials configured has no sync and no community contribution at all.</p>
+          </section>
         </div>
       </div>
     </div>

@@ -1068,6 +1068,7 @@ export default function App() {
         <a href="/about">About</a>
         <a href="/metrics">Metrics</a>
         <a href="/melee-majors">Melee majors</a>
+        <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">Source</a>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
       </footer>
