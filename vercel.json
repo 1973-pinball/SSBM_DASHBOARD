@@ -1,6 +1,5 @@
 {
   "buildCommand": "npm run build:deploy",
-  "//": "cleanUrls serves dist/about.html at /about and 308-redirects /about.html to it. Vercel defaults this to false, so without it every link and canonical on the static SEO pages would 404.",
   "cleanUrls": true,
   "headers": [
     {
