@@ -100,4 +100,9 @@ node scripts/refresh-liquipedia.mjs         # top up the bundled scene dataset (
 npm run assets                              # render public/share/*.gif|png (gitignored; the deploy does this too)
 node scripts/rebuild-liquipedia.mjs         # re-derive the whole snapshot (add --force to refetch players, ~30 min)
 node scripts/inspect-liquipedia-page.mjs Hungrybox 'winnings'   # print real markup when a parser stops matching
+
+# Assert the two parse invariants that break silently — the header pass staying a
+# strict subset of the full one, and dropUnreadComputers still binding to slippi-js's
+# private fields. Needs a real replay folder; run it after any @slippi/slippi-js bump.
+node --experimental-strip-types scripts/verify-parse.mjs <replay-folder> [count]
 ```

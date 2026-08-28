@@ -45,8 +45,13 @@ function detectGameType(matchId: string | null | undefined): GameType {
  * playableFrameCount all came back byte-identical to a stock parse.
  *
  * If a future stat needs combos or stocks, add the computer back here.
+ *
+ * Exported only so `scripts/verify-parse.mjs` can assert that the reach-in still
+ * binds. The guard makes a slippi-js shape change degrade to slow-but-correct,
+ * which is the safe direction and therefore the silent one — nothing in the app
+ * would ever surface it. That script is the thing that notices.
  */
-function dropUnreadComputers(game: SlippiGame): void {
+export function dropUnreadComputers(game: SlippiGame): void {
   const g = game as unknown as {
     statsComputer?: { allComputers?: unknown[] };
     actionsComputer?: unknown;
