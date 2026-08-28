@@ -27,11 +27,18 @@ export function readDataset(path = DATA_PATH) {
     if (!m) throw new Error(`could not locate ${name} in ${path}`);
     return JSON.parse(m[1]);
   };
+  // DATA_AS_OF is a bare string, not one of the four JSON literals, so it needs
+  // its own match rather than a widened block() — that regex only accepts `[`
+  // or `{` and throws by design on a miss, which is what protects the datasets.
+  // Optional: a snapshot written before this export existed still reads fine.
+  const asOfMatch = src.match(/export const DATA_AS_OF[^=]*= "([^"]+)";/);
+
   return {
     sources: block("SOURCES"),
     majors: block("MAJORS"),
     editions: block("RANKING_EDITIONS"),
     players: block("PLAYERS"),
+    asOf: asOfMatch ? asOfMatch[1] : null,
   };
 }
 

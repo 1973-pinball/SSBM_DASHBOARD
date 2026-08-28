@@ -32,6 +32,47 @@ const ORIGIN = "https://ssbmstats.com";
 const esc = (s) =>
   String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 
+/** Heading/term -> URL fragment, so every section and definition is linkable. */
+const slug = (s) =>
+  String(s)
+    .toLowerCase()
+    .replace(/[%]/g, " percent ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+/**
+ * JSON-LD goes in as `<script type="application/ld+json">`, which is data and
+ * not subject to script-src, but its *contents* are still parsed as raw text by
+ * the HTML tokenizer: an unescaped `</script>` inside a string would end the
+ * block early. esc() is wrong here — it would corrupt the JSON — so only `<`
+ * gets neutralised, using the < escape JSON itself understands.
+ */
+const ldJson = (v) => JSON.stringify(v).replace(/</g, "\\u003c");
+
+// Stable @ids so the four documents resolve as one site rather than four
+// unrelated pages. Anything referencing an @id must emit that node in the same
+// graph — a dangling reference is worse than an absent property.
+const ORG_ID = `${ORIGIN}/#studio-pinball`;
+const SITE_ID = `${ORIGIN}/#website`;
+
+const SITE_NODES = [
+  {
+    "@type": "Organization",
+    "@id": ORG_ID,
+    name: "Studio Pinball",
+    url: `${ORIGIN}/`,
+    email: "info.studio.pinball@gmail.com",
+  },
+  {
+    "@type": "WebSite",
+    "@id": SITE_ID,
+    name: "SSBM Stats",
+    url: `${ORIGIN}/`,
+    inLanguage: "en-US",
+    publisher: { "@id": ORG_ID },
+  },
+];
+
 // Kept in one place so the three pages cannot drift apart visually. Mirrors the
 // app's tokens in src/index.css; inlined because a static page should not have
 // to fetch a stylesheet to render its first paint.
@@ -82,6 +123,14 @@ font-family:"IBM Plex Mono",ui-monospace,monospace}
 .note{border-left:2px solid var(--accent);background:rgba(143,127,247,.09);border-radius:0 8px 8px 0;
 padding:13px 17px;margin:0 0 18px;font-size:14.5px;color:var(--muted)}
 .note strong{color:var(--text)}
+.toc{border:1px solid var(--line);border-radius:10px;padding:18px 20px;margin:0 0 12px;
+display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px 26px}
+.toc-sec{display:flex;flex-direction:column;gap:3px;font-size:13.5px}
+.toc-sec a{color:var(--muted);text-decoration:none}
+.toc-sec a:hover{color:var(--accent);text-decoration:underline}
+.toc a.toc-h{font-family:"Chakra Petch",system-ui,sans-serif;font-weight:600;font-size:12px;
+letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-bottom:4px}
+.updated{font-size:13.5px;color:var(--faint);margin:0 0 22px}
 footer{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-size:13.5px;
 color:var(--faint);display:flex;gap:16px;flex-wrap:wrap}
 @media(max-width:560px){header.top nav{margin-left:0;width:100%}}
@@ -92,9 +141,46 @@ color:var(--faint);display:flex;gap:16px;flex-wrap:wrap}
  * description and self-referencing canonical — a shared canonical pointing at
  * `/` (which is what index.html correctly does for its own `?view=` params)
  * would tell Google these pages are duplicates of the app and drop them.
+ *
+ * There is deliberately no `preconnect` here. These pages carry no webfont at
+ * all — the inline CSS names Inter and Chakra Petch and falls straight through
+ * to system-ui — and the CSP in vercel.json forbids third-party style and font
+ * origins anyway, so a preconnect to one could never pay off. One pointing at
+ * fonts.googleapis.com survived here from before the fonts were self-hosted,
+ * opening a TLS handshake on every page load for a request never made.
  */
-function page({ slug, title, description, body }) {
+function page({ slug, title, description, heading, body, mainEntity }) {
   const url = slug === "" ? `${ORIGIN}/` : `${ORIGIN}/${slug}`;
+
+  // WebPage + breadcrumb per document, on top of the shared site nodes. The
+  // breadcrumb's leaf carries no `item`: it is the current page, and schema.org
+  // takes the trailing entry as self-referential.
+  const graph = [
+    ...SITE_NODES,
+    {
+      "@type": "WebPage",
+      "@id": `${url}#webpage`,
+      url,
+      name: title,
+      description,
+      isPartOf: { "@id": SITE_ID },
+      inLanguage: "en-US",
+      breadcrumb: { "@id": `${url}#breadcrumb` },
+      ...(mainEntity ? { mainEntity: { "@id": mainEntity["@id"] } } : {}),
+    },
+    {
+      "@type": "BreadcrumbList",
+      "@id": `${url}#breadcrumb`,
+      itemListElement: [
+        { "@type": "ListItem", position: 1, name: "SSBM Stats", item: `${ORIGIN}/` },
+        { "@type": "ListItem", position: 2, name: heading },
+      ],
+    },
+    // Emitted last and only when supplied, which is what keeps the mainEntity
+    // reference above from ever dangling.
+    ...(mainEntity ? [mainEntity] : []),
+  ];
+
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -106,7 +192,7 @@ function page({ slug, title, description, body }) {
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <meta name="theme-color" content="#121022">
 <meta name="color-scheme" content="dark">
-<meta property="og:type" content="article">
+<meta property="og:type" content="website">
 <meta property="og:site_name" content="SSBM Stats">
 <meta property="og:url" content="${url}">
 <meta property="og:title" content="${esc(title)}">
@@ -116,7 +202,7 @@ function page({ slug, title, description, body }) {
 <meta name="twitter:title" content="${esc(title)}">
 <meta name="twitter:description" content="${esc(description)}">
 <meta name="twitter:image" content="${ORIGIN}/share/melee-majors-race.png">
-<link rel="preconnect" href="https://fonts.googleapis.com">
+<script type="application/ld+json">${ldJson({ "@context": "https://schema.org", "@graph": graph })}</script>
 <style>${CSS}</style>
 </head>
 <body>
@@ -126,7 +212,7 @@ function page({ slug, title, description, body }) {
   <a class="brand" href="/">SSBM Stats</a>
   <nav>
     <a href="/about">About</a>
-    <a href="/metrics">Metrics</a>
+    <a href="/metrics">Melee metrics</a>
     <a href="/melee-majors">Melee majors</a>
   </nav>
 </header>
@@ -147,9 +233,13 @@ ${body}
 
 const about = page({
   slug: "about",
-  title: "About SSBM Stats — Slippi Replay Analytics That Stay On Your Machine",
+  // The brand belongs at the end, not the front. This is the only page on the
+  // site with crawlable prose about the product, so its title has to spend its
+  // opening words on what the product is rather than on the word "About".
+  title: "Slippi Replay Analytics, Parsed In Your Browser — SSBM Stats",
   description:
-    "SSBM Stats turns your Slippi replay folder into a Super Smash Bros. Melee stats dashboard. Replays are parsed in your browser and never uploaded.",
+    "How SSBM Stats reads your local Slippi replay folder to build a Super Smash Bros. Melee stats dashboard: what it computes, what browsers it needs, and the privacy contract — replays are parsed on your machine and never uploaded.",
+  heading: "About",
   body: `
 <h1>Slippi replay stats, parsed in your browser</h1>
 <p class="lede">SSBM Stats reads your local Slippi replay folder and builds a full statistical
@@ -237,21 +327,64 @@ removes the operator from the picture entirely.</p>
 
 // -------------------------------------------------------------- /metrics
 
+// Every section and every term gets an id. Two reasons: a definitional query
+// like "what is L-cancel percentage" needs something on the page to point at
+// finer than the whole document, and the DefinedTerm nodes below give each term
+// a `url` — which is only honest if that fragment actually resolves.
 const metricsBody = SECTIONS.map(
   (s) => `
-<h2>${esc(s.title)}</h2>
+<h2 id="${slug(s.title)}">${esc(s.title)}</h2>
 <dl>
 ${s.items
-  .map((it) => `  <div class="def"><dt>${esc(it.term)}</dt><dd>${esc(it.def)}</dd></div>`)
+  .map(
+    (it) =>
+      `  <div class="def" id="${slug(it.term)}"><dt>${esc(it.term)}</dt><dd>${esc(it.def)}</dd></div>`,
+  )
   .join("\n")}
 </dl>`,
 ).join("\n");
+
+const metricsToc = `
+<nav class="toc" aria-label="On this page">
+${SECTIONS.map(
+  (s) =>
+    `  <div class="toc-sec"><a class="toc-h" href="#${slug(s.title)}">${esc(s.title)}</a>
+${s.items.map((it) => `    <a href="#${slug(it.term)}">${esc(it.term)}</a>`).join("\n")}
+  </div>`,
+).join("\n")}
+</nav>`;
+
+// A glossary of 40 terms is the one thing on this site that maps cleanly onto a
+// schema.org type. Per-term `url` is safe because the ids above exist; there is
+// deliberately no FAQPage, which would misrepresent definitions as Q&A.
+const METRICS_GLOSSARY_ID = `${ORIGIN}/metrics#glossary`;
+const metricsGlossary = {
+  "@type": "DefinedTermSet",
+  "@id": METRICS_GLOSSARY_ID,
+  name: "Super Smash Bros. Melee and Slippi metrics glossary",
+  description:
+    "Definitions of every statistic SSBM Stats computes from Slippi replays, from openings per kill to L-cancel percentage.",
+  url: `${ORIGIN}/metrics`,
+  inLanguage: "en-US",
+  hasDefinedTerm: SECTIONS.flatMap((s) =>
+    s.items.map((it) => ({
+      "@type": "DefinedTerm",
+      "@id": `${ORIGIN}/metrics#${slug(it.term)}`,
+      name: it.term,
+      description: it.def,
+      url: `${ORIGIN}/metrics#${slug(it.term)}`,
+      inDefinedTermSet: { "@id": METRICS_GLOSSARY_ID },
+    })),
+  ),
+};
 
 const metrics = page({
   slug: "metrics",
   title: "Melee & Slippi Metrics Reference — Openings Per Kill, L-Cancel %, and More",
   description:
     "Plain-English definitions of every Super Smash Bros. Melee statistic SSBM Stats computes from Slippi replays: openings per kill, damage per opening, L-cancel percentage, neutral wins, tilt, and more.",
+  heading: "Metrics reference",
+  mainEntity: metricsGlossary,
   body: `
 <h1>Metrics reference</h1>
 <p class="lede">Every statistic SSBM Stats computes from your Slippi replays, and exactly what it
@@ -259,17 +392,18 @@ means. This is the same reference the app shows in its metrics guide.</p>
 <div class="note"><strong>Where these come from.</strong> Neutral and punish metrics are derived
 from slippi-js conversion detection over each replay's frame data, so they exist only for games
 where that data is present. Everything else is computed from the parsed game record.</div>
+${metricsToc}
 ${metricsBody}
-<h2>Seeing them on your own games</h2>
+<h2 id="your-own-games">Seeing them on your own games</h2>
 <p>The dashboard computes all of the above from your local replay folder, in your browser.
-Nothing is uploaded — see <a href="/about">how it works</a>.</p>
+Nothing is uploaded — see <a href="/about">how Slippi replay parsing works in your browser</a>.</p>
 <a class="cta" href="/">Open the dashboard</a>
 `,
 });
 
 // -------------------------------------------------- /melee-majors
 
-const { majors, sources } = readDataset();
+const { majors, sources, asOf } = readDataset();
 
 // Decision 6: netplay events are flagged, not deleted, and excluded from every
 // total the site publishes. The same rule has to hold here or this page would
@@ -285,16 +419,77 @@ const leaderboard = [...titles.entries()].sort((a, b) => b[1] - a[1] || a[0].loc
 const years = offline.map((m) => m.year);
 const firstYear = Math.min(...years);
 const lastYear = Math.max(...years);
-const supermajors = offline.filter((m) => m.tier === "supermajor").length;
+const superMajors = offline.filter((m) => m.tier === "supermajor");
 const onlineExcluded = majors.length - offline.length;
 
-const majorsTable = offline
+const row = (m) =>
+  `<tr><td class="num">${esc(m.date)}</td><td>${esc(m.name)}${
+    m.tier === "supermajor" ? ' <span class="tier">super</span>' : ""
+  }</td><td>${esc(m.winner)}</td><td>${esc(m.runnerUp ?? "—")}</td></tr>`;
+
+// One block per year rather than a single 211-row table. The flat version had
+// no year signal at all beyond an ISO date in a cell — the word "year" did not
+// appear on the page — so nothing here could match "melee major winners by
+// year", which is the second-largest query this page exists to serve.
+//
+// The heading has to sit outside the table: heading content is not permitted
+// inside <table>/<tbody>, and a parser hoists it out, so each year gets its own
+// complete table rather than an <h3> wedged between rows.
+const byYear = new Map();
+for (const m of offline) {
+  if (!byYear.has(m.year)) byYear.set(m.year, []);
+  byYear.get(m.year).push(m);
+}
+const yearsDesc = [...byYear.keys()].sort((a, b) => b - a);
+
+const majorsByYear = yearsDesc
   .map(
-    (m) => `<tr><td class="num">${esc(m.date)}</td><td>${esc(m.name)}${
-      m.tier === "supermajor" ? ' <span class="tier">super</span>' : ""
-    }</td><td>${esc(m.winner)}</td><td>${esc(m.runnerUp ?? "—")}</td></tr>`,
+    (y) => `
+<h3 id="majors-${y}">${y} Melee major winners</h3>
+<div class="tablewrap">
+<table>
+<thead><tr><th>Date</th><th>Event</th><th>Winner</th><th>Runner-up</th></tr></thead>
+<tbody>
+${byYear.get(y).map(row).join("\n")}
+</tbody>
+</table>
+</div>`,
   )
   .join("\n");
+
+// Three columns, not the full four: this is the same dataset already listed
+// below, and reprinting it wholesale would read as one page padded twice.
+const superTable = superMajors
+  .map(
+    (m) => `<tr><td class="num">${m.year}</td><td>${esc(m.name)}</td><td>${esc(m.winner)}</td></tr>`,
+  )
+  .join("\n");
+
+const majorsDescription = `A complete record of ${offline.length} offline Super Smash Bros. Melee majors and supermajors from ${firstYear} to ${lastYear}, with winners, runners-up, and an all-time titles leaderboard.`;
+
+const majorsDataset = {
+  "@type": "Dataset",
+  "@id": `${ORIGIN}/melee-majors#dataset`,
+  name: `Super Smash Bros. Melee offline majors, ${firstYear}–${lastYear}`,
+  description: majorsDescription,
+  url: `${ORIGIN}/melee-majors`,
+  inLanguage: "en-US",
+  license: "https://creativecommons.org/licenses/by-sa/3.0/",
+  isBasedOn: sources.map((s) => s.url),
+  temporalCoverage: `${offline.at(-1).date}/${offline[0].date}`,
+  creator: { "@id": ORG_ID },
+  keywords: [
+    "Super Smash Bros. Melee",
+    "Melee majors",
+    "Melee supermajors",
+    "tournament winners",
+    "esports results",
+  ],
+  variableMeasured: ["Event name", "Date", "Winner", "Runner-up", "Tier"],
+  // Deliberately no 211 Event nodes: the Major type carries no venue or
+  // location, so every one of them would be ineligible for the Event rich
+  // result and would only generate warnings.
+};
 
 const leaderTable = leaderboard
   .slice(0, 25)
@@ -306,12 +501,15 @@ const leaderTable = leaderboard
 
 const meleeMajors = page({
   slug: "melee-majors",
-  title: "Every Super Smash Bros. Melee Major Since 2003",
-  description: `A complete record of ${offline.length} offline Super Smash Bros. Melee majors and supermajors from ${firstYear} to ${lastYear}, with winners, runners-up, and an all-time titles leaderboard.`,
+  title: "Every Super Smash Bros. Melee Major Since 2003 — Winners By Year",
+  description: majorsDescription,
+  heading: `Every Melee major since ${firstYear}`,
+  mainEntity: majorsDataset,
   body: `
 <h1>Every Melee major since ${firstYear}</h1>
 <p class="lede">${offline.length} offline Super Smash Bros. Melee majors and supermajors, ${firstYear}–${lastYear},
-with winner and runner-up for each. ${supermajors} of them are supermajors.</p>
+with winner and runner-up for each, listed year by year. ${superMajors.length} of them are supermajors.</p>
+${asOf ? `<p class="updated">Dataset updated ${esc(asOf)}.</p>` : ""}
 
 <div class="note"><strong>Offline events only.</strong> ${onlineExcluded} netplay events that
 Liquipedia lists with an &quot;Online&quot; venue are excluded from this table and from every count on
@@ -319,7 +517,7 @@ this page. That is a judgement call, not a data cleanup — counting individual 
 league beside Genesis materially changes the all-time standings — and the underlying records keep
 the flag so the choice stays auditable.</div>
 
-<h2>All-time titles</h2>
+<h2 id="all-time-titles">All-time titles</h2>
 <div class="tablewrap">
 <table>
 <thead><tr><th>#</th><th>Player</th><th>Majors won</th></tr></thead>
@@ -330,17 +528,24 @@ ${leaderTable}
 </div>
 <p>Top 25 by offline major titles. ${leaderboard.length} players have won at least one.</p>
 
-<h2>Every major, newest first</h2>
+<h2 id="supermajors">Melee supermajors</h2>
+<p>${superMajors.length} of the ${offline.length} events on this page are supermajors — the
+largest tier, by entrant count and field strength. Every one of them, newest first:</p>
 <div class="tablewrap">
 <table>
-<thead><tr><th>Date</th><th>Event</th><th>Winner</th><th>Runner-up</th></tr></thead>
+<thead><tr><th>Year</th><th>Event</th><th>Winner</th></tr></thead>
 <tbody>
-${majorsTable}
+${superTable}
 </tbody>
 </table>
 </div>
 
-<h2>Sources and licence</h2>
+<h2 id="by-year">Every major by year</h2>
+<p>All ${offline.length} offline majors, newest year first. Jump to
+${yearsDesc.map((y) => `<a href="#majors-${y}">${y}</a>`).join(" · ")}.</p>
+${majorsByYear}
+
+<h2 id="sources">Sources and licence</h2>
 <p>This page is compiled from Liquipedia, which publishes under
 <a href="https://creativecommons.org/licenses/by-sa/3.0/" rel="license">CC BY-SA 3.0</a>. The
 dataset ships with the app as a bundled snapshot and is topped up weekly.</p>
@@ -348,23 +553,37 @@ dataset ships with the app as a bundled snapshot and is topped up weekly.</p>
 ${sources.map((s) => `  <li><a href="${esc(s.url)}" rel="noopener">${esc(s.label)}</a></li>`).join("\n")}
 </ul>
 
-<h2>Track your own record</h2>
+<h2 id="track-your-own">Track your own record</h2>
 <p>SSBM Stats also reads your personal Slippi replays and builds the same kind of record for your
 own play — win rates, matchups, and execution stats, parsed entirely in your browser.
-<a href="/about">How it works</a>.</p>
+<a href="/about">How Slippi replay analytics works here</a>.</p>
 <a class="cta" href="/">Open the dashboard</a>
 `,
 });
 
 // ------------------------------------------------------------- sitemap
 
-// No <lastmod>: Google only trusts it when it is consistently accurate, and a
-// build timestamp would claim every page changed on every deploy. Omitting it
-// is better than asserting something false.
+// <lastmod> on /melee-majors only. Google trusts the field only when it is
+// consistently accurate, so a build timestamp — which would claim all four
+// pages changed on every deploy — is worse than omitting it, and /, /about and
+// /metrics still carry none. The majors page is the exception because its
+// content is the Liquipedia snapshot and DATA_AS_OF is that snapshot's real
+// date, not a build artifact.
+//
+// The honest caveat: DATA_AS_OF tracks the whole snapshot, so a refresh that
+// only topped up player winnings advances it without changing anything on this
+// page. That overstates freshness occasionally; it never invents a change that
+// did not happen somewhere in the dataset.
+const lastmod = { "melee-majors": asOf };
+
 const sitemap = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${["", "about", "metrics", "melee-majors"]
-  .map((s) => `  <url>\n    <loc>${s === "" ? `${ORIGIN}/` : `${ORIGIN}/${s}`}</loc>\n  </url>`)
+  .map((s) => {
+    const loc = s === "" ? `${ORIGIN}/` : `${ORIGIN}/${s}`;
+    const mod = lastmod[s] ? `\n    <lastmod>${lastmod[s]}</lastmod>` : "";
+    return `  <url>\n    <loc>${loc}</loc>${mod}\n  </url>`;
+  })
   .join("\n")}
 </urlset>
 `;
