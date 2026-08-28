@@ -124,9 +124,20 @@ function useWinModel(
   return { status: entry.status, model: entry.model };
 }
 
+/**
+ * How many items show before the expander. The panel is "the short version",
+ * so the rest stays behind a click rather than being dropped: with fifteen
+ * detectors feeding one ranking, a finding that cleared a ~98% bar should not
+ * vanish silently just because five louder ones landed above it.
+ */
+const COACH_VISIBLE = 5;
+
 /** Ranked plain-English "do this" list — the tab's front door for non-stats readers. */
 function CoachPanel({ games }: { games: ResolvedGame[] }) {
-  const recs = useMemo(() => recommendations(games), [games]);
+  const recs = useMemo(() => recommendations(games, Infinity), [games]);
+  const [expanded, setExpanded] = useState(false);
+  const hidden = recs.length - COACH_VISIBLE;
+  const shown = expanded ? recs : recs.slice(0, COACH_VISIBLE);
   return (
     <div className="panel">
       <h2>The short version — what to change</h2>
@@ -136,18 +147,26 @@ function CoachPanel({ games }: { games: ResolvedGame[] }) {
           losses spread evenly across matchups, stages, and session length. That second one is a compliment.
         </div>
       ) : (
-        <ol className="coach-list">
-          {recs.map((r) => (
-            <li key={r.kind + r.headline}>
-              <div className="coach-headline">{r.headline}</div>
-              <div className="coach-detail">{r.detail}</div>
-            </li>
-          ))}
-        </ol>
+        <>
+          <ol className="coach-list">
+            {shown.map((r) => (
+              <li key={r.kind + r.headline}>
+                <div className="coach-headline">{r.headline}</div>
+                <div className="coach-detail">{r.detail}</div>
+              </li>
+            ))}
+          </ol>
+          {hidden > 0 && (
+            <button className="ghost coach-more" aria-expanded={expanded} onClick={() => setExpanded((v) => !v)}>
+              {expanded ? "Show fewer" : `Show ${hidden} more`}
+            </button>
+          )}
+        </>
       )}
       <div className="hint">
-        Ranked by effect size × evidence, each against your own overall win rate; anything that doesn't clear a
-        significance bar is left out. The models below show the full picture behind these.
+        Ranked by effect size × evidence, each against your own overall win rate — the top {COACH_VISIBLE} show by
+        default. Anything that doesn't clear a significance bar is left out entirely. The models below show the full
+        picture behind these.
       </div>
     </div>
   );

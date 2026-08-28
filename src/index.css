@@ -882,6 +882,7 @@ button.linky:hover { color: #a094ff; }
 .coach-list li::marker { color: var(--accent); font-family: var(--font-data); font-weight: 600; }
 .coach-headline { font-family: var(--font-display); font-size: 15px; font-weight: 600; }
 .coach-detail { color: var(--muted); font-size: 13px; margin-top: 2px; max-width: 720px; }
+.coach-more { margin-top: 14px; font-size: 13px; }
 
 /* ---- Share card ---- */
 .sc-wrap { display: flex; justify-content: center; }
