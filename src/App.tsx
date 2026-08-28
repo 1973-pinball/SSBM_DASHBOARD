@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
-import { DEFAULT_FILTERS } from "./lib/types";
+import { DEFAULT_FILTERS, hasFullStats } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline, RecordSaveError } from "./lib/pool";
 import { allRecords, clearAll, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
@@ -266,12 +266,30 @@ export default function App() {
    * pull can race on dashboard entry and hand us the same game (ids are
    * machine-independent path|size|mtime), so blind appends double-count.
    */
+  /**
+   * Merge streamed records into state by id. Replacement matters here as much
+   * as insertion: on a large import the pipeline delivers a header-only preview
+   * of every game first and the full parse of the same file second, under the
+   * same id. This used to skip any id already present, which would drop every
+   * real record and strand the dashboard on preview numbers.
+   */
   const appendRecords = useCallback((incoming: GameRecord[]) => {
     if (!incoming.length) return;
     setRecords((prev) => {
-      const have = new Set(prev.map((r) => r.id));
-      const fresh = incoming.filter((r) => !have.has(r.id));
-      return fresh.length ? [...prev, ...fresh] : prev;
+      const byId = new Map(prev.map((r) => [r.id, r]));
+      let changed = false;
+      for (const rec of incoming) {
+        const cur = byId.get(rec.id);
+        if (cur === rec) continue;
+        // Never let a preview overwrite the full record it was standing in for:
+        // a late-delivered header batch can arrive after the full pass has
+        // already replaced that game.
+        if (cur && hasFullStats(cur) && !hasFullStats(rec)) continue;
+        byId.set(rec.id, rec);
+        changed = true;
+      }
+      // Map preserves insertion order, so a replaced record keeps its position.
+      return changed ? [...byId.values()] : prev;
     });
   }, []);
 
@@ -449,7 +467,7 @@ export default function App() {
       if (scanBusy.current) return;
       scanBusy.current = true;
       lastFolderSyncAt.current = Date.now();
-      setSyncing({ total: 0, done: 0, skippedCached: 0, errors: 0, deferred: 0 });
+      setSyncing({ pass: "full", total: 0, done: 0, skippedCached: 0, errors: 0, deferred: 0 });
       setSyncSkipped(null);
       setPipelineError(null);
       const gen = generation.current;
@@ -803,7 +821,7 @@ export default function App() {
                   {syncing
                     ? syncing.total === 0
                       ? "Scanning…"
-                      : `Parsing ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
+                      : `${syncing.pass === "header" ? "Reading" : "Parsing"} ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
                     : !dirHandle
                       ? supportsFsAccess ? "Connect replay folder" : "Add replays"
                       : folderPermission === "granted" ? "Refresh" : "Reconnect folder"}
@@ -1020,6 +1038,9 @@ export default function App() {
       <footer className="site-footer" data-build={__BUILD_ID__}>
         <span>Brought to you by Studio Pinball · © 2026</span>
         <a href="https://ssbmstats.com/">ssbmstats.com</a>
+        <a href="/about">About</a>
+        <a href="/metrics">Metrics</a>
+        <a href="/melee-majors">Melee majors</a>
         <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
         <button className="footer-link" onClick={() => openOverlay("privacy")}>Privacy promise</button>
       </footer>

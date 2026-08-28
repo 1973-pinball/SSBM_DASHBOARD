@@ -1,4 +1,5 @@
 import type { GameRecord } from "./types";
+import { hasFullStats } from "./types";
 
 /**
  * `GameRecord.id` is `path|size|mtime`. It answers "have I already parsed this
@@ -42,6 +43,14 @@ function preferred(a: GameRecord, b: GameRecord): boolean {
   // carry a timestamp (header read, stats failed) loses to the copy of that
   // game which parsed cleanly on another machine, rather than winning on id.
   if (aTombstone !== bTombstone) return bTombstone;
+  // A full parse beats the header preview standing in for it. Those two collide
+  // on the *same id* — one file, read once by each pass — so the id comparison
+  // below cannot separate them and would keep whichever landed first, which is
+  // always the preview. The library would then sit on zeroed execution metrics
+  // until the next reload rebuilt state from the cache.
+  const aFull = hasFullStats(a);
+  const bFull = hasFullStats(b);
+  if (aFull !== bFull) return aFull;
   return a.id < b.id;
 }
 

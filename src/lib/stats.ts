@@ -1,5 +1,5 @@
 import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame } from "./types";
-import { ACTION_LABELS } from "./types";
+import { ACTION_LABELS, hasFullStats } from "./types";
 import { INCLUDED_CHARACTER_ID_SET, INCLUDED_STAGE_ID_SET } from "./config";
 import { moveGroup } from "./melee";
 
@@ -205,11 +205,19 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
   let deaths = 0;
   let damage = 0;
   let frames = 0;
+  // Per-game rates get their own denominator. While a large import is running
+  // the dashboard is briefly showing header previews, whose kill and damage
+  // counts are zeroes standing in for "not computed yet" — dividing by every
+  // game would walk these averages toward zero for the length of the import.
+  // Duration comes out of the header, so `frames` still counts every game.
+  let measured = 0;
   for (const g of games) {
+    frames += g.rec.durationFrames;
+    if (!hasFullStats(g.rec)) continue;
+    measured++;
     kills += g.me.kills;
     deaths += g.opp.kills;
     damage += g.me.totalDamage;
-    frames += g.rec.durationFrames;
   }
   const streak = streakOf(games);
   // Prior-window comparison (only meaningful for bounded ranges; a picked day
@@ -225,9 +233,9 @@ export function overview(games: ResolvedGame[], allResolved: ResolvedGame[], f: 
   return {
     ...base,
     totalKills: kills,
-    killsPerGame: games.length ? kills / games.length : null,
-    deathsPerGame: games.length ? deaths / games.length : null,
-    damagePerGame: games.length ? damage / games.length : null,
+    killsPerGame: measured ? kills / measured : null,
+    deathsPerGame: measured ? deaths / measured : null,
+    damagePerGame: measured ? damage / measured : null,
     avgGameSeconds: games.length ? frames / 60 / games.length : null,
     currentStreak: streak,
     prevWinRate,
@@ -244,6 +252,10 @@ export interface NeutralSummaryRow {
 
 /** Aggregate neutral-exchange counts: who's winning neutral, countering, and trading well. */
 export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
+  // `share` is a ratio of sums and would survive a header preview, but
+  // `perGame` would not: a preview contributes nothing to the numerator and a
+  // whole game to the denominator.
+  const measured = games.filter((g) => hasFullStats(g.rec));
   const rows = [
     { label: "Neutral wins", pick: (p: { neutralWins: number }) => p.neutralWins },
     { label: "Counter hits", pick: (p: { counterHits: number }) => p.counterHits },
@@ -252,7 +264,7 @@ export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
   return rows.map(({ label, pick }) => {
     let mine = 0;
     let theirs = 0;
-    for (const g of games) {
+    for (const g of measured) {
       mine += pick(g.me) ?? 0;
       theirs += pick(g.opp) ?? 0;
     }
@@ -260,7 +272,7 @@ export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
       label,
       mine,
       theirs,
-      perGame: games.length ? mine / games.length : 0,
+      perGame: measured.length ? mine / measured.length : 0,
       share: mine + theirs > 0 ? mine / (mine + theirs) : null,
     };
   });
@@ -277,7 +289,10 @@ export interface ActionAverageRow {
 
 /** Average action counts per game (and per minute, for length-independent comparison). */
 export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
-  if (games.length === 0) return [];
+  // Header previews carry zeroed action counts, and both denominators here —
+  // game count and total minutes — would otherwise include them.
+  const measured = games.filter((g) => hasFullStats(g.rec));
+  if (measured.length === 0) return [];
   const totals: Record<keyof ActionCounts, number> = {
     rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
   };
@@ -285,7 +300,7 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
     rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
   };
   let frames = 0;
-  for (const g of games) {
+  for (const g of measured) {
     frames += g.rec.durationFrames;
     for (const { key } of ACTION_LABELS) {
       totals[key] += g.me.actions?.[key] ?? 0;
@@ -296,9 +311,9 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
   return ACTION_LABELS.map(({ key, label }) => ({
     key,
     label,
-    perGame: totals[key] / games.length,
+    perGame: totals[key] / measured.length,
     perMinute: minutes > 0 ? totals[key] / minutes : 0,
-    oppPerGame: oppTotals[key] / games.length,
+    oppPerGame: oppTotals[key] / measured.length,
     oppPerMinute: minutes > 0 ? oppTotals[key] / minutes : 0,
   }));
 }
@@ -360,7 +375,13 @@ function groupRows(games: ResolvedGame[], key: (g: ResolvedGame) => number): Cha
       let deaths = 0;
       let lcS = 0;
       let lcF = 0;
+      // The L-cancel rate is a ratio of sums and a header preview adds 0 to
+      // both halves, but the kill/death averages divide by a game count — so
+      // that count has to be of games the numbers actually came from.
+      let measured = 0;
       for (const g of gs) {
+        if (!hasFullStats(g.rec)) continue;
+        measured++;
         kills += g.me.kills;
         deaths += g.opp.kills;
         // Attempt-weighted, never a mean of per-game rates: a 3-aerial game
@@ -372,8 +393,8 @@ function groupRows(games: ResolvedGame[], key: (g: ResolvedGame) => number): Cha
       return {
         characterId,
         ...t,
-        killsPerGame: gs.length ? kills / gs.length : null,
-        deathsPerGame: gs.length ? deaths / gs.length : null,
+        killsPerGame: measured ? kills / measured : null,
+        deathsPerGame: measured ? deaths / measured : null,
         lCancelAttempts: lcAtt,
         lCancelPct: lcAtt > 0 ? lcS / lcAtt : null,
       };
@@ -610,7 +631,11 @@ export function singlesRecords(games: ResolvedGame[]): SinglesRecords {
       if (k === "W" && (!bestW || run > bestW.length)) bestW = { length: run, end: g.date };
       if (k === "L" && (!bestL || run > bestL.length)) bestL = { length: run, end: g.date };
     }
-    if (!highestDamage || g.me.totalDamage > highestDamage.value) highestDamage = { ...ref(g), value: g.me.totalDamage };
+    // A header preview reports zero damage, so without this guard the card
+    // reads 0 for as long as the preview is the only thing on screen.
+    if (hasFullStats(g.rec) && (!highestDamage || g.me.totalDamage > highestDamage.value)) {
+      highestDamage = { ...ref(g), value: g.me.totalDamage };
+    }
     if (g.isWin === true && (!fastestWin || seconds < fastestWin.seconds)) fastestWin = { ...ref(g), seconds };
     if (!longestGame || seconds > longestGame.seconds) longestGame = { ...ref(g), seconds };
     if (g.isWin === true && g.me.stocksRemaining === 4) perfectWins++;
@@ -889,6 +914,9 @@ export function actionImpact(games: ResolvedGame[], minGames = 40): MoveImpactRo
   let n = 0;
   for (const g of games) {
     if (g.isWin === null || g.rec.durationFrames <= 0) continue;
+    // A header preview would enter a zero action-rate sample on both sides of
+    // the win/loss split and count toward minGames while it did it.
+    if (!hasFullStats(g.rec)) continue;
     const minutes = g.rec.durationFrames / 3600;
     n++;
     for (const { key } of ACTION_LABELS) {
@@ -1415,8 +1443,11 @@ export interface LCancelPoint {
  * see perGameSeries for the window/cap semantics.
  */
 export function lCancelSeries(games: ResolvedGame[], window = ROLLING_WINDOW, limit = 500): LCancelPoint[] {
+  // This is a volume chart, so a header preview does not cancel out the way it
+  // does in a rate: it enters the window as a genuine-looking zero and drags
+  // the line down.
   return perGameSeries(
-    games,
+    games.filter((g) => hasFullStats(g.rec)),
     [
       { key: "attempts", value: (g) => g.me.lCancelSuccess + g.me.lCancelFail },
       { key: "success", value: (g) => g.me.lCancelSuccess },
@@ -1485,16 +1516,21 @@ export function byMode(games: ResolvedGame[]): ModeRow[] {
     let kills = 0;
     let deaths = 0;
     let frames = 0;
+    // See overview(): kill/death averages need a denominator of games that
+    // carry the counts, while duration comes from the header and does not.
+    let measured = 0;
     for (const g of gs) {
+      frames += g.rec.durationFrames;
+      if (!hasFullStats(g.rec)) continue;
+      measured++;
       kills += g.me.kills;
       deaths += g.opp.kills;
-      frames += g.rec.durationFrames;
     }
     return {
       mode,
       ...tally(gs),
-      killsPerGame: gs.length ? kills / gs.length : null,
-      deathsPerGame: gs.length ? deaths / gs.length : null,
+      killsPerGame: measured ? kills / measured : null,
+      deathsPerGame: measured ? deaths / measured : null,
       avgGameSeconds: gs.length ? frames / 60 / gs.length : null,
     };
   };
@@ -1523,19 +1559,22 @@ export interface AccountRow extends WL {
 export function byAccount(games: ResolvedGame[]): AccountRow[] {
   const map = new Map<
     string,
-    { gs: ResolvedGame[]; kills: number; deaths: number; chars: Map<number, number>; last: Date | null }
+    { gs: ResolvedGame[]; kills: number; deaths: number; measured: number; chars: Map<number, number>; last: Date | null }
   >();
   for (const g of games) {
     const code = g.me.connectCode;
     if (!code) continue; // offline games carry no code to attribute to an account
     let e = map.get(code);
     if (!e) {
-      e = { gs: [], kills: 0, deaths: 0, chars: new Map(), last: null };
+      e = { gs: [], kills: 0, deaths: 0, measured: 0, chars: new Map(), last: null };
       map.set(code, e);
     }
     e.gs.push(g);
-    e.kills += g.me.kills;
-    e.deaths += g.opp.kills;
+    if (hasFullStats(g.rec)) {
+      e.measured++;
+      e.kills += g.me.kills;
+      e.deaths += g.opp.kills;
+    }
     e.chars.set(g.me.characterId, (e.chars.get(g.me.characterId) ?? 0) + 1);
     if (g.date && (!e.last || g.date > e.last)) e.last = g.date;
   }
@@ -1552,8 +1591,8 @@ export function byAccount(games: ResolvedGame[]): AccountRow[] {
       return {
         code,
         ...tally(e.gs),
-        killsPerGame: e.gs.length ? e.kills / e.gs.length : null,
-        deathsPerGame: e.gs.length ? e.deaths / e.gs.length : null,
+        killsPerGame: e.measured ? e.kills / e.measured : null,
+        deathsPerGame: e.measured ? e.deaths / e.measured : null,
         topCharacter,
         lastPlayed: e.last,
       };
@@ -1872,6 +1911,10 @@ export function teamsExecution(games: ResolvedTeamGame[]): TeamsExecutionRow[] {
   const me = mk();
   const mate = mk();
   for (const g of games) {
+    // lCancelPct and grabSuccessPct are ratios of sums and would be unmoved by
+    // a header preview; the wavedash and dash-dance averages divide by
+    // `agg.games`, which the preview would inflate.
+    if (!hasFullStats(g.rec)) continue;
     for (const [agg, p] of [
       [me, g.me],
       [mate, g.teammate],

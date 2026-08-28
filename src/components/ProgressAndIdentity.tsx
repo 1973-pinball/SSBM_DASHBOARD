@@ -8,7 +8,8 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
   return (
     <div className="progress-panel">
       <div className="progress-meta">
-        Parsing replays… {p.done.toLocaleString()} / {p.total.toLocaleString()}
+        {p.pass === "header" ? "Reading game headers…" : "Parsing replays…"} {p.done.toLocaleString()} /{" "}
+        {p.total.toLocaleString()}
         {p.skippedCached > 0 ? ` (${p.skippedCached.toLocaleString()} cached)` : ""}
         {p.errors > 0 ? ` · ${p.errors} unreadable` : ""}
         {p.deferred > 0 ? ` · ${p.deferred} still being written` : ""}
@@ -16,6 +17,9 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
       <div className="progress-track">
         <div className="progress-fill" style={{ width: `${(fraction * 100).toFixed(1)}%` }} />
       </div>
+      {p.pass === "header" && (
+        <div className="hint">Win rates, matchups and opponents first — execution stats follow on the second pass.</div>
+      )}
     </div>
   );
 }

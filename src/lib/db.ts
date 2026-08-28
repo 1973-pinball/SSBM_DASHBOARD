@@ -160,6 +160,48 @@ class SsbmDb extends Dexie {
         await tx.table("packs").clear();
         await tx.table("seen").clear();
       });
+    // v12 changes no field, so it is deliberately NOT a full re-parse.
+    //
+    // `computeTeamsStats` used to throw on a 2v2 frame whose predecessor was
+    // missing a player, which failed the parse and wrote a tombstone for the
+    // whole game — 13 of 85 doubles replays in one real library. Fixing the
+    // parser is not enough on its own: a tombstone's id goes into `seen` like any
+    // other record, so `cachedIds()` filters that file out of every future scan
+    // and the game stays lost forever.
+    //
+    // Dropping the tombstones and forgetting their ids re-parses exactly those
+    // files and nothing else, which is why this is surgical rather than the
+    // clear-everything template of v9–v11: there is no schema skew here, only a
+    // set of files whose verdict was wrong. Genuinely corrupt replays simply
+    // fail again on the next scan and are tombstoned afresh.
+    this.version(12)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        const packs = tx.table<RecordPack>("packs");
+        const rows = await packs.toArray();
+        const deadIds: string[] = [];
+        for (const pack of rows) {
+          const kept = pack.records.filter((r) => {
+            if (r.parseError === undefined) return true;
+            deadIds.push(r.id);
+            return false;
+          });
+          if (kept.length !== pack.records.length) pack.records = kept;
+        }
+        if (deadIds.length === 0) return;
+        // Packs are storage buckets, not an ordering: leaving the survivors in
+        // slightly under-full rows is cheaper than rewriting every pack, and
+        // putRecords tops up the trailing one anyway.
+        for (const pack of rows) {
+          if (pack.id !== undefined) await packs.put(pack);
+        }
+        await tx.table("seen").bulkDelete(deadIds);
+      });
   }
 }
 

@@ -1,4 +1,5 @@
 import type { Account, GameRecord } from "./types";
+import { hasFullStats } from "./types";
 import { putRecords } from "./db";
 import { dedupeRecords, gameKey } from "./dedupe";
 import { supabase } from "./supabase";
@@ -76,6 +77,11 @@ export async function restoreCloudRecords(
  */
 export function isSyncable(rec: GameRecord, myCodes: Set<string>): boolean {
   if (rec.parseError) return false;
+  // Header previews are transient and carry zeroed execution metrics. A push
+  // would upsert one over the full record another device already holds, since
+  // both share the (user_id, id) key — and because the preview is never written
+  // to the local cache, nothing here would ever correct it back.
+  if (!hasFullStats(rec)) return false;
   return rec.players.some((p) => p.connectCode !== null && myCodes.has(p.connectCode));
 }
 

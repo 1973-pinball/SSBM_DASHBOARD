@@ -1,4 +1,4 @@
-import type { GameRecord, ParseProgress } from "./types";
+import type { GameRecord, ParsePassMode, ParseProgress } from "./types";
 import { cachedIds, putRecords } from "./db";
 import type { WorkerResult } from "../worker/parser.worker";
 
@@ -110,9 +110,34 @@ export class RecordSaveError extends Error {
 }
 
 /**
+ * Below this many new files the preview pass is pure overhead: the full parse
+ * is already over in seconds, so a second walk of the same files only delays
+ * it. This matters for a first-run import, not an incremental rescan.
+ */
+const HEADER_PASS_MIN = 1000;
+
+/**
  * Parse all not-yet-cached files across a pool of web workers.
- * Streams progress and flushes records to IndexedDB in batches so the
- * dashboard can render while parsing continues.
+ *
+ * A large import runs two passes over the same queue. The first reads only each
+ * replay's settings, metadata and game-end blocks — never a frame, which is
+ * where nearly all of the cost of a parse lives — and streams the results to
+ * the dashboard as a preview without caching them, filling in game counts, win
+ * rates, matchups, opponents and sessions in a fraction of the time. Showing
+ * those is safe because the header ladder is a strict subset of the full one
+ * (see decideWinner in parse.ts): it can leave a result undetermined, never
+ * disagree about one, so nothing on screen is corrected out from under the user
+ * when the real numbers land. What it cannot fill in is the execution metrics,
+ * which is why its records carry `statsLevel: "header"` and every averaging
+ * selector filters them out.
+ *
+ * The second pass is the authoritative one — full stats, written to IndexedDB,
+ * replacing the previews in React state by id. Both passes drive one pool of
+ * workers, because spawning them twice would re-parse the slippi-js bundle in
+ * every worker.
+ *
+ * Streams progress and flushes records to IndexedDB in batches so the dashboard
+ * can render while parsing continues.
  */
 export async function runParsePipeline(
   files: DiscoveredFile[],
@@ -123,18 +148,41 @@ export async function runParsePipeline(
   signal?: AbortSignal,
 ): Promise<void> {
   const cached = await cachedIds();
-  const queue = files.filter((f) => !cached.has(f.id));
+  // Newest first. Total parse time is unchanged, but the records that reach the
+  // dashboard first are then the ones a player actually wants to see — this
+  // week's games rather than whatever the directory walk happened to hit first.
+  const queue = files
+    .filter((f) => !cached.has(f.id))
+    .sort((a, b) => b.file.lastModified - a.file.lastModified);
+  // Large imports get the preview pass; below the threshold it is pure overhead
+  // (see HEADER_PASS_MIN), and an incremental rescan of a handful of new files
+  // should just parse them.
+  const willPreview = queue.length >= HEADER_PASS_MIN;
   const progress: ParseProgress = {
-    total: files.length,
-    done: files.length - queue.length,
+    pass: willPreview ? "header" : "full",
+    total: willPreview ? queue.length : files.length,
+    done: willPreview ? 0 : files.length - queue.length,
     skippedCached: files.length - queue.length,
     errors: 0,
     deferred: 0,
   };
+  // This emit is what the bar paints before a single worker starts, so it has to
+  // already describe the pass about to run — labelling it "full" here made the
+  // UI flash "Parsing replays… 0 / N" for a frame before the preview relabelled
+  // it, which reads as the parse restarting.
   onProgress({ ...progress }, []);
   if (queue.length === 0) return;
 
-  const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, 8));
+  // Parsing is CPU-bound, so the pool wants every core it can get — but each
+  // worker holds a whole game's frame objects while slippi-js computes over
+  // them, and the parser's frame map and the stats computer's index the same
+  // objects twice. That is ~100 MB peak on a long replay, so sixteen workers
+  // will exhaust a modest machine. The ceiling therefore rises only when the
+  // browser says there is memory behind it: `deviceMemory` is Chromium-only and
+  // coarse (rounded down, capped at 8), which is exactly the "plenty" signal
+  // wanted here — anything that withholds it keeps the old conservative cap.
+  const roomy = (navigator.deviceMemory ?? 0) >= 8;
+  const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, roomy ? 16 : 8));
   interface Slot {
     worker: Worker;
     job: DiscoveredFile | null;
@@ -146,7 +194,6 @@ export async function runParsePipeline(
     dead: false,
   }));
 
-  let next = 0;
   let pendingDb: GameRecord[] = [];
   let pendingUi: GameRecord[] = [];
   let lastProgressEmit = 0;
@@ -163,6 +210,14 @@ export async function runParsePipeline(
       batch = pendingUi;
       pendingUi = [];
     }
+    onProgress({ ...progress }, batch);
+  };
+
+  /** Hand over everything buffered, throttles ignored. */
+  const drainUi = () => {
+    if (signal?.aborted) return;
+    const batch = pendingUi;
+    pendingUi = [];
     onProgress({ ...progress }, batch);
   };
 
@@ -187,120 +242,164 @@ export async function runParsePipeline(
     });
   };
 
-  const workerLoop = new Promise<void>((resolve, reject) => {
-    let inFlight = 0;
+  /**
+   * Drive the pool once over the queue. The preview pass writes nothing: a file
+   * it cannot read or parse is simply left out, because the full pass reaches
+   * that same file moments later and is the one whose verdict — record or
+   * tombstone — gets cached.
+   */
+  const runPass = (mode: ParsePassMode): Promise<void> => {
+    const persist = mode === "full";
+    // Pass-local copy: a dying worker requeues its job onto this list, and that
+    // must not lengthen the other pass's work.
+    const work = [...queue];
+    let next = 0;
 
-    const feed = (slot: Slot) => {
-      if (slot.dead) return;
-      // Once a cache write fails, later ones will too (quota, private
-      // browsing) — stop starting new files instead of parsing into batches
-      // that can't be saved.
-      if (next >= queue.length || flushError || signal?.aborted) {
-        if (inFlight === 0) resolve();
-        return;
-      }
-      const job = queue[next++]!;
-      slot.job = job;
-      inFlight++;
-      // Retire the job without producing a record. Nothing lands in `seen`,
-      // which is precisely what lets the next scan come back for it.
-      const retire = (deferred: boolean) => {
-        inFlight--;
-        slot.job = null;
-        progress.done++;
-        if (deferred) progress.deferred++;
-        else progress.errors++;
-        emitUi(); // read failures must still move the bar
-        feed(slot);
-      };
-      void (async () => {
-        let { file, id } = job;
-        if (job.handle) {
-          // Re-stat immediately before reading. The File from discovery is a
-          // snapshot of size+mtime taken during the walk, and Chrome fails the
-          // read when the file has changed since — which is exactly the replay
-          // of the game you just finished. Re-fetching here shrinks that window
-          // from "however long the scan took" to microseconds, and gives the
-          // record an id that matches the bytes we actually parse.
-          file = await job.handle.getFile();
-          id = fileId(job.path, file);
-          // It moved on since discovery and we already hold this exact version.
-          if (id !== job.id && cached.has(id)) return retire(true);
-          // Deferring is only useful when a rescan can come back for the file.
-          // The webkitdirectory path has no handle and no rescan, so there it
-          // is better to parse what we have than to drop the file silently.
-          if (writtenJustNow(file)) return retire(true);
-        }
-        const buf = await file.arrayBuffer();
-        slot.worker.postMessage({ id, path: job.path, buf }, [buf]);
-      })().catch(() => retire(false));
-    };
+    return new Promise<void>((resolve, reject) => {
+      let inFlight = 0;
 
-    for (const slot of slots) {
-      slot.worker.onmessage = (e: MessageEvent) => {
-        inFlight--;
-        slot.job = null;
-        progress.done++;
-        const res = e.data as WorkerResult;
-        if (res.ok && res.record) {
-          pendingDb.push(res.record);
-          pendingUi.push(res.record);
-        } else if (res.incomplete) {
-          // Read mid-write: the file is fine, we were early. No tombstone —
-          // keeping its id out of `seen` is what lets the next scan pick up
-          // the finished game. Caching the fragment instead would shadow that
-          // game permanently (see IncompleteReplayError in parse.ts).
-          progress.deferred++;
-        } else {
-          progress.errors++;
-          // Store a tombstone so corrupt files are not re-parsed every visit.
-          const tombstone: GameRecord = {
-            id: res.id,
-            path: res.path,
-            playedAt: null,
-            durationFrames: 0,
-            stageId: -1,
-            gameType: "unknown",
-            isTeams: false,
-            players: [],
-            winnerIndex: null,
-            winnerTeamId: null,
-            parseError: res.error ?? "parse failed",
-          };
-          pendingDb.push(tombstone);
-          pendingUi.push(tombstone);
-        }
-        if (pendingDb.length >= BATCH_FLUSH) flush();
-        emitUi();
-        feed(slot);
-      };
-      // A worker that dies — most commonly its script 404ing because a new
-      // deploy replaced the hashed chunk while this tab was open — never posts
-      // a message, which used to hang the pipeline at "0 / N" forever. The
-      // file is fine, so requeue it (no tombstone) and drop the worker; when
-      // every worker is gone, fail loudly instead of waiting.
-      slot.worker.onerror = () => {
-        slot.dead = true;
-        slot.worker.terminate();
-        if (slot.job) {
-          inFlight--;
-          queue.push(slot.job);
-          slot.job = null;
-        }
-        const alive = slots.filter((s) => !s.dead);
-        if (alive.length === 0) {
-          reject(new Error("All parse workers failed to start (often a stale tab after a site update)."));
+      const feed = (slot: Slot) => {
+        if (slot.dead) return;
+        // Once a cache write fails, later ones will too (quota, private
+        // browsing) — stop starting new files instead of parsing into batches
+        // that can't be saved.
+        if (next >= work.length || flushError || signal?.aborted) {
+          if (inFlight === 0) resolve();
           return;
         }
-        // Wake idle survivors so the requeued job isn't stranded.
-        for (const s of alive) if (s.job === null) feed(s);
+        const job = work[next++]!;
+        slot.job = job;
+        inFlight++;
+        // Retire the job without producing a record. Nothing lands in `seen`,
+        // which is precisely what lets the next scan come back for it.
+        const retire = (deferred: boolean) => {
+          inFlight--;
+          slot.job = null;
+          progress.done++;
+          if (deferred) progress.deferred++;
+          else progress.errors++;
+          emitUi(); // read failures must still move the bar
+          feed(slot);
+        };
+        void (async () => {
+          let { file, id } = job;
+          if (job.handle) {
+            // Re-stat immediately before reading. The File from discovery is a
+            // snapshot of size+mtime taken during the walk, and Chrome fails the
+            // read when the file has changed since — which is exactly the replay
+            // of the game you just finished. Re-fetching here shrinks that window
+            // from "however long the scan took" to microseconds, and gives the
+            // record an id that matches the bytes we actually parse.
+            file = await job.handle.getFile();
+            id = fileId(job.path, file);
+            // It moved on since discovery and we already hold this exact version.
+            if (id !== job.id && cached.has(id)) return retire(true);
+            // Deferring is only useful when a rescan can come back for the file.
+            // The webkitdirectory path has no handle and no rescan, so there it
+            // is better to parse what we have than to drop the file silently.
+            if (writtenJustNow(file)) return retire(true);
+          }
+          // Unread: the worker does the I/O. See the Job comment in the worker.
+          slot.worker.postMessage({ id, path: job.path, file, mode });
+        })().catch(() => retire(false));
       };
-      feed(slot);
-    }
-  });
+
+      const alive = slots.filter((s) => !s.dead);
+      if (alive.length === 0) {
+        reject(new Error("All parse workers failed to start (often a stale tab after a site update)."));
+        return;
+      }
+
+      for (const slot of alive) {
+        slot.worker.onmessage = (e: MessageEvent) => {
+          inFlight--;
+          slot.job = null;
+          progress.done++;
+          const res = e.data as WorkerResult;
+          if (res.ok && res.record) {
+            if (persist) pendingDb.push(res.record);
+            pendingUi.push(res.record);
+          } else if (res.readFailed) {
+            // The read is the worker's job now, so its failures arrive here
+            // rather than as a rejected promise on the feed path. Same treatment
+            // as before: counted, but never cached, so the file stays eligible.
+            progress.errors++;
+          } else if (res.incomplete) {
+            // Read mid-write: the file is fine, we were early. No tombstone —
+            // keeping its id out of `seen` is what lets the next scan pick up
+            // the finished game. Caching the fragment instead would shadow that
+            // game permanently (see IncompleteReplayError in parse.ts).
+            progress.deferred++;
+          } else {
+            progress.errors++;
+            // Store a tombstone so corrupt files are not re-parsed every visit.
+            if (persist) {
+              const tombstone: GameRecord = {
+                id: res.id,
+                path: res.path,
+                playedAt: null,
+                durationFrames: 0,
+                stageId: -1,
+                gameType: "unknown",
+                isTeams: false,
+                players: [],
+                winnerIndex: null,
+                winnerTeamId: null,
+                parseError: res.error ?? "parse failed",
+              };
+              pendingDb.push(tombstone);
+              pendingUi.push(tombstone);
+            }
+          }
+          if (pendingDb.length >= BATCH_FLUSH) flush();
+          emitUi();
+          feed(slot);
+        };
+        // A worker that dies — most commonly its script 404ing because a new
+        // deploy replaced the hashed chunk while this tab was open — never posts
+        // a message, which used to hang the pipeline at "0 / N" forever. The
+        // file is fine, so requeue it (no tombstone) and drop the worker; when
+        // every worker is gone, fail loudly instead of waiting.
+        slot.worker.onerror = () => {
+          slot.dead = true;
+          slot.worker.terminate();
+          if (slot.job) {
+            inFlight--;
+            work.push(slot.job);
+            slot.job = null;
+          }
+          const stillAlive = slots.filter((s) => !s.dead);
+          if (stillAlive.length === 0) {
+            reject(new Error("All parse workers failed to start (often a stale tab after a site update)."));
+            return;
+          }
+          // Wake idle survivors so the requeued job isn't stranded.
+          for (const s of stillAlive) if (s.job === null) feed(s);
+        };
+        feed(slot);
+      }
+    });
+  };
 
   try {
-    await workerLoop;
+    // Preview pass — large imports only, see HEADER_PASS_MIN. Its counters were
+    // set above so the very first frame the user sees is already correct.
+    if (willPreview) {
+      await runPass("header");
+      if (signal?.aborted) return;
+      // Hand the last previews over before the counters reset, or they would be
+      // reported under the full pass's numbers.
+      drainUi();
+      // Errors and deferrals here were provisional — the full pass re-decides
+      // every one of them — so they start clean rather than being counted twice.
+      progress.errors = 0;
+      progress.deferred = 0;
+    }
+
+    progress.pass = "full";
+    progress.total = files.length;
+    progress.done = files.length - queue.length;
+    await runPass("full");
   } finally {
     // Terminate on rejection too — a failed pipeline must not leak the pool.
     slots.forEach((s) => s.worker.terminate());
@@ -312,7 +411,6 @@ export async function runParsePipeline(
   if (signal?.aborted) return;
   // Trailing delivery: syncFolder builds its record state solely from these
   // callbacks, so every remaining record must go out, exactly once.
-  onProgress({ ...progress }, pendingUi);
-  pendingUi = [];
+  drainUi();
   if (flushError) throw new RecordSaveError(unsaved, flushError);
 }
