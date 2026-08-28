@@ -10,7 +10,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "assets": "node scripts/render-liquipedia-assets.mjs",
-    "build:deploy": "npm run assets || echo 'share images skipped'; npm run build"
+    "build:deploy": "npm run assets && npm run build"
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",

@@ -9,15 +9,15 @@
 // Output: public/share/*.gif (animated) and *.png (first-frame posters, handy
 // for link previews). Both are committed.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCanvas, loadImage } from "@napi-rs/canvas";
 import { encodeGifStreamed, sampleFrameIndices } from "./lib/gif-encode.mjs";
 import { CANVAS, drawCharFrame, drawRaceFrame } from "./lib/gif-draw.mjs";
+import { readDataset } from "./lib/liquipedia-data.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const DATA_PATH = resolve(ROOT, "src/lib/liquipedia/data.ts");
 const OUT_DIR = resolve(ROOT, "public/share");
 const STOCK_DIR = resolve(ROOT, "public/stock");
 
@@ -36,17 +36,13 @@ const NAME_TO_ID = {
 
 // ---------------------------------------------------------------- dataset
 
-const src = readFileSync(DATA_PATH, "utf8");
-const block = (name) => {
-  const m = src.match(new RegExp(`export const ${name}[^=]*= (\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\});\\n`));
-  if (!m) throw new Error(`could not locate ${name} in ${DATA_PATH}`);
-  return JSON.parse(m[1]);
-};
+// Read through the shared reader rather than a second copy of the parser. The
+// duplicate that lived here required a bare newline and so threw on every
+// Windows checkout, where data.ts is CRLF - this script only ever ran in CI.
+const { majors: allMajors, editions, players } = readDataset();
 // Offline majors only, matching the tab: netplay-era events are excluded from
 // every total, so an exported image must not disagree with the page.
-const majors = block("MAJORS").filter((m) => !m.online);
-const editions = block("RANKING_EDITIONS");
-const players = block("PLAYERS");
+const majors = allMajors.filter((m) => !m.online);
 if (majors.length === 0 || editions.length === 0) throw new Error("dataset is empty — nothing to render");
 
 // ---------------------------------------------------------------- frames
@@ -198,7 +194,15 @@ async function main() {
   console.log(`wrote 4 assets to ${OUT_DIR}`);
 }
 
+// A failed render must not fail the deploy: the share images are for sending
+// to other people, and the app serves fine without them. This guard lives here
+// rather than as an `|| echo` in the npm script for two reasons. Only this
+// process can tell "nothing to render" from "crashed unexpectedly". And the
+// shell operators do not agree across platforms - cmd.exe parses
+// `A || B && C` as `A || (B && C)`, so on Windows the step after the guard was
+// silently skipped whenever this script succeeded, taking the build with it.
 main().catch((err) => {
+  console.error("share-image render failed - continuing without them:");
   console.error(err);
-  process.exit(1);
+  process.exit(0);
 });

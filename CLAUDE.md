@@ -82,7 +82,11 @@ Vercel, deploying `main`. Three things to know before touching config:
 
 - **PWA**: `vite-plugin-pwa` precaches the entire shell — all lazy chunks, fonts, icons — so the app works offline. If you add a new asset *type*, check `globPatterns` in `vite.config.ts` covers it. Registration is **manual** (`injectRegister: null` in `vite.config.ts`): `src/main.tsx` registers the SW itself and polls `registration.update()` hourly so a tab left open picks up new deploys — don't re-enable the plugin's auto-registration, which would silently drop that poll.
 - **Build identity**: `__BUILD_ID__` (defined in `vite.config.ts` from the git commit, declared in `src/global.d.ts`) is stamped onto the footer in `App.tsx` as `data-build`. It is no longer printed on the page, but it is still how you verify a deploy actually rolled — `document.querySelector(".site-footer").dataset.build`, or grep the served bundle for the commit. Keep it in the DOM: a deploy you cannot identify is a deploy you cannot debug.
-- **Static pages need two settings to work.** `vercel.json` sets `cleanUrls: true` so `dist/about.html` serves at `/about`; Vercel defaults that to `false`, and without it every link and canonical on those pages 404s. `vite.config.ts` needs the matching `navigateFallbackDenylist` (both the bare and `.html` forms), or the service worker answers those navigations from the precached app shell and anyone who has already loaded the site gets the SPA instead of the page.
+- **Static pages need two settings to work.** `vercel.json` sets `cleanUrls: true` so `dist/about.html` serves at `/about`; Vercel defaults that to `false`, and without it every link and canonical on those pages 404s. `vite.config.ts` needs the matching `navigateFallbackDenylist` (both the bare and `.html` forms), or the service worker answers those navigations from the precached app shell and anyone who has already loaded the site gets the SPA instead of the page. **And vercel.json takes no comments** - the
+  schema is `additionalProperties: false`, so a `"//"` key, or any key Vercel does not
+  declare, is a hard validation error that fails the deployment before the build
+  starts. Nothing local catches it: the file is still valid JSON, so no linter
+  complains, and a local build never reads it. Explanations go here instead.
 - **CSP** in `vercel.json` allows connections only to self + `*.supabase.co`. Any new network destination must be added there deliberately — a blocked request in production is the symptom.
 
 ## Commands
