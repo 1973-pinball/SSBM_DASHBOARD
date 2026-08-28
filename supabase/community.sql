@@ -225,21 +225,26 @@ benchmark_user as (
   having count(*) >= 5
 ),
 benchmark_rollup as (
+  -- percentile_cont has no numeric overload: Postgres coerces the numeric sort
+  -- column to double precision and hands back double precision[]. round() then
+  -- has no round(double precision, integer) to bind to, so the whole function
+  -- fails to create. Casting the array back to numeric[] here fixes all twelve
+  -- round() call sites at once rather than one at a time.
   select
     character_id,
     sum(games)::int as games,
     count(*)::int as contributors,
     case when count(l_cancel) >= params.min_contributors then
-      percentile_cont(array[0.25, 0.5, 0.75]) within group (order by l_cancel) filter (where l_cancel is not null)
+      (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by l_cancel) filter (where l_cancel is not null))::numeric[]
     end as l_cancel_q,
     case when count(openings_per_kill) >= params.min_contributors then
-      percentile_cont(array[0.25, 0.5, 0.75]) within group (order by openings_per_kill) filter (where openings_per_kill is not null)
+      (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by openings_per_kill) filter (where openings_per_kill is not null))::numeric[]
     end as opk_q,
     case when count(damage_per_opening) >= params.min_contributors then
-      percentile_cont(array[0.25, 0.5, 0.75]) within group (order by damage_per_opening) filter (where damage_per_opening is not null)
+      (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by damage_per_opening) filter (where damage_per_opening is not null))::numeric[]
     end as dpo_q,
     case when count(inputs_per_minute) >= params.min_contributors then
-      percentile_cont(array[0.25, 0.5, 0.75]) within group (order by inputs_per_minute) filter (where inputs_per_minute is not null)
+      (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by inputs_per_minute) filter (where inputs_per_minute is not null))::numeric[]
     end as ipm_q
   from benchmark_user, params
   group by character_id, params.min_contributors, params.min_games
