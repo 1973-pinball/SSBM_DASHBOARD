@@ -23,7 +23,7 @@ export function readDataset(path = DATA_PATH) {
   const block = (name) => {
     // Tolerate CRLF: a Windows checkout stores data.ts with CRLF endings, and
     // matching a bare newline made every read here throw outside CI.
-    const m = src.match(new RegExp(`export const ${name}[^=]*= (\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\});\\r?\\n`));
+    const m = src.match(new RegExp(`export const ${name}[^=]*= (\\[[\\s\\S]*?\\]|\\{[\\s\\S]*?\\});[ \\t]*(?:\\r?\\n|$)`));
     if (!m) throw new Error(`could not locate ${name} in ${path}`);
     return JSON.parse(m[1]);
   };
