@@ -36,7 +36,13 @@ if (amounts.length) {
   console.log(`dollar amounts: ${amounts.length}, sum $${sum.toLocaleString("en-US")}, max $${Math.max(...amounts).toLocaleString("en-US")}`);
 }
 
-const re = new RegExp(needle, "gi");
+// The needle is a command-line argument, and it is matched literally rather
+// than compiled as a pattern. That is both the safe reading and the useful one:
+// searching for `winnings (approx.)` or `$1,234` finds those characters instead
+// of throwing on an unbalanced paren, and no argument can pin the CPU on
+// catastrophic backtracking.
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, (c) => "\\" + c);
+const re = new RegExp(escapeRe(needle), "gi");
 let hit;
 let n = 0;
 while ((hit = re.exec(html)) !== null && n < 12) {

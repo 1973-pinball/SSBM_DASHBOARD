@@ -109,13 +109,36 @@ export const displayName = (tag) => CANONICAL_DISPLAY[playerKey(tag)] ?? String(
 const MONTHS = { Jan: 1, Feb: 2, Mar: 3, Apr: 4, May: 5, Jun: 6, Jul: 7, Aug: 8, Sep: 9, Oct: 10, Nov: 11, Dec: 12 };
 const pad = (n) => String(n).padStart(2, "0");
 
-const stripTags = (s) =>
-  s
-    .replace(/<[^>]+>/g, "")
+/**
+ * HTML → plain text.
+ *
+ * Strips to a fixed point rather than in one pass. A single sweep can splice a
+ * new tag together out of what surrounded the one it removed — `<scr<script>ipt>`
+ * loses `<scr<script>` and leaves `ipt>` — so the loop runs until the string
+ * stops changing. Then any surviving angle bracket is dropped outright: the
+ * output of this function is a tournament name, a venue or a player tag, none of
+ * which has a legitimate `<` in it, and that makes it impossible for markup to
+ * come through however it was nested.
+ *
+ * Nothing downstream renders these unescaped today — React escapes its text
+ * children and render-seo-pages.mjs puts every one of them through esc(). This
+ * is still the sanitizer, and a sanitizer that only mostly works is the kind of
+ * thing the next consumer inherits without knowing it needs checking.
+ */
+const stripTags = (s) => {
+  let out = String(s);
+  let prev;
+  do {
+    prev = out;
+    out = out.replace(/<[^>]*>/g, "");
+  } while (out !== prev);
+  return out
+    .replace(/[<>]/g, "")
     .replace(/&#160;|&nbsp;/g, " ")
     .replace(/ /g, " ")
     .replace(/\s+/g, " ")
     .trim();
+};
 
 /**
  * "Nov 20 - 21, 2010" / "Aug 9, 2026" / "Dec 30, 2003 - Jan 2, 2004" → the END
