@@ -63,9 +63,42 @@
         "author": { "@type": "Organization", "name": "Studio Pinball" }
       }
     </script>
+
+    <!--
+      Critical styles, and only that. index.css ships with the JS bundle, so
+      until that lands the page is unstyled white — and the static footer below
+      #root is the one thing on screen before then. These few rules keep it dark
+      and legible rather than flashing. The values are copied from the tokens in
+      src/index.css; this is a pre-mount fallback, not a second source of truth.
+    -->
+    <style>
+      html, body { margin: 0; background: #121022; color: #ece9f8;
+                   font-family: Inter, system-ui, sans-serif; font-size: 14px; }
+      #static-nav { display: flex; flex-wrap: wrap; justify-content: center;
+                    gap: 10px; padding: 18px; font-size: 12px; color: #8981ae; }
+      #static-nav a { color: #aaa3c9; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+
+    <!--
+      The only crawlable path from / to the static pages. Googlebot's first pass
+      parses this HTML without running JavaScript, and #root is empty until React
+      mounts, so without this a crawler landing on the homepage finds no links at
+      all: /about, /metrics and /melee-majors would be reachable only through
+      sitemap.xml, and the homepage would pass them nothing.
+
+      It mirrors App.tsx's <footer class="site-footer">, and main.tsx removes it
+      as it mounts, so the two are never on screen together.
+    -->
+    <footer id="static-nav">
+      <span>SSBM Stats — Slippi replay analytics, parsed in your browser.</span>
+      <a href="/about">About</a>
+      <a href="/metrics">Metrics reference</a>
+      <a href="/melee-majors">Melee majors</a>
+      <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">Source</a>
+    </footer>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

@@ -57,6 +57,11 @@ registerSW({
   },
 })
 
+// index.html ships a static footer so a crawler that never runs this bundle
+// still finds the /about, /metrics and /melee-majors links. App renders its own
+// footer, so the placeholder goes as React takes over.
+document.getElementById('static-nav')?.remove()
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
