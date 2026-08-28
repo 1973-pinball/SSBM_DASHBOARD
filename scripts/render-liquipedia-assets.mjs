@@ -34,21 +34,10 @@ const NAME_TO_ID = {
   "Young Link": 21, "Dr. Mario": 22, Roy: 23, Pichu: 24, Ganondorf: 25,
 };
 
-// ---------------------------------------------------------------- dataset
-
-// Read through the shared reader rather than a second copy of the parser. The
-// duplicate that lived here required a bare newline and so threw on every
-// Windows checkout, where data.ts is CRLF - this script only ever ran in CI.
-const { majors: allMajors, editions, players } = readDataset();
-// Offline majors only, matching the tab: netplay-era events are excluded from
-// every total, so an exported image must not disagree with the page.
-const majors = allMajors.filter((m) => !m.online);
-if (majors.length === 0 || editions.length === 0) throw new Error("dataset is empty — nothing to render");
-
 // ---------------------------------------------------------------- frames
 
 /** Cumulative standings after each major (mirrors raceFrames in select.ts). */
-function raceFrames() {
+function raceFrames(majors) {
   const ordered = [...majors].sort((a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : a.name.localeCompare(b.name),
   );
@@ -69,7 +58,7 @@ function raceFrames() {
 }
 
 /** Per-edition character breakdown (mirrors compositionByEdition). */
-function charFrames() {
+function charFrames(editions) {
   return [...editions]
     .sort((a, b) => a.year - b.year)
     .map((edition, idx, all) => {
@@ -148,7 +137,20 @@ const mb = (n) => `${(n / 1048576).toFixed(2)} MB`;
 async function main() {
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const race = raceFrames();
+  // Loaded here rather than at module scope on purpose. A top-level throw
+  // rejects module evaluation and never reaches main().catch() below, so it
+  // would exit 1 and — now that build:deploy chains with && — take the whole
+  // production deploy down instead of just skipping the share images. The two
+  // most likely failures are exactly here: a data.ts the reader cannot parse,
+  // and an empty dataset. The weekly liquipedia-refresh Action rewrites that
+  // file, so this is a live path, not a hypothetical one.
+  const { majors: allMajors, editions, players } = readDataset();
+  // Offline majors only, matching the tab: netplay-era events are excluded from
+  // every total, so an exported image must not disagree with the page.
+  const majors = allMajors.filter((m) => !m.online);
+  if (majors.length === 0 || editions.length === 0) throw new Error("dataset is empty - nothing to render");
+
+  const race = raceFrames(majors);
   const raceIcons = await loadIcons(
     Object.entries(players)
       .map(([tag, meta]) => [tag, NAME_TO_ID[meta.mains?.[0]]])
@@ -174,7 +176,7 @@ async function main() {
     `majors race: ${raceSampled.length} frames of ${race.length}${raceStride > 1 ? ` (every ${raceStride})` : ""}, ${mb(raceOut.gif.length)}`,
   );
 
-  const chars = charFrames();
+  const chars = charFrames(editions);
   const charIcons = await loadIcons(
     [...new Set(chars.flatMap((f) => f.chars.map((c) => c.char)))]
       .map((name) => [name, NAME_TO_ID[name]])
