@@ -185,19 +185,30 @@ class SsbmDb extends Dexie {
         const packs = tx.table<RecordPack>("packs");
         const rows = await packs.toArray();
         const deadIds: string[] = [];
+        // Only the packs that actually lose a record get rewritten. Collected
+        // here rather than re-derived below, because "did this pack change" is
+        // known exactly once — at the moment the filter shortens it.
+        const dirty: RecordPack[] = [];
         for (const pack of rows) {
           const kept = pack.records.filter((r) => {
             if (r.parseError === undefined) return true;
             deadIds.push(r.id);
             return false;
           });
-          if (kept.length !== pack.records.length) pack.records = kept;
+          if (kept.length !== pack.records.length) {
+            pack.records = kept;
+            dirty.push(pack);
+          }
         }
         if (deadIds.length === 0) return;
-        // Packs are storage buckets, not an ordering: leaving the survivors in
-        // slightly under-full rows is cheaper than rewriting every pack, and
-        // putRecords tops up the trailing one anyway.
-        for (const pack of rows) {
+        // This runs inside the blocking versionchange transaction, so the write
+        // count is what the user waits through on first load after the deploy.
+        // Tombstones cluster in the handful of packs written while the parser
+        // was broken, so on a 30k-game library this is a few writes rather than
+        // the ~120 that rewriting every row would cost. Packs are storage
+        // buckets, not an ordering: survivors stay in slightly under-full rows,
+        // and putRecords tops the trailing one up on the next flush.
+        for (const pack of dirty) {
           if (pack.id !== undefined) await packs.put(pack);
         }
         await tx.table("seen").bulkDelete(deadIds);
