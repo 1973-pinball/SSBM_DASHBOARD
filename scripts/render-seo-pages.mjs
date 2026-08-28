@@ -134,6 +134,7 @@ ${body}
 <footer>
   <span>Brought to you by Studio Pinball · © 2026</span>
   <a href="/">ssbmstats.com</a>
+  <a href="https://github.com/1973-pinball/SSBM_DASHBOARD">Source on GitHub</a>
   <a href="mailto:info.studio.pinball@gmail.com">info.studio.pinball@gmail.com</a>
 </footer>
 </div>
@@ -213,6 +214,22 @@ between your own devices.</p>
 <p>Two parts of the site need no replay folder at all: the
 <a href="/melee-majors">Melee majors record</a>, covering every offline major since 2003, and the
 anonymous community benchmarks. Both are open to anyone.</p>
+
+<h2>Open source</h2>
+<p>The whole thing is on GitHub at
+<a href="https://github.com/1973-pinball/SSBM_DASHBOARD">1973-pinball/SSBM_DASHBOARD</a>, MIT licensed. The
+parsing pipeline, the statistics, and the database schema behind cloud sync and the community aggregates are all
+there to read.</p>
+<p>That matters more here than it would elsewhere, because most of what this page claims is otherwise
+unfalsifiable. You cannot see from the outside that frame data is discarded after parsing, or that only
+thresholded aggregates are published. You can read the code that does it.</p>
+<p>Being honest about the limit of that: reading the source tells you what the code does, not that the server is
+running exactly this code. Builds here are not byte-for-byte reproducible, so nobody can diff what you download
+against what is served. What you <em>can</em> check without trusting anyone is the browser itself — open the
+network panel and watch a parse: no request carries replay bytes, because there is no code path that sends
+them.</p>
+<p>You can also run your own copy. Self-hosting points cloud sync at a Supabase project you control, which
+removes the operator from the picture entirely.</p>
 
 <a class="cta" href="/">Open the dashboard</a>
 `,
