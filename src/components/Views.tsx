@@ -2,8 +2,8 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } 
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, actionAverages, actionImpact, moveTable, moveImpact, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
-import type { ExecMetricKey, GameSet, SetsSummary } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeries, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import type { ExecMetricKey, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
@@ -657,12 +657,6 @@ interface SeriesDef {
   oppValue?: (g: ResolvedGame) => number;
 }
 
-const NEUTRAL_SERIES: SeriesDef[] = [
-  { key: "neutralWins", label: "Neutral wins", color: "var(--accent)", value: (g) => g.me.neutralWins },
-  { key: "counterHits", label: "Counter hits", color: "#e8b54d", value: (g) => g.me.counterHits },
-  { key: "beneficialTrades", label: "Beneficial trades", color: "#3fcf8e", value: (g) => g.me.beneficialTrades },
-];
-
 // No reds here: red stays reserved for loss/danger, not series identity.
 const ACTION_COLORS: Record<keyof ActionCounts, string> = {
   rolls: "#4fc9c4",
@@ -806,11 +800,146 @@ function PerGameMetricChart({
   );
 }
 
+const MOVE_METRIC_CHOICES: { key: MoveMetricKey; label: string; unit: string; digits: number }[] = [
+  { key: "attemptsPerGame", label: "Attempted / game", unit: "", digits: 1 },
+  { key: "landedPerGame", label: "Landed / game", unit: "", digits: 1 },
+  { key: "dmgPerGame", label: "Dmg / game", unit: "", digits: 1 },
+  { key: "dmgShare", label: "Dmg share", unit: "%", digits: 1 },
+  { key: "avgDmgPerHit", label: "Avg dmg / hit", unit: "", digits: 1 },
+  { key: "killsPerGame", label: "Kills / game", unit: "", digits: 2 },
+  { key: "killShare", label: "Kill share", unit: "%", digits: 1 },
+  { key: "avgKillPct", label: "Avg kill %", unit: "%", digits: 0 },
+  { key: "lCancelPct", label: "L-cancel", unit: "%", digits: 1 },
+];
+
+/**
+ * Why a move x metric can have nothing to plot without anything being wrong.
+ * Named per metric because a bare "no data" reads as a bug otherwise: two of
+ * these columns simply are not collected for every move (see MoveAgg).
+ */
+const MOVE_METRIC_EMPTY: Partial<Record<MoveMetricKey, string>> = {
+  attemptsPerGame:
+    "Attempts are tracked for grounded normals and aerials only — specials and throws record landings, not initiations.",
+  lCancelPct: "L-cancel only applies to aerials.",
+  avgKillPct: "This move hasn't closed a stock in these games.",
+};
+
+/**
+ * Any cell of the Move effectiveness table, plotted over time. That table is a
+ * snapshot of the last ROLLING_WINDOW games; this is the same figure computed
+ * over the window ending at every game, so its right edge is that table and
+ * the line behind it is how the number got there.
+ */
+function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveRow[] }) {
+  const [moveKey, setMoveKey] = useState("");
+  const [metric, setMetric] = useState<MoveMetricKey>("landedPerGame");
+  // Filters change which moves exist at all, so a held key goes stale — fall
+  // back to the top move rather than plotting nothing until the user works out
+  // that the dropdown is pointing at something no longer in the data.
+  const active = moves.find((m) => m.key === moveKey) ?? moves[0];
+  const activeKey = active?.key;
+  const def = MOVE_METRIC_CHOICES.find((m) => m.key === metric)!;
+  const data = useMemo(
+    () => (activeKey ? moveMetricSeries(games, activeKey, metric) : []),
+    [games, activeKey, metric],
+  );
+  const hasData = data.some((p) => p.value !== null);
+  return (
+    <div className="panel">
+      <div className="panel-heading-row">
+        <div>
+          <h2>Move trend — {ROLLING_WINDOW}-game rolling average</h2>
+        </div>
+        <div className="panel-controls">
+          <label>
+            Move
+            <select value={activeKey ?? ""} onChange={(e) => setMoveKey(e.target.value)} disabled={moves.length === 0}>
+              {moves.length === 0 && <option value="">No move data</option>}
+              {moves.map((m) => (
+                <option key={m.key} value={m.key}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Metric
+            <select value={metric} onChange={(e) => setMetric(e.target.value as MoveMetricKey)}>
+              {MOVE_METRIC_CHOICES.map((m) => (
+                <option key={m.key} value={m.key}>{m.label}</option>
+              ))}
+            </select>
+          </label>
+        </div>
+      </div>
+      {!active ? (
+        <div className="empty-note">
+          No per-move data in these games yet — it's computed at parse time, so hit <b>Refresh</b> (or re-pick your
+          folder) to re-parse the library once.
+        </div>
+      ) : !hasData ? (
+        <div className="empty-note">
+          Nothing to plot for {active.label} — {def.label}.{" "}
+          {MOVE_METRIC_EMPTY[metric] ?? "That move doesn't land in these games."}
+        </div>
+      ) : (
+        <>
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
+              <CartesianGrid {...gridStyle} />
+              {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
+              <XAxis
+                dataKey="index"
+                tick={axisStyle}
+                tickLine={false}
+                axisLine={{ stroke: "var(--line)" }}
+                minTickGap={48}
+                tickFormatter={(v: number) => dayTick(data[v - data[0]!.index]?.date)} // ticks only exist when data is non-empty
+              />
+              <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={def.unit} />
+              <Tooltip
+                {...tooltipStyle}
+                labelFormatter={(v, payload) => {
+                  const d = payload?.[0]?.payload?.date;
+                  return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
+                }}
+                formatter={(v) => [`${num(Number(v), def.digits)}${def.unit}`, `${active.label} — ${def.label}`]}
+              />
+              <Line
+                type="monotone"
+                dataKey="value"
+                name={`${active.label} — ${def.label}`}
+                stroke="var(--accent)"
+                strokeWidth={2}
+                dot={false}
+                connectNulls
+              />
+            </LineChart>
+          </ResponsiveContainer>
+          <div className="hint">
+            Each point is {active.label} — {def.label} over the previous {ROLLING_WINDOW} games, so the last point
+            is the figure the Move effectiveness table below shows
+            {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}. Gaps are
+            windows with no denominator — games you never threw it in — rather than zeroes, which would claim
+            you threw it and got nothing.
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 export function Execution({ games }: { games: ResolvedGame[] }) {
+  // The charts cover the whole filter; everything under them describes current
+  // form, so it reads the trailing window the charts smooth over. The same
+  // number on purpose — see ROLLING_WINDOW.
+  const recentGames = useMemo(() => games.slice(-ROLLING_WINDOW), [games]);
   const points = useMemo(() => executionTrend(games), [games]);
   const summary = useMemo(() => executionSummary(games), [games]);
-  const actions = useMemo(() => actionAverages(games), [games]);
-  const neutral = useMemo(() => neutralSummary(games), [games]);
+  const actions = useMemo(() => actionAverages(recentGames), [recentGames]);
+  const neutral = useMemo(() => neutralSummary(recentGames), [recentGames]);
+  // One pass over the whole filter feeds the move picker and the impact split;
+  // the window pass feeds the two tables that report current habits.
+  const career = useMemo(() => moveTable(games), [games]);
+  const recentMoves = useMemo(() => moveTable(recentGames), [recentGames]);
   if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
@@ -864,12 +993,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
 
       <RollingExecChart games={games} />
 
-      <PerGameMetricChart
-        title={`Neutral exchanges — per game, ${ROLLING_WINDOW}-game rolling average`}
-        games={games}
-        series={NEUTRAL_SERIES}
-        defaults={["beneficialTrades"]}
-      />
+      <MoveMetricChart games={games} moves={career.rows} />
 
       <PerGameMetricChart
         title={`Actions — per game, ${ROLLING_WINDOW}-game rolling average`}
@@ -879,82 +1003,106 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
       />
 
       <div className="panel">
-        <h2>Neutral summary</h2>
-        <table>
-          <thead>
-            <tr>
-              <th />
-              <th className="data">Me</th>
-              <th className="data">Opponents</th>
-              <th className="data">Per game</th>
-              <th className="data">My share</th>
-            </tr>
-          </thead>
-          <tbody>
-            {neutral.map((r) => (
-              <tr key={r.label}>
-                <td>{r.label}</td>
-                <td className="data">{r.mine.toLocaleString()}</td>
-                <td className="data">{r.theirs.toLocaleString()}</td>
-                <td className="data">{num(r.perGame, 1)}</td>
-                <td className="data" style={{ color: winRateColor(r.share) }}>{pct(r.share, 0)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="hint">
-          Share is your count ÷ the game total — over 50% means you're winning that kind of exchange more often than your
-          opponents across the filtered games.
-        </div>
+        <h2>Neutral summary (past {neutral.covered.toLocaleString()} games)</h2>
+        {neutral.covered === 0 ? (
+          <div className="empty-note">Your most recent games in this filter don't carry neutral counts yet.</div>
+        ) : (
+          <>
+            <table>
+              <thead>
+                <tr>
+                  <th />
+                  <th className="data">Me</th>
+                  <th className="data">Opponents</th>
+                  <th className="data">Per game</th>
+                  <th className="data">My share</th>
+                </tr>
+              </thead>
+              <tbody>
+                {neutral.rows.map((r) => (
+                  <tr key={r.label}>
+                    <td>{r.label}</td>
+                    <td className="data">{r.mine.toLocaleString()}</td>
+                    <td className="data">{r.theirs.toLocaleString()}</td>
+                    <td className="data">{num(r.perGame, 1)}</td>
+                    <td className="data" style={{ color: winRateColor(r.share) }}>{pct(r.share, 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="hint">
+              Your most recent {neutral.covered.toLocaleString()} games in this filter — current form, not career
+              totals. Share is your count ÷ the game total, so over 50% means you're winning that kind of exchange
+              more often than your opponents.
+            </div>
+          </>
+        )}
       </div>
 
       <div className="panel">
-        <h2>Actions per game</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>Action</th>
-              <th className="data">Per game</th>
-              <th className="data">Per minute</th>
-              <th className="data">Opp per game</th>
-              <th className="data">Opp per minute</th>
-            </tr>
-          </thead>
-          <tbody>
-            {actions.map((a) => (
-              <tr key={a.key}>
-                <td>{a.label}</td>
-                <td className="data">{num(a.perGame, 1)}</td>
-                <td className="data">{num(a.perMinute, 1)}</td>
-                <td className="data">{num(a.oppPerGame, 1)}</td>
-                <td className="data">{num(a.oppPerMinute, 1)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <div className="hint">
-          Averages over the filtered games — your counts and your opponents'. Per-minute normalizes for game length —
-          better for comparing across filters.
-        </div>
+        <h2>Actions per game (past {actions.covered.toLocaleString()} games)</h2>
+        {actions.covered === 0 ? (
+          <div className="empty-note">Your most recent games in this filter don't carry action counts yet.</div>
+        ) : (
+          <>
+            <table>
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th className="data">Per game</th>
+                  <th className="data">Per minute</th>
+                  <th className="data">Opp per game</th>
+                  <th className="data">Opp per minute</th>
+                </tr>
+              </thead>
+              <tbody>
+                {actions.rows.map((a) => (
+                  <tr key={a.key}>
+                    <td>{a.label}</td>
+                    <td className="data">{num(a.perGame, 1)}</td>
+                    <td className="data">{num(a.perMinute, 1)}</td>
+                    <td className="data">{num(a.oppPerGame, 1)}</td>
+                    <td className="data">{num(a.oppPerMinute, 1)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="hint">
+              Your most recent {actions.covered.toLocaleString()} games in this filter — your counts and your
+              opponents'. Per-minute normalizes for game length, which is the fairer comparison across filters.
+            </div>
+          </>
+        )}
       </div>
 
-      <MovesSection games={games} />
+      <MovesSection games={games} career={career} recent={recentMoves} />
     </>
   );
 }
 
-/** Per-move damage, kills, openings, and the volume-vs-wins impact analysis. */
-function MovesSection({ games }: { games: ResolvedGame[] }) {
-  // Effectiveness reads the recent window (current habits); openings and the
-  // impact analysis keep the full filter, which they need for sample size.
-  const recent = useMemo(() => moveTable(games.slice(-100)), [games]);
-  const { rows, covered } = useMemo(() => moveTable(games), [games]);
+/**
+ * Per-move damage, kills, openings, and the volume-vs-wins impact analysis.
+ *
+ * Both move-table passes are computed by the caller and handed down: `recent`
+ * is the trailing window the first two tables report, `career` the whole
+ * filter, which the impact split needs for its medians to mean anything and
+ * the move picker needs so its dropdown isn't cut down to the window.
+ */
+function MovesSection({
+  games,
+  career,
+  recent,
+}: {
+  games: ResolvedGame[];
+  career: { rows: MoveRow[]; covered: number };
+  recent: { rows: MoveRow[]; covered: number };
+}) {
   // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
   const impact = useMemo(
     () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
     [games],
   );
-  if (rows.length === 0) {
+  if (career.rows.length === 0) {
     return (
       <div className="panel">
         <h2>Moves</h2>
@@ -969,7 +1117,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
   return (
     <>
       <div className="panel">
-        <h2>Move effectiveness (past {Math.min(100, recent.covered).toLocaleString()} games)</h2>
+        <h2>Move effectiveness (past {recent.covered.toLocaleString()} games)</h2>
         <table>
           <thead>
             <tr>
@@ -1006,7 +1154,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
           </tbody>
         </table>
         <div className="hint">
-          Your most recent {Math.min(100, recent.covered).toLocaleString()} games in this filter — current habits, not
+          Your most recent {recent.covered.toLocaleString()} games in this filter — current habits, not
           career averages. Attempted counts every initiation (whiffs included) and is tracked for normals and aerials
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
@@ -1016,7 +1164,7 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
       </div>
 
       <div className="panel">
-        <h2>Openings — which move starts your offense</h2>
+        <h2>Openings — which move starts your offense (past {recent.covered.toLocaleString()} games)</h2>
         <table>
           <thead>
             <tr>
@@ -1027,13 +1175,13 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
             </tr>
           </thead>
           <tbody>
-            {rows
+            {recent.rows
               .filter((r) => r.openings > 0)
               .sort((a, b) => b.openings - a.openings)
               .map((r) => (
                 <tr key={r.key}>
                   <td>{r.label}</td>
-                  <td className="data">{num(covered ? r.openings / covered : 0, 1)}</td>
+                  <td className="data">{num(recent.covered ? r.openings / recent.covered : 0, 1)}</td>
                   <td className="data">{pct(r.openingShare, 0)}</td>
                   <td className="data">{num(r.dmgPerOpening, 1)}</td>
                 </tr>
@@ -1041,8 +1189,10 @@ function MovesSection({ games }: { games: ResolvedGame[] }) {
           </tbody>
         </table>
         <div className="hint">
-          The first move of each conversion. High damage-per-opening moves are the neutral wins worth hunting; pair
-          with openings/kill above to see whether you're converting them.
+          The first move of each conversion, over your most recent {recent.covered.toLocaleString()} games in this
+          filter. High damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to
+          see whether you're converting them. A short window makes the rare openings noisy — a move with a handful of
+          them can top the damage column on one good conversion.
         </div>
       </div>
 

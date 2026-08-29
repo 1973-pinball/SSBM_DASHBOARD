@@ -33,6 +33,11 @@ function localWeekStart(date: Date): string {
  * win-rate curve and every trend on the Execution tab, player and opponent
  * lines alike — and by the titles that name it. One knob: widen it here and
  * they all widen together, which is the only reason they stay consistent.
+ *
+ * It is also the recency window the Execution tab's tables and KPI strip cover
+ * (they read `games.slice(-ROLLING_WINDOW)`), deliberately the same number:
+ * every one of those figures is the final point of a chart plotting the same
+ * quantity, and the two disagreeing on screen is a bug nobody would spot.
  */
 export const ROLLING_WINDOW = 100;
 
@@ -258,18 +263,23 @@ export interface NeutralSummaryRow {
   share: number | null; // mine / (mine + theirs)
 }
 
-/** Aggregate neutral-exchange counts: who's winning neutral, countering, and trading well. */
-export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
+/**
+ * Aggregate neutral-exchange counts: who's winning neutral, countering, and
+ * trading well. `covered` is how many of the given games actually carry the
+ * counts — the caller names that number, not the array length, or a window
+ * still filling with header previews reads as a full one.
+ */
+export function neutralSummary(games: ResolvedGame[]): { rows: NeutralSummaryRow[]; covered: number } {
   // `share` is a ratio of sums and would survive a header preview, but
   // `perGame` would not: a preview contributes nothing to the numerator and a
   // whole game to the denominator.
   const measured = games.filter((g) => hasFullStats(g.rec));
-  const rows = [
+  const defs = [
     { label: "Neutral wins", pick: (p: { neutralWins: number }) => p.neutralWins },
     { label: "Counter hits", pick: (p: { counterHits: number }) => p.counterHits },
     { label: "Beneficial trades", pick: (p: { beneficialTrades: number }) => p.beneficialTrades },
   ];
-  return rows.map(({ label, pick }) => {
+  const rows = defs.map(({ label, pick }) => {
     let mine = 0;
     let theirs = 0;
     for (const g of measured) {
@@ -284,6 +294,7 @@ export function neutralSummary(games: ResolvedGame[]): NeutralSummaryRow[] {
       share: mine + theirs > 0 ? mine / (mine + theirs) : null,
     };
   });
+  return { rows, covered: measured.length };
 }
 
 export interface ActionAverageRow {
@@ -295,12 +306,16 @@ export interface ActionAverageRow {
   oppPerMinute: number;
 }
 
-/** Average action counts per game (and per minute, for length-independent comparison). */
-export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
+/**
+ * Average action counts per game (and per minute, for length-independent
+ * comparison). `covered` is the measured-game count behind those averages —
+ * see neutralSummary for why the caller needs it rather than `games.length`.
+ */
+export function actionAverages(games: ResolvedGame[]): { rows: ActionAverageRow[]; covered: number } {
   // Header previews carry zeroed action counts, and both denominators here —
   // game count and total minutes — would otherwise include them.
   const measured = games.filter((g) => hasFullStats(g.rec));
-  if (measured.length === 0) return [];
+  if (measured.length === 0) return { rows: [], covered: 0 };
   const totals: Record<keyof ActionCounts, number> = {
     rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
   };
@@ -316,7 +331,7 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
     }
   }
   const minutes = frames / 3600;
-  return ACTION_LABELS.map(({ key, label }) => ({
+  const rows = ACTION_LABELS.map(({ key, label }) => ({
     key,
     label,
     perGame: totals[key] / measured.length,
@@ -324,6 +339,7 @@ export function actionAverages(games: ResolvedGame[]): ActionAverageRow[] {
     oppPerGame: oppTotals[key] / measured.length,
     oppPerMinute: minutes > 0 ? oppTotals[key] / minutes : 0,
   }));
+  return { rows, covered: measured.length };
 }
 
 export interface RollingPoint {
@@ -818,6 +834,143 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
     }))
     .sort((a, b) => b.damage - a.damage);
   return { rows, covered };
+}
+
+/** One column of the move table, as a key the chart's metric picker passes back. */
+export type MoveMetricKey =
+  | "attemptsPerGame"
+  | "landedPerGame"
+  | "dmgPerGame"
+  | "dmgShare"
+  | "avgDmgPerHit"
+  | "killsPerGame"
+  | "killShare"
+  | "avgKillPct"
+  | "lCancelPct";
+
+/**
+ * Field layout of the one-game slice `moveMetricSeries` slides a window over.
+ * A flat stride rather than objects because the window is a ring buffer: the
+ * slot being overwritten is the game leaving the window, and reading its two
+ * numbers back out is the whole subtraction step.
+ */
+const MV = {
+  attempts: 0,
+  attemptsTracked: 1, // 1 when the move reported attempts at all — see MoveAgg
+  landed: 2,
+  damage: 3,
+  kills: 4,
+  killPctSum: 5,
+  lCancelSuccess: 6,
+  lCancelTotal: 7,
+  games: 8, // games carrying move data at all, the per-game denominators
+  allDamage: 9, // whole arsenal, for the share columns
+  allKills: 10,
+} as const;
+const MV_STRIDE = 11;
+
+/**
+ * Each move-table column as a numerator/denominator pair, so a windowed value
+ * is a ratio of sliding sums. The denominators differ on purpose: per-game
+ * rates divide by the games that carry move data, shares by that window's
+ * whole-arsenal total, and the quality columns (avg damage, avg kill %,
+ * L-cancel) by their own event count — so a window in which the move went
+ * unused reads as no data rather than as a zero, which is a different claim.
+ */
+const MOVE_METRICS: Record<MoveMetricKey, { num: number; den: number; scale: number }> = {
+  attemptsPerGame: { num: MV.attempts, den: MV.attemptsTracked, scale: 1 },
+  landedPerGame: { num: MV.landed, den: MV.games, scale: 1 },
+  dmgPerGame: { num: MV.damage, den: MV.games, scale: 1 },
+  dmgShare: { num: MV.damage, den: MV.allDamage, scale: 100 },
+  avgDmgPerHit: { num: MV.damage, den: MV.landed, scale: 1 },
+  killsPerGame: { num: MV.kills, den: MV.games, scale: 1 },
+  killShare: { num: MV.kills, den: MV.allKills, scale: 100 },
+  avgKillPct: { num: MV.killPctSum, den: MV.kills, scale: 1 },
+  lCancelPct: { num: MV.lCancelSuccess, den: MV.lCancelTotal, scale: 100 },
+};
+
+/** Write one game's contribution for `moveKey` into `out` at `base`. */
+function moveSlice(g: ResolvedGame, moveKey: string, out: Float64Array, base: number): void {
+  let attempts = 0, attemptsTracked = 0, landed = 0, damage = 0, kills = 0, killPctSum = 0;
+  let lcSuccess = 0, lcTotal = 0, gameCount = 0, allDamage = 0, allKills = 0;
+  const ms = g.me.moveStats;
+  if (ms) {
+    gameCount = 1;
+    for (const idStr in ms) {
+      const m = ms[Number(idStr)];
+      if (!m) continue;
+      allDamage += m.damage;
+      allKills += m.kills;
+      if (moveGroup(Number(idStr)).key !== moveKey) continue;
+      if (m.attempts !== undefined) {
+        attempts += m.attempts;
+        attemptsTracked = 1;
+      }
+      landed += m.landed;
+      damage += m.damage;
+      kills += m.kills;
+      killPctSum += m.killPctSum;
+      lcSuccess += m.lcSuccess ?? 0;
+      lcTotal += (m.lcSuccess ?? 0) + (m.lcFail ?? 0);
+    }
+  }
+  out[base + MV.attempts] = attempts;
+  out[base + MV.attemptsTracked] = attemptsTracked;
+  out[base + MV.landed] = landed;
+  out[base + MV.damage] = damage;
+  out[base + MV.kills] = kills;
+  out[base + MV.killPctSum] = killPctSum;
+  out[base + MV.lCancelSuccess] = lcSuccess;
+  out[base + MV.lCancelTotal] = lcTotal;
+  out[base + MV.games] = gameCount;
+  out[base + MV.allDamage] = allDamage;
+  out[base + MV.allKills] = allKills;
+}
+
+/**
+ * One move's move-table column, recomputed over the trailing `window` games
+ * ending at each game — so the final point is the figure the Move effectiveness
+ * table itself shows, and the line behind it is how that figure got there.
+ *
+ * Single pass, and only a window's worth of slices is held (the ring buffer
+ * above), which is what keeps it cheap on a 30k-game library even though the
+ * picker refits it on every dropdown change. `null` wherever the window has no
+ * denominator — a move never thrown, an aerial before its first landing, or a
+ * column that move doesn't report — and the chart draws those as gaps, since a
+ * zero there would read as "attempted it and got nothing".
+ */
+export function moveMetricSeries(
+  games: ResolvedGame[],
+  moveKey: string,
+  metric: MoveMetricKey,
+  window = ROLLING_WINDOW,
+  limit = 500,
+): RollingExecutionPoint[] {
+  const { num, den, scale } = MOVE_METRICS[metric];
+  const w = Math.max(1, Math.floor(window));
+  const emitStart = Math.max(0, games.length - limit);
+  const ring = new Float64Array(w * MV_STRIDE);
+  const out: RollingExecutionPoint[] = [];
+  let numSum = 0, denSum = 0;
+  for (let i = 0; i < games.length; i++) {
+    const g = games[i]!;
+    const base = (i % w) * MV_STRIDE;
+    // That slot still holds the game about to leave the window; drop it first.
+    if (i >= w) {
+      numSum -= ring[base + num]!;
+      denSum -= ring[base + den]!;
+    }
+    moveSlice(g, moveKey, ring, base);
+    numSum += ring[base + num]!;
+    denSum += ring[base + den]!;
+    if (i < emitStart) continue;
+    out.push({
+      index: i + 1,
+      date: dayLabel(g.date),
+      value: denSum > 0 ? (numSum / denSum) * scale : null,
+    });
+  }
+  return out;
 }
 
 export interface MoveImpactRow {
@@ -1381,8 +1534,12 @@ export interface ExecutionSummary {
   ipm: number | null;
 }
 
-/** Averages over the most recent `window` games (KPI strip on Execution). */
-export function executionSummary(games: ResolvedGame[], window = 50): ExecutionSummary {
+/**
+ * Averages over the most recent `window` games (KPI strip on Execution).
+ * The default is the shared window, so the strip agrees with the trend charts
+ * and tables beside it; coach.ts passes its own narrower one deliberately.
+ */
+export function executionSummary(games: ResolvedGame[], window = ROLLING_WINDOW): ExecutionSummary {
   const slice = games.slice(Math.max(0, games.length - window));
   const value = (key: ExecMetricKey): number | null => {
     const { num, den, scale } = EXEC_METRICS[key];
