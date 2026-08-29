@@ -41,6 +41,27 @@ function localWeekStart(date: Date): string {
  */
 export const ROLLING_WINDOW = 100;
 
+/**
+ * Most points a per-game chart draws. The sliding-sum series cost O(1) per
+ * game, so what this bounds is the SVG, not the arithmetic.
+ *
+ * It thins, it does not truncate: the emitted points are spread across the
+ * whole filter rather than kept from its tail. Keeping the tail meant a library
+ * of any size answered "how am I trending?" with its last 500 games and said so
+ * only in a parenthetical — a player with a summer of replays got a chart that
+ * started three weeks ago. Every game enters the window either way; this only
+ * decides which of the results get drawn.
+ */
+export const MAX_SERIES_POINTS = 800;
+
+/**
+ * Emit every Nth game so `n` of them fit the budget. Anchored to the end, so
+ * the newest game is always a point (the move picker promises its last point
+ * is the move table's own figure) and the spacing runs back from there.
+ */
+const seriesStride = (n: number, maxPoints: number): number => Math.max(1, Math.ceil(n / maxPoints));
+const emitsAt = (i: number, n: number, stride: number): boolean => (n - 1 - i) % stride === 0;
+
 // ---------- Identity ----------
 
 /**
@@ -944,11 +965,11 @@ export function moveMetricSeries(
   moveKey: string,
   metric: MoveMetricKey,
   window = ROLLING_WINDOW,
-  limit = 500,
+  maxPoints = MAX_SERIES_POINTS,
 ): RollingExecutionPoint[] {
   const { num, den, scale } = MOVE_METRICS[metric];
   const w = Math.max(1, Math.floor(window));
-  const emitStart = Math.max(0, games.length - limit);
+  const stride = seriesStride(games.length, maxPoints);
   const ring = new Float64Array(w * MV_STRIDE);
   const out: RollingExecutionPoint[] = [];
   let numSum = 0, denSum = 0;
@@ -963,7 +984,7 @@ export function moveMetricSeries(
     moveSlice(g, moveKey, ring, base);
     numSum += ring[base + num]!;
     denSum += ring[base + den]!;
-    if (i < emitStart) continue;
+    if (!emitsAt(i, games.length, stride)) continue;
     out.push({
       index: i + 1,
       date: dayLabel(g.date),
@@ -1563,19 +1584,18 @@ export interface RollingExecutionPoint {
 }
 
 /**
- * Rolling `window`-game average of one execution metric, one point per game.
- * Single-pass sliding sums (no per-point slicing); output is capped to the
- * latest `limit` points to keep the chart renderable, but each window still
- * looks back over games before the cap.
+ * Rolling `window`-game average of one execution metric. Single-pass sliding
+ * sums (no per-point slicing); the line spans every game in the filter, thinned
+ * to MAX_SERIES_POINTS.
  */
 export function rollingExecutionSeries(
   games: ResolvedGame[],
   metric: ExecMetricKey,
   window = ROLLING_WINDOW,
-  limit = 500,
+  maxPoints = MAX_SERIES_POINTS,
 ): RollingExecutionPoint[] {
   const { num, den, scale } = EXEC_METRICS[metric];
-  const emitStart = Math.max(0, games.length - limit);
+  const stride = seriesStride(games.length, maxPoints);
   const out: RollingExecutionPoint[] = [];
   let numSum = 0, denSum = 0;
   for (let i = 0; i < games.length; i++) {
@@ -1587,7 +1607,7 @@ export function rollingExecutionSeries(
       numSum -= num(old);
       denSum -= den(old);
     }
-    if (i < emitStart) continue;
+    if (!emitsAt(i, games.length, stride)) continue;
     out.push({
       index: i + 1,
       date: dayLabel(g.date),
@@ -1604,22 +1624,21 @@ export interface GameSeriesPoint {
 }
 
 /**
- * Trailing `window`-game mean of arbitrary picked metrics, one point per game.
- * Raw per-game counts swing far too hard to read a trend off, so these are
- * smoothed like executionTrend's rates — but as counts per game, not ratios.
- * Sliding sums keep it single-pass; the window is computed over every game and
- * only the emitted points are capped to the latest `limit` (which keeps charts
- * renderable on 30k-game libraries), so the first emitted point still averages
- * the games before the cap. The first `window` games of all average however
- * many games exist, matching rollingExecutionSeries.
+ * Trailing `window`-game mean of arbitrary picked metrics. Raw per-game counts
+ * swing far too hard to read a trend off, so these are smoothed like
+ * executionTrend's rates — but as counts per game, not ratios. Sliding sums
+ * keep it single-pass; the window is computed over every game and the emitted
+ * points are thinned to MAX_SERIES_POINTS across the whole filter. The first
+ * `window` games of all average however many games exist, matching
+ * rollingExecutionSeries.
  */
 export function perGameSeries(
   games: ResolvedGame[],
   picks: { key: string; value: (g: ResolvedGame) => number }[],
   window = ROLLING_WINDOW,
-  limit = 500,
+  maxPoints = MAX_SERIES_POINTS,
 ): GameSeriesPoint[] {
-  const emitStart = Math.max(0, games.length - limit);
+  const stride = seriesStride(games.length, maxPoints);
   const sums = new Float64Array(picks.length);
   const out: GameSeriesPoint[] = [];
   for (let i = 0; i < games.length; i++) {
@@ -1629,7 +1648,7 @@ export function perGameSeries(
       const pick = picks[p]!;
       sums[p] = sums[p]! + pick.value(g) - (old ? pick.value(old) : 0);
     }
-    if (i < emitStart) continue;
+    if (!emitsAt(i, games.length, stride)) continue;
     const n = Math.min(i + 1, window);
     const point: GameSeriesPoint = { index: i + 1, date: dayLabel(g.date) };
     for (let p = 0; p < picks.length; p++) point[picks[p]!.key] = sums[p]! / n;

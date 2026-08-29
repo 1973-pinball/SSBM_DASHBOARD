@@ -2,7 +2,7 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } 
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeries, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeries, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -597,6 +597,9 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
   const [metric, setMetric] = useState<ExecMetricKey>("lCancel");
   const def = ROLLING_METRICS.find((m) => m.key === metric)!;
   const data = useMemo(() => rollingExecutionSeries(games, metric), [games, metric]);
+  // Points are thinned across the whole history, so a tick's game index is no
+  // longer its position in the array — look the date up instead of deriving it.
+  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
   return (
     <div className="panel">
       <h2>Rolling {ROLLING_WINDOW}-game average</h2>
@@ -627,7 +630,7 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
             tickLine={false}
             axisLine={{ stroke: "var(--line)" }}
             minTickGap={48}
-            tickFormatter={(v: number) => dayTick(data[v - data[0]!.index]?.date)} // ticks only exist when data is non-empty
+            tickFormatter={(v: number) => dayTick(dateByIndex.get(v))}
           />
           <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={def.unit} />
           <Tooltip
@@ -642,7 +645,9 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
         </LineChart>
       </ResponsiveContainer>
       <div className="hint">
-        Each point averages the previous {ROLLING_WINDOW} games{games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
+        Each point averages the previous {ROLLING_WINDOW} games. The line spans all {games.length.toLocaleString()}{" "}
+        games in this filter
+        {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
       </div>
     </div>
   );
@@ -702,6 +707,9 @@ function PerGameMetricChart({
       ]),
     [games, series],
   );
+  // Points are thinned across the whole history, so a tick's game index is no
+  // longer its position in the array — look the date up instead of deriving it.
+  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -755,7 +763,7 @@ function PerGameMetricChart({
               tickLine={false}
               axisLine={{ stroke: "var(--line)" }}
               minTickGap={48}
-              tickFormatter={(v: number) => dayTick((data[v - data[0]!.index] as { date?: string })?.date)} // ticks only exist when data is non-empty
+              tickFormatter={(v: number) => dayTick(dateByIndex.get(v))}
             />
             {/* Decimals allowed: these are rolling averages of counts, not counts. */}
             <YAxis tick={axisStyle} tickLine={false} axisLine={false} />
@@ -793,8 +801,9 @@ function PerGameMetricChart({
         </ResponsiveContainer>
       )}
       <div className="hint">
-        Each point averages the previous {ROLLING_WINDOW} games
-        {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}.
+        Each point averages the previous {ROLLING_WINDOW} games. The line spans all {games.length.toLocaleString()}{" "}
+        games in this filter
+        {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
       </div>
     </div>
   );
@@ -843,6 +852,9 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
     () => (activeKey ? moveMetricSeries(games, activeKey, metric) : []),
     [games, activeKey, metric],
   );
+  // Points are thinned across the whole history, so a tick's game index is no
+  // longer its position in the array — look the date up instead of deriving it.
+  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
   const hasData = data.some((p) => p.value !== null);
   return (
     <div className="panel">
@@ -892,7 +904,7 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
                 tickLine={false}
                 axisLine={{ stroke: "var(--line)" }}
                 minTickGap={48}
-                tickFormatter={(v: number) => dayTick(data[v - data[0]!.index]?.date)} // ticks only exist when data is non-empty
+                tickFormatter={(v: number) => dayTick(dateByIndex.get(v))}
               />
               <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={def.unit} />
               <Tooltip
@@ -916,9 +928,10 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
           </ResponsiveContainer>
           <div className="hint">
             Each point is {active.label} — {def.label} over the previous {ROLLING_WINDOW} games, so the last point
-            is the figure the Move effectiveness table below shows
-            {games.length > 500 ? ` (latest 500 of ${games.length.toLocaleString()} games shown)` : ""}. Gaps are
-            windows with no denominator — games you never threw it in — rather than zeroes, which would claim
+            is the figure the Move effectiveness table below shows. The line spans all{" "}
+            {games.length.toLocaleString()} games in this filter
+            {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
+            Gaps are windows with no denominator — games you never threw it in — rather than zeroes, which would claim
             you threw it and got nothing.
           </div>
         </>
