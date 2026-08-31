@@ -27,10 +27,16 @@ export function ProgressBar({ p }: { p: ParseProgress }) {
 
 interface IdentityProps {
   gameCounts: Map<string, number>;
+  /**
+   * Live tally when the authoritative pass is still running behind this
+   * screen — the preview pass hands the user over here as soon as it knows
+   * every connect code, which is all this step needs.
+   */
+  parsing?: ParseProgress | null;
   onConfirm: (accounts: Account[]) => void;
 }
 
-export function IdentityPicker({ gameCounts, onConfirm }: IdentityProps) {
+export function IdentityPicker({ gameCounts, parsing, onConfirm }: IdentityProps) {
   const [accounts, setAccounts] = useState<Account[]>([blankAccount(0)]);
 
   const error = accountsError(accounts);
@@ -61,6 +67,12 @@ export function IdentityPicker({ gameCounts, onConfirm }: IdentityProps) {
         )}
       </div>
       <p className="hint">You can add, rename, or remove accounts later without re-scanning your replays.</p>
+      {parsing && parsing.total > 0 && parsing.done < parsing.total && (
+        <p className="hint">
+          Still parsing in the background — {parsing.done.toLocaleString()} of {parsing.total.toLocaleString()}{" "}
+          replays. The game counts above are already in; this pass is the execution stats catching up.
+        </p>
+      )}
     </div>
   );
 }

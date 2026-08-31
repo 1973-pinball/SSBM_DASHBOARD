@@ -431,9 +431,31 @@ export default function App() {
     async (discover: () => Promise<{ id: string; path: string; file: File }[]>) => {
       setPhase("parsing");
       setPipelineError(null);
+      setSyncSkipped(null);
       const gen = generation.current;
       const controller = new AbortController();
       abortRef.current = controller;
+      /**
+       * The preview pass only earns its second walk of the library if what it
+       * finds is on screen while the slow authoritative pass runs behind it.
+       * So the moment the pipeline flips to the full pass, hand the user over
+       * to the dashboard (or the identity prompt) and let the rest report
+       * through the topbar button, exactly as a folder Refresh does. Waiting
+       * for the whole pipeline meant the previews were parsed, streamed into
+       * state and never rendered: one bar filling fast, then a second one
+       * crawling, with nothing to show for the first.
+       */
+      let sawPreview = false;
+      let handedOff = false;
+      let onDashboard = false;
+      // Held on an object rather than a plain `let` for the same reason
+      // syncFolder does: the tally arrives through the callback and is read
+      // after the await.
+      const tally: { last: ParseProgress | null } = { last: null };
+      // A full pass running behind the dashboard keeps the folder busy: the
+      // re-focus rescan goes live at the hand-off, and would otherwise start a
+      // second walk of the folder this run is still parsing.
+      scanBusy.current = true;
       try {
         const files = await discover();
         if (files.length === 0) {
@@ -444,8 +466,41 @@ export default function App() {
           files,
           (p, newRecords) => {
             if (generation.current !== gen) return;
-            setProgress(p);
+            tally.last = p;
             appendRecords(newRecords);
+            if (p.pass === "header") sawPreview = true;
+            else if (sawPreview && !handedOff) {
+              handedOff = true;
+              void (async () => {
+                let accts: Account[] = [];
+                try {
+                  // The pipeline only streams the files it actually parses, so
+                  // a pick over a warm cache would hand over a dashboard with
+                  // everything already cached missing from it. Merge that in
+                  // first — appendRecords keeps a full record over the preview
+                  // standing in for it.
+                  const [known, alreadyCached] = await Promise.all([accountsForSession(), allRecords()]);
+                  accts = known;
+                  appendRecords(alreadyCached);
+                } catch (err) {
+                  console.error(err); // a dead local cache just means "ask them"
+                }
+                if (generation.current !== gen) return;
+                if (accts.length > 0) {
+                  setAccountsState(accts);
+                  setPhase("dashboard");
+                } else {
+                  setPhase("identity");
+                }
+                onDashboard = true;
+                setProgress(null);
+              })();
+            }
+            if (handedOff) setSyncing(p);
+            // The bar stays live until the phase actually flips: the account
+            // lookup behind the hand-off can cost a cloud roundtrip, and a bar
+            // frozen for that long reads as a stall.
+            if (!onDashboard) setProgress(p);
           },
           controller.signal,
         );
@@ -453,6 +508,20 @@ export default function App() {
         if (generation.current !== gen) return;
         const all = await allRecords();
         setRecords(all);
+        // What the progress panel used to report on its last frame. After the
+        // hand-off nobody is looking at it, so the tally moves to the topbar
+        // tag a refresh already uses.
+        const done = tally.last;
+        setSyncSkipped(
+          done && done.failed + done.unreadable + done.deferred > 0
+            ? { failed: done.failed, unreadable: done.unreadable, deferred: done.deferred }
+            : null,
+        );
+        // Phase was already resolved at the hand-off. Re-running it here would
+        // re-read accounts that an identity confirmation may have written back
+        // moments ago, and a lost race would throw the user back onto the
+        // prompt they just finished with.
+        if (handedOff) return;
         // A fresh folder pick on a signed-in device lands here with empty kv:
         // ask the cloud who they are before falling back to the prompt.
         const accts = await accountsForSession();
@@ -472,9 +541,19 @@ export default function App() {
           // AbortError is the user cancelling the folder picker — not a failure.
           setPipelineError("Parsing failed to start. Reload the page and try again — this usually happens when the site updated while this tab was open.");
         }
-        setPhase("landing");
+        // Past the hand-off the user is on a working dashboard holding most of
+        // their library, and the error note says what went wrong. Dropping them
+        // back to the landing page would throw all of it away.
+        if (!handedOff) setPhase("landing");
       } finally {
-        if (generation.current === gen) setProgress(null);
+        scanBusy.current = false;
+        // The re-focus throttle should run from the end of the parse, not from
+        // whenever this tab last happened to walk the folder.
+        lastFolderSyncAt.current = Date.now();
+        if (generation.current === gen) {
+          setProgress(null);
+          setSyncing(null);
+        }
       }
     },
     [appendRecords, markScanned, accountsForSession],
@@ -944,7 +1023,9 @@ export default function App() {
 
       {!publicView && phase === "parsing" && progress && <ProgressBar p={progress} />}
 
-      {!publicView && phase === "identity" && <IdentityPicker gameCounts={gameCounts} onConfirm={confirmIdentity} />}
+      {!publicView && phase === "identity" && (
+        <IdentityPicker gameCounts={gameCounts} parsing={syncing} onConfirm={confirmIdentity} />
+      )}
 
       {!publicView && phase === "dashboard" && (
         <>
