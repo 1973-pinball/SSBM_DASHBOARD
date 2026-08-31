@@ -10,12 +10,19 @@ export function activateOnKey(event: KeyboardEvent<HTMLElement>, activate: () =>
 /**
  * Roving focus for ARIA tab lists. Tab enters the active tab; arrow keys move
  * and select, matching the platform convention used by installed apps.
+ *
+ * A tab marked aria-disabled is stepped over rather than landed on. Because
+ * arrowing selects as well as focuses, stopping on one would move the focus
+ * ring off the panel the user is still looking at and open nothing in its
+ * place — the keyboard equivalent of a click that does nothing.
  */
 export function moveTabFocus(event: KeyboardEvent<HTMLElement>) {
   if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
   const list = event.currentTarget.closest('[role="tablist"]');
   if (!list) return;
-  const tabs = Array.from(list.querySelectorAll<HTMLElement>('[role="tab"]:not([disabled])'));
+  const tabs = Array.from(
+    list.querySelectorAll<HTMLElement>('[role="tab"]:not([disabled]):not([aria-disabled="true"])'),
+  );
   if (!tabs.length) return;
   const current = tabs.indexOf(event.currentTarget);
   let next = current;

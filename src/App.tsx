@@ -79,6 +79,20 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "liquipedia", label: "Liquipedia" },
 ];
 
+/**
+ * Tabs whose numbers are computed from frames. A header preview carries the
+ * result, the characters and the stage but no execution metrics at all (see
+ * runParsePipeline), so while any survive these tabs would average over
+ * whatever scattered fraction of the library the full pass had reached and
+ * draw the answer as a trend line — something that looks like data and is not.
+ * The rest of the tabs read only what a preview already knows, which is the
+ * whole point of parsing headers first.
+ */
+const NEEDS_FULL_STATS: ReadonlySet<Tab> = new Set<Tab>(["execution", "insights"]);
+
+/** Said on the tab itself and, for a deep link that landed on one, in its panel. */
+const PENDING_TAB_HINT = "Loading — waiting on execution stats from the parse still running";
+
 type Overlay = "guide" | "accounts" | "privacy" | null;
 type PublicView = "community" | "liquipedia" | null;
 interface AppHistoryState { ssbm: true; tab: Tab; overlay: Overlay; publicView: PublicView }
@@ -860,9 +874,17 @@ export default function App() {
     [phase, showAccounts, deduped],
   );
 
+  // A preview is replaced by id the moment its full parse lands, so this goes
+  // false on its own as the second pass drains — no separate "is a parse
+  // running" flag to keep in step. An incremental refresh never sets it: below
+  // HEADER_PASS_MIN the pipeline skips the preview pass entirely.
+  const hasPreviews = useMemo(() => deduped.some((r) => !hasFullStats(r)), [deduped]);
+  const isTabPending = (id: Tab) => hasPreviews && NEEDS_FULL_STATS.has(id);
+
   // Never strand the user in a teams view they have no games for.
   const hasTeamGames = resolvedTeams.length > 0;
   const showTeams = hasTeamGames && filters.format === "teams";
+  const activePending = isTabPending(tab);
   const busy = phase === "parsing" || syncing !== null;
   const lastScanLabel = lastScanned
     ? new Date(lastScanned).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
@@ -1039,27 +1061,50 @@ export default function App() {
           />
           {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
               consolidated view rather than the singles tab set. */}
+          {/* Deliberately outside the Suspense boundary below: a tab whose chunk
+              was still in flight used to take the whole strip down with it, so
+              the one control that could end the wait was the thing that
+              disappeared for the length of it. */}
+          {!showTeams && (
+            <div className="tabs" role="tablist">
+              {TABS.map((t) => {
+                const pending = isTabPending(t.id);
+                return (
+                  <button
+                    key={t.id}
+                    role="tab"
+                    tabIndex={tab === t.id ? 0 : -1}
+                    aria-selected={tab === t.id}
+                    // aria-disabled rather than the disabled attribute: Chrome
+                    // swallows hover on a disabled button, so the title saying
+                    // why the tab will not open would never be read.
+                    aria-disabled={pending || undefined}
+                    title={pending ? PENDING_TAB_HINT : undefined}
+                    className={tab === t.id ? "active" : ""}
+                    onKeyDown={moveTabFocus}
+                    onClick={() => { if (!pending) selectTab(t.id); }}
+                  >
+                    {t.label}
+                  </button>
+                );
+              })}
+            </div>
+          )}
           <ViewErrorBoundary>
           <Suspense fallback={<div className="empty-note">Loading…</div>}>
           {showTeams ? (
             <Teams games={filteredTeams} onSelectTeammate={(code) => setFilters({ ...filters, teammateCode: code })} />
+          ) : activePending ? (
+            // Reachable without a click: a ?view=execution link, or a tab left
+            // selected while a fresh import replaced the library under it.
+            <div className="empty-note">
+              {PENDING_TAB_HINT}
+              {syncing ? ` — ${syncing.done.toLocaleString()} of ${syncing.total.toLocaleString()} replays so far` : ""}.
+              <br />
+              The tab opens on its own when the parse finishes.
+            </div>
           ) : (
         <>
-          <div className="tabs" role="tablist">
-            {TABS.map((t) => (
-              <button
-                key={t.id}
-                role="tab"
-                tabIndex={tab === t.id ? 0 : -1}
-                aria-selected={tab === t.id}
-                className={tab === t.id ? "active" : ""}
-                onKeyDown={moveTabFocus}
-                onClick={() => selectTab(t.id)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
 
           {tab === "overview" && (
             <Overview
