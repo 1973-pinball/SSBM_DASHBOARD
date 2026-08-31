@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { IncompleteReplayError, parseHeader, parseReplay } from "../lib/parse";
+import { IncompleteReplayError, parseHeaderFile, parseReplay } from "../lib/parse";
 import type { GameRecord, ParsePassMode } from "../lib/types";
 
 interface Job {
@@ -39,6 +39,23 @@ export interface WorkerResult {
 
 self.onmessage = async (e: MessageEvent<Job>) => {
   const { id, path, file, mode } = e.data;
+  if (mode === "header") {
+    try {
+      const record = await parseHeaderFile(id, path, file);
+      const result: WorkerResult = { ok: true, id, path, record };
+      self.postMessage(result);
+    } catch (err) {
+      const result: WorkerResult = {
+        ok: false,
+        id,
+        path,
+        error: err instanceof Error ? err.message : String(err),
+        incomplete: err instanceof IncompleteReplayError,
+      };
+      self.postMessage(result);
+    }
+    return;
+  }
   let buf: ArrayBuffer;
   try {
     buf = await file.arrayBuffer();
@@ -54,7 +71,7 @@ self.onmessage = async (e: MessageEvent<Job>) => {
     return;
   }
   try {
-    const record = mode === "header" ? parseHeader(id, path, buf) : parseReplay(id, path, buf);
+    const record = parseReplay(id, path, buf);
     const result: WorkerResult = { ok: true, id, path, record };
     self.postMessage(result);
   } catch (err) {

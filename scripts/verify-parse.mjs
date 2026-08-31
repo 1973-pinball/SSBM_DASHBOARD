@@ -8,7 +8,7 @@
  * (decision 1 — raw replays never leave the machine), so this stays a manual
  * script rather than anything CI could run.
  *
- * Both invariants share a failure mode: they break QUIETLY. Nothing in the app
+ * These invariants share a failure mode: they break QUIETLY. Nothing in the app
  * goes red, no build fails, and the dashboard keeps rendering plausible numbers.
  * That is the whole reason this file exists.
  *
@@ -18,16 +18,30 @@
  *      it may leave a winner undetermined, never name a different one. Break
  *      this and win rates silently rewrite themselves mid-import.
  *
- *   2. dropUnreadComputers still binds. It reaches into slippi-js's private
+ *   2. The ranged header is byte-for-byte equivalent at the GameRecord level
+ *      to the whole-buffer header it replaces.
+ *
+ *   3. The bounded-frame full parser returns the same GameRecord as the old
+ *      retained-frame path, including teams matrices and per-move fields.
+ *
+ *   4. dropUnreadComputers still binds. It reaches into slippi-js's private
  *      fields to stop three stat computers whose output nothing reads. The
  *      guard means a shape change degrades to slow-but-correct, which is the
  *      safe direction and therefore the invisible one: a library upgrade could
  *      quietly hand back ~10% of every parse and nobody would ever know.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { File } from "node:buffer";
+import { basename, join } from "node:path";
 import { SlippiGame } from "@slippi/slippi-js";
-import { parseReplay, parseHeader, dropUnreadComputers, IncompleteReplayError } from "../src/lib/parse.ts";
+import {
+  parseReplay,
+  parseReplayRetainedForVerification,
+  parseHeader,
+  parseHeaderFile,
+  dropUnreadComputers,
+  IncompleteReplayError,
+} from "../src/lib/parse.ts";
 
 /**
  * Every input gameKey() derives a game's identity from. Asserted instead of
@@ -73,7 +87,7 @@ const sample = all.filter((_, i) => i % step === 0).slice(0, WANT);
 const failures = [];
 const fail = (file, what, detail) => failures.push({ file: file.split(/[\\/]/).pop(), what, detail });
 
-// ---- invariant 2: the reach-in still binds -------------------------------
+// ---- invariant 4: the reach-in still binds -------------------------------
 // Checked on the shape itself rather than inferred from timing, because a
 // timing regression is exactly the signal that gets lost in the noise.
 {
@@ -109,14 +123,16 @@ let skipped = 0;
 let headerDecided = 0;
 let fullDecided = 0;
 let headerMs = 0;
+let rangeHeaderMs = 0;
 let fullMs = 0;
+let retainedMs = 0;
 const ms = () => Number(process.hrtime.bigint() / 1000n) / 1000;
 
 for (const path of sample) {
   const buf = readFileSync(path);
   const id = `${path}|${buf.length}|${statSync(path).mtimeMs}`;
 
-  let header, full;
+  let header, rangeHeader, full, retained;
   try {
     const a = toArrayBuffer(buf);
     const b = toArrayBuffer(buf);
@@ -126,6 +142,12 @@ for (const path of sample) {
     t = ms();
     full = parseReplay(id, path, b);
     fullMs += ms() - t;
+    t = ms();
+    rangeHeader = await parseHeaderFile(id, path, new File([buf], basename(path), { lastModified: statSync(path).mtimeMs }));
+    rangeHeaderMs += ms() - t;
+    t = ms();
+    retained = parseReplayRetainedForVerification(id, path, toArrayBuffer(buf));
+    retainedMs += ms() - t;
   } catch (err) {
     // A replay caught mid-write is expected and not a failure; anything else is.
     if (err instanceof IncompleteReplayError) skipped++;
@@ -133,6 +155,13 @@ for (const path of sample) {
     continue;
   }
   ok++;
+
+  if (JSON.stringify(rangeHeader) !== JSON.stringify(header)) {
+    fail(path, "range header differs", "slice-backed preview changed a field from the whole-buffer header");
+  }
+  if (JSON.stringify(full) !== JSON.stringify(retained)) {
+    fail(path, "streaming parse differs", "bounded-frame parse changed a GameRecord from the retained-frame baseline");
+  }
 
   // ---- invariant 1: header is a strict subset of full --------------------
   const hw = header.isTeams ? header.winnerTeamId : header.winnerIndex;
@@ -159,7 +188,7 @@ for (const path of sample) {
     if (h !== f) fail(path, `${field} disagrees`, `header ${h}, full ${f}`);
   }
 
-  // ---- invariant 2, per file: lean stats == stock stats -------------------
+  // ---- invariant 4, per file: lean stats == stock stats -------------------
   const lean = new SlippiGame(toArrayBuffer(buf));
   dropUnreadComputers(lean);
   const stock = new SlippiGame(toArrayBuffer(buf));
@@ -170,11 +199,15 @@ for (const path of sample) {
 
 const per = (t) => (ok ? (t / ok).toFixed(1) : "-");
 console.log(`\nlibrary ${all.length} files, sampled ${sample.length}, parsed ${ok}${skipped ? `, skipped ${skipped} mid-write` : ""}`);
-console.log(`  parseHeader ${per(headerMs)} ms/game   parseReplay ${per(fullMs)} ms/game   ratio ${headerMs ? (fullMs / headerMs).toFixed(0) : "-"}x`);
+console.log(`  header: whole ${per(headerMs)} ms/game   ranged ${per(rangeHeaderMs)} ms/game`);
+console.log(
+  `  full: bounded ${per(fullMs)} ms/game   retained ${per(retainedMs)} ms/game   ` +
+    `speedup ${fullMs ? (retainedMs / fullMs).toFixed(2) : "-"}x`,
+);
 console.log(`  winner decided: header ${headerDecided}/${ok}, full ${fullDecided}/${ok}  (header <= full by design)`);
 
 if (failures.length === 0) {
-  console.log("\nOK — header pass is a strict subset, gameKeys agree, lean stats identical, reach-in still binds\n");
+  console.log("\nOK — ranged/whole headers and bounded/retained records match; subset, gameKey, and lean-stat invariants hold\n");
   process.exit(0);
 }
 console.log(`\n${failures.length} FAILURE(S):`);

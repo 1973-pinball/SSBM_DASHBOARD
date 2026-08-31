@@ -88,7 +88,9 @@ export function discoverFromFileList(files: FileList): DiscoveredFile[] {
   return out;
 }
 
-const BATCH_FLUSH = 25;
+// One transaction now fills one storage pack. The old 25-record batch paid ten
+// transactions (and ten trailing-pack reads/writes) for the same 250 records.
+const BATCH_FLUSH = 250;
 
 // UI record delivery is throttled by time, not batch size: every append
 // invalidates App's memoized resolve+sort of the entire library, so per-batch
@@ -174,16 +176,20 @@ export async function runParsePipeline(
   onProgress({ ...progress }, []);
   if (queue.length === 0) return;
 
-  // Parsing is CPU-bound, so the pool wants every core it can get — but each
-  // worker holds a whole game's frame objects while slippi-js computes over
-  // them, and the parser's frame map and the stats computer's index the same
-  // objects twice. That is ~100 MB peak on a long replay, so sixteen workers
-  // will exhaust a modest machine. The ceiling therefore rises only when the
-  // browser says there is memory behind it: `deviceMemory` is Chromium-only and
-  // coarse (rounded down, capped at 8), which is exactly the "plenty" signal
-  // wanted here — anything that withholds it keeps the old conservative cap.
-  const roomy = (navigator.deviceMemory ?? 0) >= 8;
-  const workerCount = Math.max(1, Math.min(navigator.hardwareConcurrency || 4, roomy ? 16 : 8));
+  // Logical cores are not a useful worker count by themselves: on hybrid CPUs
+  // they include efficiency cores, and slippi-js used to retain ~100 MB of
+  // frame objects per worker. The streaming parser below removes that peak, but
+  // memory bandwidth still flattens before every logical core is busy. A
+  // two-round, 240-game local benchmark of the final bounded parser measured
+  // 44.7/52.5/54.8 games/s at 4/6/8 workers respectively, so eight is the
+  // measured ceiling rather than a guess at "all cores". Four remains the
+  // low-memory baseline; browsers that withhold `deviceMemory` may use the
+  // measured 6/8 tiers now that completed frame batches are released in-stream.
+  const cores = navigator.hardwareConcurrency || 4;
+  const memoryGb = navigator.deviceMemory ?? 0;
+  const hasMemory = memoryGb === 0 || memoryGb >= 8;
+  const workerCap = hasMemory && cores >= 8 ? 8 : hasMemory && cores >= 6 ? 6 : 4;
+  const workerCount = Math.max(1, Math.min(cores, workerCap));
   interface Slot {
     worker: Worker;
     job: DiscoveredFile | null;

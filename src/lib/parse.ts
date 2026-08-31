@@ -1,5 +1,18 @@
-import { SlippiGame, Frames, GameEndMethod, ActionsComputer, InputComputer, calcDamageTaken, didLoseStock } from "@slippi/slippi-js";
-import type { GameEndType, GameStartType } from "@slippi/slippi-js";
+import {
+  SlippiGame,
+  Frames,
+  GameEndMethod,
+  ActionsComputer,
+  InputComputer,
+  SlpParser,
+  SlpParserEvent,
+  SlpStream,
+  SlpStreamEvent,
+  Command,
+  calcDamageTaken,
+  didLoseStock,
+} from "@slippi/slippi-js";
+import type { FrameEntryType, FramesType, GameEndType, GameStartType, MetadataType } from "@slippi/slippi-js";
 import type { GameRecord, GameType, MoveAgg, PlayerSide } from "./types";
 
 const MIN_GAME_SECONDS = 30;
@@ -72,17 +85,16 @@ interface TeamsStats {
   inputCountByPlayerIndex: Map<number, number>;
 }
 
-/**
- * slippi-js's stat computers are singles-only (they no-op on 4-player games),
- * so for clean 2v2s we make our own frame pass. Damage and kills are
- * attributed through each victim's `lastHitBy`, split into a full
- * attacker→victim matrix — that one structure yields enemy damage, friendly
- * fire (both directions), damage taken by source, and real stock captures.
- * Action/input counts reuse the library's own per-player state machines by
- * running them pairwise across teams (they only read the opponent's position,
- * for tech direction, which we don't surface).
- */
-function computeTeamsStats(game: SlippiGame, settings: GameStartType, lastFrame: number): TeamsStats | null {
+interface TeamsAccumulator {
+  players: GameStartType["players"];
+  computers: { actions: ActionsComputer; inputs: InputComputer }[];
+  posOf: Map<number, number>;
+  dmgMatrix: number[][];
+  killMatrix: number[][];
+  prev: FrameEntryType | null;
+}
+
+function createTeamsAccumulator(settings: GameStartType): TeamsAccumulator | null {
   const players = settings.players;
   if (players.length !== 4) return null;
   const byTeam = new Map<number, number>();
@@ -108,59 +120,264 @@ function computeTeamsStats(game: SlippiGame, settings: GameStartType, lastFrame:
     return { actions, inputs };
   });
 
-  const posOf = new Map(players.map((p, i) => [p.playerIndex, i]));
-  const dmgMatrix = players.map(() => players.map(() => 0));
-  const killMatrix = players.map(() => players.map(() => 0));
+  return {
+    players,
+    computers,
+    posOf: new Map(players.map((p, i) => [p.playerIndex, i])),
+    dmgMatrix: players.map(() => players.map(() => 0)),
+    killMatrix: players.map(() => players.map(() => 0)),
+    prev: null,
+  };
+}
+
+function addTeamsFrame(acc: TeamsAccumulator, frame: FrameEntryType, frames: FramesType): void {
+  const { players, computers, posOf, dmgMatrix, killMatrix } = acc;
+  if (!frame.players || players.some((p) => !frame.players[p.playerIndex]?.post)) return;
+
+  // InputComputer reaches back to frame-1 for each of its two players' `pre`
+  // blocks and does not guard that lookup. Keep action/damage computation when
+  // a malformed predecessor is missing and skip only that input sample.
+  const prevFrame = frames[frame.frame - 1];
+  const inputsReady =
+    players.every((p) => frame.players[p.playerIndex]?.pre) &&
+    prevFrame?.players !== undefined &&
+    players.every((p) => prevFrame.players[p.playerIndex]?.pre);
+  for (const { actions, inputs } of computers) {
+    actions.processFrame(frame);
+    if (inputsReady) inputs.processFrame(frame, frames);
+  }
+  if (acc.prev?.players) {
+    for (const p of players) {
+      const post = frame.players[p.playerIndex]!.post;
+      const prevPost = acc.prev.players[p.playerIndex]?.post;
+      if (!prevPost) continue;
+      const vi = posOf.get(p.playerIndex)!;
+      const lhb = post.lastHitBy;
+      const ai = lhb !== null && lhb !== undefined && lhb !== p.playerIndex && posOf.has(lhb) ? posOf.get(lhb)! : vi;
+      const dmg = calcDamageTaken(post, prevPost);
+      if (dmg > 0) dmgMatrix[ai]![vi]! += dmg;
+      if (didLoseStock(post, prevPost)) killMatrix[ai]![vi]! += 1;
+    }
+  }
+  acc.prev = frame;
+}
+
+function finishTeamsAccumulator(acc: TeamsAccumulator): TeamsStats {
+  const actionsByPlayerIndex = new Map<number, ReturnType<ActionsComputer["fetch"]>[number]>();
+  const inputCountByPlayerIndex = new Map<number, number>();
+  for (const { actions, inputs } of acc.computers) {
+    for (const a of actions.fetch()) actionsByPlayerIndex.set(a.playerIndex, a);
+    for (const i of inputs.fetch()) inputCountByPlayerIndex.set(i.playerIndex, i.inputCount);
+  }
+  return { dmgMatrix: acc.dmgMatrix, killMatrix: acc.killMatrix, actionsByPlayerIndex, inputCountByPlayerIndex };
+}
+
+/**
+ * slippi-js's stat computers are singles-only (they no-op on 4-player games),
+ * so for clean 2v2s we make our own frame pass. Damage and kills are
+ * attributed through each victim's `lastHitBy`, split into a full
+ * attacker→victim matrix — that one structure yields enemy damage, friendly
+ * fire (both directions), damage taken by source, and real stock captures.
+ * Action/input counts reuse the library's own per-player state machines by
+ * running them pairwise across teams (they only read the opponent's position,
+ * for tech direction, which we don't surface).
+ */
+function computeTeamsStats(game: SlippiGame, settings: GameStartType, lastFrame: number): TeamsStats | null {
+  const acc = createTeamsAccumulator(settings);
+  if (!acc) return null;
 
   // Frames are keyed by frame number from Frames.FIRST upward, so walk the range
   // numerically rather than materializing and sorting the key set: the old
   // Object.keys().map(Number).sort() allocated one string plus one number per
   // frame and cost ~1 ms per six-minute replay, twice over on a teams game.
   const frames = game.getFrames();
-  let prev: (typeof frames)[number] | null = null;
   for (let fn = Frames.FIRST; fn <= lastFrame; fn++) {
     const frame = frames[fn];
-    if (!frame?.players || players.some((p) => !frame.players[p.playerIndex]?.post)) continue;
-    // InputComputer reaches back to frame-1 for each of its two players' `pre`
-    // blocks and does not guard that lookup, so one frame whose predecessor is
-    // missing a player throws straight out of the parse and tombstones the whole
-    // game. That is not hypothetical: it hit 13 of 85 real 2v2 replays here, and
-    // a tombstoned doubles game is simply gone from every teams view. Action
-    // counts and the damage/kill matrices need no predecessor, so only the input
-    // sample is skipped — the cost is a slightly low IPM on a malformed frame
-    // instead of losing the game entirely.
-    const prevFrame = frames[fn - 1];
-    const inputsReady =
-      players.every((p) => frame.players[p.playerIndex]?.pre) &&
-      prevFrame?.players !== undefined &&
-      players.every((p) => prevFrame.players[p.playerIndex]?.pre);
-    for (const { actions, inputs } of computers) {
-      actions.processFrame(frame);
-      if (inputsReady) inputs.processFrame(frame, frames);
+    if (frame) addTeamsFrame(acc, frame, frames);
+  }
+  return finishTeamsAccumulator(acc);
+}
+
+const LANDING_TO_MOVE: Record<number, number> = { 0x46: 13, 0x47: 14, 0x48: 15, 0x49: 16, 0x4a: 17 };
+
+interface AerialLCAggregate {
+  prevAnim: Map<number, number | null>;
+  prevCounter: Map<number, number | null>;
+  byPlayer: Map<number, Map<number, { success: number; fail: number }>>;
+}
+
+function createAerialLCAggregate(settings: GameStartType): AerialLCAggregate | null {
+  if (settings.players.length !== 2 || settings.isTeams) return null;
+  return {
+    prevAnim: new Map(settings.players.map((p) => [p.playerIndex, null])),
+    prevCounter: new Map(settings.players.map((p) => [p.playerIndex, null])),
+    byPlayer: new Map(settings.players.map((p) => [p.playerIndex, new Map()])),
+  };
+}
+
+function addAerialLCFrame(acc: AerialLCAggregate, settings: GameStartType, frame: FrameEntryType): void {
+  if (!frame.players) return;
+  for (const p of settings.players) {
+    const post = frame.players[p.playerIndex]?.post;
+    if (!post) continue;
+    const anim = post.actionStateId ?? null;
+    const counter = post.actionStateCounter ?? null;
+    const prevAnim = acc.prevAnim.get(p.playerIndex) ?? null;
+    const prevCounter = acc.prevCounter.get(p.playerIndex) ?? null;
+    const isNewAction = anim !== prevAnim || (prevCounter !== null && counter !== null && prevCounter > counter);
+    const moveId = anim === null ? undefined : LANDING_TO_MOVE[anim];
+    if (isNewAction && moveId !== undefined && (post.lCancelStatus === 1 || post.lCancelStatus === 2)) {
+      const byMove = acc.byPlayer.get(p.playerIndex)!;
+      const counts = byMove.get(moveId) ?? { success: 0, fail: 0 };
+      if (post.lCancelStatus === 1) counts.success++;
+      else counts.fail++;
+      byMove.set(moveId, counts);
     }
-    if (prev?.players) {
-      for (const p of players) {
-        const post = frame.players[p.playerIndex]!.post;
-        const prevPost = prev.players[p.playerIndex]?.post;
-        if (!prevPost) continue;
-        const vi = posOf.get(p.playerIndex)!;
-        const lhb = post.lastHitBy;
-        const ai = lhb !== null && lhb !== undefined && lhb !== p.playerIndex && posOf.has(lhb) ? posOf.get(lhb)! : vi;
-        const dmg = calcDamageTaken(post, prevPost);
-        if (dmg > 0) dmgMatrix[ai]![vi]! += dmg;
-        if (didLoseStock(post, prevPost)) killMatrix[ai]![vi]! += 1;
-      }
+    acc.prevAnim.set(p.playerIndex, anim);
+    acc.prevCounter.set(p.playerIndex, counter);
+  }
+}
+
+function applyAerialLC(acc: AerialLCAggregate, settings: GameStartType, players: PlayerSide[]): void {
+  settings.players.forEach((p, i) => {
+    for (const [moveId, counts] of acc.byPlayer.get(p.playerIndex) ?? []) {
+      const byMove = (players[i]!.moveStats ??= {});
+      const move: MoveAgg = (byMove[moveId] ??= {
+        landed: 0,
+        damage: 0,
+        kills: 0,
+        killPctSum: 0,
+        openings: 0,
+        openingDmg: 0,
+        lcSuccess: 0,
+        lcFail: 0,
+      });
+      move.lcSuccess += counts.success;
+      move.lcFail += counts.fail;
     }
-    prev = frame;
+  });
+}
+
+class StreamingFrameSummary {
+  private settings: GameStartType | null = null;
+  private aerialLC: AerialLCAggregate | null = null;
+  private teams: TeamsAccumulator | null = null;
+
+  setup(settings: GameStartType): void {
+    this.settings = settings;
+    this.aerialLC = createAerialLCAggregate(settings);
+    this.teams = createTeamsAccumulator(settings);
   }
 
-  const actionsByPlayerIndex = new Map<number, ReturnType<ActionsComputer["fetch"]>[number]>();
-  const inputCountByPlayerIndex = new Map<number, number>();
-  for (const { actions, inputs } of computers) {
-    for (const a of actions.fetch()) actionsByPlayerIndex.set(a.playerIndex, a);
-    for (const i of inputs.fetch()) inputCountByPlayerIndex.set(i.playerIndex, i.inputCount);
+  process(frame: FrameEntryType, frames: FramesType): void {
+    if (!this.settings) return;
+    if (this.aerialLC) addAerialLCFrame(this.aerialLC, this.settings, frame);
+    if (this.teams) addTeamsFrame(this.teams, frame, frames);
   }
-  return { dmgMatrix, killMatrix, actionsByPlayerIndex, inputCountByPlayerIndex };
+
+  applyAerialLC(players: PlayerSide[]): void {
+    if (this.aerialLC && this.settings) applyAerialLC(this.aerialLC, this.settings, players);
+  }
+
+  teamsStats(): TeamsStats | null {
+    return this.teams ? finishTeamsAccumulator(this.teams) : null;
+  }
+}
+
+/**
+ * Make slippi-js consume finalized frames in compact batches, then release each
+ * completed batch from both of its internal indexes. Conversions and inputs
+ * look back one frame only; online rollback candidates are not finalized yet,
+ * so they remain in the parser until safe. Batching keeps Stats.process() on a
+ * tight loop instead of re-entering it for every frame, while changing the full
+ * parse from retaining every large frame object twice to retaining at most 8,192
+ * finalized frames plus the small rollback window.
+ *
+ * The private-field guard mirrors dropUnreadComputers: an upstream shape change
+ * falls back to the old full-frame pass, which is slower but correct.
+ */
+interface StreamingFrameController {
+  flush: () => void;
+  applyAerialLC: (players: PlayerSide[]) => void;
+  teamsStats: () => TeamsStats | null;
+}
+
+function installStreamingFrameSummary(game: SlippiGame): StreamingFrameController | null {
+  const runtime = game as unknown as {
+    parser?: {
+      frames?: FramesType;
+      on: (event: string, listener: (value: never) => void) => unknown;
+    };
+    statsComputer?: {
+      frames?: FramesType;
+      allComputers?: { processFrame: (frame: FrameEntryType, frames: FramesType) => void }[];
+      lastProcessedFrame?: number;
+      process?: () => void;
+      addFrame?: (frame: FrameEntryType) => void;
+    };
+  };
+  const parser = runtime.parser;
+  const stats = runtime.statsComputer;
+  if (
+    !parser?.frames ||
+    !stats?.frames ||
+    !Array.isArray(stats.allComputers) ||
+    typeof stats.process !== "function" ||
+    typeof stats.addFrame !== "function"
+  )
+    return null;
+
+  const summary = new StreamingFrameSummary();
+  const FRAME_BATCH = 8192;
+  let pendingFrames = 0;
+  let latestFinalized = Frames.FIRST - 1;
+  let summaryNextFrame = Frames.FIRST;
+
+  const flush = () => {
+    if (!pendingFrames) return;
+    // The library's own tight loop preserves its malformed-frame stop rule and
+    // is measurably faster than calling each computer through an event per frame.
+    stats.process!();
+    const parserFrames = parser.frames!;
+    for (let fn = summaryNextFrame; fn <= latestFinalized; fn++) {
+      const frame = parserFrames[fn];
+      if (frame) summary.process(frame, parserFrames);
+    }
+    summaryNextFrame = latestFinalized + 1;
+
+    // Keep the last finalized frame for the next batch's one-frame lookback,
+    // plus any newer unfinalized rollback candidates held by the parser.
+    const keptParserFrames: FramesType = {};
+    for (const key of Object.keys(parserFrames)) {
+      const fn = Number(key);
+      if (fn >= latestFinalized) keptParserFrames[fn] = parserFrames[fn]!;
+    }
+    parser.frames = keptParserFrames;
+    const lastStatsFrame = stats.frames?.[latestFinalized];
+    stats.frames = lastStatsFrame ? { [latestFinalized]: lastStatsFrame } : {};
+    pendingFrames = 0;
+  };
+
+  parser.on(SlpParserEvent.SETTINGS, (settings: GameStartType) => {
+    summary.setup(settings);
+    // The built-in computers are singles-only. Avoid three no-op calls per
+    // finalized frame on teams/FFA; StreamingFrameSummary owns clean 2v2 stats.
+    if (settings.players.length !== 2) stats.allComputers = [];
+  });
+  // SlippiGame's existing finalized-frame listener calls this method. Wrapping
+  // it avoids registering a second EventEmitter callback on every game frame.
+  const addFrame = stats.addFrame.bind(stats);
+  stats.addFrame = (frame: FrameEntryType) => {
+    addFrame(frame);
+    latestFinalized = frame.frame;
+    pendingFrames++;
+    if (pendingFrames >= FRAME_BATCH) flush();
+  };
+  return {
+    flush,
+    applyAerialLC: (players) => summary.applyAerialLC(players),
+    teamsStats: () => summary.teamsStats(),
+  };
 }
 
 /**
@@ -283,9 +500,10 @@ function decideWinner(
  * real library), of which the per-move table is the bulk; the headline stats
  * alone are ~1 KB, and teams records carry no move table at all.
  */
-export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRecord {
+function parseReplayWithMode(id: string, path: string, buf: ArrayBuffer, boundedFrames: boolean): GameRecord {
   const game = new SlippiGame(buf);
   dropUnreadComputers(game);
+  const streaming = boundedFrames ? installStreamingFrameSummary(game) : null;
   const settings = game.getSettings();
   if (!settings || !settings.players || settings.players.length === 0) {
     throw new Error("no settings block");
@@ -298,6 +516,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   const metadata = game.getMetadata();
   if (!metadata) throw new IncompleteReplayError();
   const gameEnd = game.getGameEnd();
+  streaming?.flush();
   const stats = game.getStats();
   const latestFrame = game.getLatestFrame();
 
@@ -375,29 +594,16 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   // Mirrors slippi-js's isNewAction guard; we skip its rare edge-cancel
   // correction, so per-move sums can differ from the headline rate by a hair.
   if (!isTeams && settings.players.length === 2) {
-    const LANDING_TO_MOVE: Record<number, number> = { 0x46: 13, 0x47: 14, 0x48: 15, 0x49: 16, 0x4a: 17 };
-    const frames = game.getFrames();
-    const prevAnim: (number | null)[] = [null, null];
-    const prevCounter: (number | null)[] = [null, null];
-    for (let fn = Frames.FIRST; fn <= durationFrames; fn++) {
-      const frame = frames[fn];
-      if (!frame?.players) continue;
-      settings.players.forEach((p, i) => {
-        const post = frame.players[p.playerIndex]?.post;
-        if (!post) return;
-        const anim = post.actionStateId ?? null;
-        const counter = post.actionStateCounter ?? null;
-        const isNewAction =
-          anim !== prevAnim[i] || (prevCounter[i] !== null && counter !== null && prevCounter[i]! > counter);
-        if (isNewAction && anim !== null && LANDING_TO_MOVE[anim] !== undefined && (post.lCancelStatus === 1 || post.lCancelStatus === 2)) {
-          const byMove = (players[i]!.moveStats ??= {});
-          const a: MoveAgg = (byMove[LANDING_TO_MOVE[anim]] ??= { landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcSuccess: 0, lcFail: 0 });
-          if (post.lCancelStatus === 1) a.lcSuccess++;
-          else a.lcFail++;
-        }
-        prevAnim[i] = anim;
-        prevCounter[i] = counter;
-      });
+    if (streaming) {
+      streaming.applyAerialLC(players);
+    } else {
+      const aerialLC = createAerialLCAggregate(settings)!;
+      const frames = game.getFrames();
+      for (let fn = Frames.FIRST; fn <= durationFrames; fn++) {
+        const frame = frames[fn];
+        if (frame) addAerialLCFrame(aerialLC, settings, frame);
+      }
+      applyAerialLC(aerialLC, settings, players);
     }
   }
 
@@ -435,7 +641,7 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   // Doubles: slippi-js left every stat field zeroed, so fill them from our
   // own frame pass. kills/totalDamage keep singles semantics (enemies only);
   // friendly fire lives in the matrices.
-  const teamsStats = isTeams ? computeTeamsStats(game, settings, durationFrames) : null;
+  const teamsStats = isTeams ? (streaming ? streaming.teamsStats() : computeTeamsStats(game, settings, durationFrames)) : null;
   if (teamsStats) {
     const minutes = durationFrames / 3600;
     settings.players.forEach((p, i) => {
@@ -488,6 +694,15 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
   };
 }
 
+export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRecord {
+  return parseReplayWithMode(id, path, buf, true);
+}
+
+/** Retained-frame baseline for scripts/verify-parse.mjs; never used by the app. */
+export function parseReplayRetainedForVerification(id: string, path: string, buf: ArrayBuffer): GameRecord {
+  return parseReplayWithMode(id, path, buf, false);
+}
+
 /**
  * The fast pass: everything a replay's settings, metadata and game-end blocks
  * can answer, and nothing that needs the frames.
@@ -509,19 +724,13 @@ export function parseReplay(id: string, path: string, buf: ArrayBuffer): GameRec
  * Records from here are a preview. pool.ts streams them to the dashboard and
  * never caches them; the full pass follows behind and replaces them in place.
  */
-export function parseHeader(id: string, path: string, buf: ArrayBuffer): GameRecord {
-  const game = new SlippiGame(buf);
-  const settings = game.getSettings();
-  if (!settings || !settings.players || settings.players.length === 0) {
-    throw new Error("no settings block");
-  }
-
-  // Same "severed incomplete file" check as the full parse, and it matters more
-  // here: this pass is cheap enough to reach a replay Slippi is mid-write on.
-  const metadata = game.getMetadata();
-  if (!metadata) throw new IncompleteReplayError();
-  const gameEnd = game.getGameEnd({ skipProcessing: true });
-
+function buildHeaderRecord(
+  id: string,
+  path: string,
+  settings: GameStartType,
+  metadata: MetadataType,
+  gameEnd: GameEndType | undefined,
+): GameRecord {
   const durationFrames = metadata.lastFrame ?? 0;
   const isTeams = Boolean(settings.isTeams) || settings.players.length > 2;
 
@@ -566,4 +775,118 @@ export function parseHeader(id: string, path: string, buf: ArrayBuffer): GameRec
     killMatrix: null,
     statsLevel: "header",
   };
+}
+
+export function parseHeader(id: string, path: string, buf: ArrayBuffer): GameRecord {
+  const game = new SlippiGame(buf);
+  const settings = game.getSettings();
+  if (!settings || !settings.players || settings.players.length === 0) {
+    throw new Error("no settings block");
+  }
+
+  // Same "severed incomplete file" check as the full parse, and it matters more
+  // here: this pass is cheap enough to reach a replay Slippi is mid-write on.
+  const metadata = game.getMetadata();
+  if (!metadata) throw new IncompleteReplayError();
+  return buildHeaderRecord(id, path, settings, metadata, game.getGameEnd({ skipProcessing: true }));
+}
+
+const SLP_RAW_POSITION = 15;
+const HEADER_SETTINGS_CHUNK = 64 * 1024;
+const HEADER_SETTINGS_LIMIT = 1024 * 1024;
+
+async function readFileRange(file: File, start: number, end: number): Promise<Uint8Array> {
+  return new Uint8Array(await file.slice(start, end).arrayBuffer());
+}
+
+/**
+ * File-backed preview parser. A normal replay is a UBJSON envelope whose raw
+ * command-stream length lives in bytes 11–14, so the three preview ingredients
+ * can be read independently: settings from the first 64 KiB (growing only when
+ * needed), the fixed-size GAME_END command at the raw stream's tail, and the
+ * small metadata object after it. The old worker handed `parseHeader` a full
+ * `arrayBuffer()`, reading multi-megabyte frame data that this pass never uses
+ * and then reading those same bytes again for the authoritative full pass.
+ *
+ * Pre-UBJSON/unknown layouts fall back to the whole-buffer parser. That path is
+ * rare, but preserving it keeps compatibility broader than this optimization.
+ */
+export async function parseHeaderFile(id: string, path: string, file: File): Promise<GameRecord> {
+  const fullFallback = async (): Promise<GameRecord> => parseHeader(id, path, await file.arrayBuffer());
+  const first = await readFileRange(file, 0, Math.min(file.size, HEADER_SETTINGS_CHUNK));
+  if (first.length < SLP_RAW_POSITION || first[0] !== "{".charCodeAt(0)) return fullFallback();
+
+  const rawLength = new DataView(first.buffer, first.byteOffset, first.byteLength).getUint32(SLP_RAW_POSITION - 4);
+  const rawEnd = SLP_RAW_POSITION + rawLength;
+  const metadataPosition = rawEnd + 10;
+  const metadataEnd = file.size - 1;
+  if (rawLength <= 0 || rawEnd > file.size || metadataPosition >= metadataEnd) throw new IncompleteReplayError();
+
+  const parser = new SlpParser();
+  const stream = new SlpStream();
+  const headerState: { messageSizes: Map<Command, number> | null; messageSizesCommand: Uint8Array | null } = {
+    messageSizes: null,
+    messageSizesCommand: null,
+  };
+  stream.on(SlpStreamEvent.RAW, ({ command, payload }) => {
+    if (command === Command.MESSAGE_SIZES) headerState.messageSizesCommand = payload.slice();
+  });
+  stream.on(SlpStreamEvent.COMMAND, ({ command, payload }) => {
+    if (command === Command.MESSAGE_SIZES && payload instanceof Map) headerState.messageSizes = payload as Map<Command, number>;
+    parser.handleCommand(command, payload);
+  });
+
+  let readPosition = SLP_RAW_POSITION;
+  const firstRawEnd = Math.min(first.length, rawEnd);
+  if (firstRawEnd > readPosition) {
+    stream.process(first.subarray(readPosition, firstRawEnd));
+    readPosition = firstRawEnd;
+  }
+  const settingsReadEnd = Math.min(rawEnd, SLP_RAW_POSITION + HEADER_SETTINGS_LIMIT);
+  while (!parser.getSettings() && readPosition < settingsReadEnd) {
+    const next = Math.min(settingsReadEnd, readPosition + HEADER_SETTINGS_CHUNK);
+    stream.process(await readFileRange(file, readPosition, next));
+    readPosition = next;
+  }
+  const settings = parser.getSettings();
+  if (!settings || !settings.players || settings.players.length === 0) return fullFallback();
+
+  // Reuse slippi-js's own UBJSON decoder without handing it the frame body:
+  // build a compact valid envelope containing the original header, message-size
+  // command, metadata marker/tail, and closing brace. This keeps the ranged and
+  // whole-buffer paths on one decoder and avoids a second browser polyfill.
+  if (!headerState.messageSizesCommand) return fullFallback();
+  const metadataTail = await readFileRange(file, rawEnd, metadataEnd);
+  const compactRawEnd = SLP_RAW_POSITION + headerState.messageSizesCommand.length;
+  const compact = new Uint8Array(compactRawEnd + metadataTail.length + 1);
+  compact.set(first.subarray(0, SLP_RAW_POSITION));
+  new DataView(compact.buffer).setUint32(SLP_RAW_POSITION - 4, headerState.messageSizesCommand.length);
+  compact.set(headerState.messageSizesCommand, SLP_RAW_POSITION);
+  compact.set(metadataTail, compactRawEnd);
+  compact[compact.length - 1] = "}".charCodeAt(0);
+  let metadata: MetadataType | undefined;
+  try {
+    metadata = new SlippiGame(compact.buffer).getMetadata();
+  } catch {
+    // Matches slippi-js: an undecodable/missing metadata block means the file
+    // was severed while still being written, and must be retried rather than cached.
+  }
+  if (!metadata) throw new IncompleteReplayError();
+
+  let gameEnd: GameEndType | undefined;
+  const gameEndPayloadSize = headerState.messageSizes?.get(Command.GAME_END);
+  if (headerState.messageSizesCommand && gameEndPayloadSize && gameEndPayloadSize > 0) {
+    const gameEndSize = gameEndPayloadSize + 1;
+    const gameEndPosition = rawEnd - gameEndSize;
+    if (gameEndPosition >= SLP_RAW_POSITION) {
+      const endStream = new SlpStream();
+      endStream.on(SlpStreamEvent.COMMAND, ({ command, payload }) => {
+        if (command === Command.GAME_END) gameEnd = payload as GameEndType;
+      });
+      endStream.process(headerState.messageSizesCommand);
+      endStream.process(await readFileRange(file, gameEndPosition, rawEnd));
+    }
+  }
+
+  return buildHeaderRecord(id, path, settings, metadata, gameEnd);
 }
