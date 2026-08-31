@@ -114,7 +114,7 @@ export class RecordSaveError extends Error {
  * is already over in seconds, so a second walk of the same files only delays
  * it. This matters for a first-run import, not an incremental rescan.
  */
-const HEADER_PASS_MIN = 1000;
+const HEADER_PASS_MIN = 250;
 
 /**
  * Parse all not-yet-cached files across a pool of web workers.
