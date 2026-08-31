@@ -910,10 +910,26 @@ const MOVE_METRICS: Record<MoveMetricKey, { num: number; den: number; scale: num
   lCancelPct: { num: MV.lCancelSuccess, den: MV.lCancelTotal, scale: 100 },
 };
 
-/** Write one game's contribution for `moveKey` into `out` at `base`. */
-function moveSlice(g: ResolvedGame, moveKey: string, out: Float64Array, base: number): void {
-  let attempts = 0, attemptsTracked = 0, landed = 0, damage = 0, kills = 0, killPctSum = 0;
-  let lcSuccess = 0, lcTotal = 0, gameCount = 0, allDamage = 0, allKills = 0;
+/** Values for every selected move at one sampled point in the rolling series. */
+export interface MultiMoveMetricPoint {
+  index: number;
+  date: string;
+  /** Same order as the `moveKeys` passed to `moveMetricSeriesMany`. */
+  values: (number | null)[];
+}
+
+/**
+ * Write one game's contribution for every selected move into `out`. The replay
+ * move table is walked once regardless of how many lines the chart is showing.
+ */
+function moveSlices(
+  g: ResolvedGame,
+  keyIndex: ReadonlyMap<string, number>,
+  moveCount: number,
+  out: Float64Array,
+): void {
+  out.fill(0);
+  let gameCount = 0, allDamage = 0, allKills = 0;
   const ms = g.me.moveStats;
   if (ms) {
     gameCount = 1;
@@ -922,30 +938,28 @@ function moveSlice(g: ResolvedGame, moveKey: string, out: Float64Array, base: nu
       if (!m) continue;
       allDamage += m.damage;
       allKills += m.kills;
-      if (moveGroup(Number(idStr)).key !== moveKey) continue;
+      const moveIndex = keyIndex.get(moveGroup(Number(idStr)).key);
+      if (moveIndex === undefined) continue;
+      const base = moveIndex * MV_STRIDE;
       if (m.attempts !== undefined) {
-        attempts += m.attempts;
-        attemptsTracked = 1;
+        out[base + MV.attempts] = out[base + MV.attempts]! + m.attempts;
+        out[base + MV.attemptsTracked] = 1;
       }
-      landed += m.landed;
-      damage += m.damage;
-      kills += m.kills;
-      killPctSum += m.killPctSum;
-      lcSuccess += m.lcSuccess ?? 0;
-      lcTotal += (m.lcSuccess ?? 0) + (m.lcFail ?? 0);
+      out[base + MV.landed] = out[base + MV.landed]! + m.landed;
+      out[base + MV.damage] = out[base + MV.damage]! + m.damage;
+      out[base + MV.kills] = out[base + MV.kills]! + m.kills;
+      out[base + MV.killPctSum] = out[base + MV.killPctSum]! + m.killPctSum;
+      out[base + MV.lCancelSuccess] = out[base + MV.lCancelSuccess]! + (m.lcSuccess ?? 0);
+      out[base + MV.lCancelTotal] =
+        out[base + MV.lCancelTotal]! + (m.lcSuccess ?? 0) + (m.lcFail ?? 0);
     }
   }
-  out[base + MV.attempts] = attempts;
-  out[base + MV.attemptsTracked] = attemptsTracked;
-  out[base + MV.landed] = landed;
-  out[base + MV.damage] = damage;
-  out[base + MV.kills] = kills;
-  out[base + MV.killPctSum] = killPctSum;
-  out[base + MV.lCancelSuccess] = lcSuccess;
-  out[base + MV.lCancelTotal] = lcTotal;
-  out[base + MV.games] = gameCount;
-  out[base + MV.allDamage] = allDamage;
-  out[base + MV.allKills] = allKills;
+  for (let moveIndex = 0; moveIndex < moveCount; moveIndex++) {
+    const base = moveIndex * MV_STRIDE;
+    out[base + MV.games] = gameCount;
+    out[base + MV.allDamage] = allDamage;
+    out[base + MV.allKills] = allKills;
+  }
 }
 
 /**
@@ -967,28 +981,64 @@ export function moveMetricSeries(
   window = ROLLING_WINDOW,
   maxPoints = MAX_SERIES_POINTS,
 ): RollingExecutionPoint[] {
+  return moveMetricSeriesMany(games, [moveKey], metric, window, maxPoints).map((point) => ({
+    index: point.index,
+    date: point.date,
+    value: point.values[0] ?? null,
+  }));
+}
+
+/**
+ * Several moves plotted against the same metric and rolling window. This stays
+ * single-pass over the games and each game's move table; selecting another
+ * line adds only its small ring-buffer slice and output value.
+ */
+export function moveMetricSeriesMany(
+  games: ResolvedGame[],
+  moveKeys: readonly string[],
+  metric: MoveMetricKey,
+  window = ROLLING_WINDOW,
+  maxPoints = MAX_SERIES_POINTS,
+): MultiMoveMetricPoint[] {
+  const keys = [...new Set(moveKeys)];
+  if (keys.length === 0) return [];
+  const keyIndex = new Map(keys.map((key, index) => [key, index]));
   const { num, den, scale } = MOVE_METRICS[metric];
   const w = Math.max(1, Math.floor(window));
   const stride = seriesStride(games.length, maxPoints);
-  const ring = new Float64Array(w * MV_STRIDE);
-  const out: RollingExecutionPoint[] = [];
-  let numSum = 0, denSum = 0;
+  const moveCount = keys.length;
+  // The ring only needs the selected numerator and denominator for each move;
+  // `slice` holds the full one-game aggregate while that pair is chosen.
+  const ring = new Float64Array(w * moveCount * 2);
+  const slice = new Float64Array(moveCount * MV_STRIDE);
+  const numSums = new Float64Array(moveCount);
+  const denSums = new Float64Array(moveCount);
+  const out: MultiMoveMetricPoint[] = [];
   for (let i = 0; i < games.length; i++) {
     const g = games[i]!;
-    const base = (i % w) * MV_STRIDE;
-    // That slot still holds the game about to leave the window; drop it first.
-    if (i >= w) {
-      numSum -= ring[base + num]!;
-      denSum -= ring[base + den]!;
+    moveSlices(g, keyIndex, moveCount, slice);
+    for (let moveIndex = 0; moveIndex < moveCount; moveIndex++) {
+      const ringBase = ((i % w) * moveCount + moveIndex) * 2;
+      // That slot still holds the game about to leave the window; drop it first.
+      if (i >= w) {
+        numSums[moveIndex] = numSums[moveIndex]! - ring[ringBase]!;
+        denSums[moveIndex] = denSums[moveIndex]! - ring[ringBase + 1]!;
+      }
+      const sliceBase = moveIndex * MV_STRIDE;
+      const nextNum = slice[sliceBase + num]!;
+      const nextDen = slice[sliceBase + den]!;
+      ring[ringBase] = nextNum;
+      ring[ringBase + 1] = nextDen;
+      numSums[moveIndex] = numSums[moveIndex]! + nextNum;
+      denSums[moveIndex] = denSums[moveIndex]! + nextDen;
     }
-    moveSlice(g, moveKey, ring, base);
-    numSum += ring[base + num]!;
-    denSum += ring[base + den]!;
     if (!emitsAt(i, games.length, stride)) continue;
     out.push({
       index: i + 1,
       date: dayLabel(g.date),
-      value: denSum > 0 ? (numSum / denSum) * scale : null,
+      values: keys.map((_, moveIndex) =>
+        denSums[moveIndex]! > 0 ? (numSums[moveIndex]! / denSums[moveIndex]!) * scale : null,
+      ),
     });
   }
   return out;

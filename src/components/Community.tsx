@@ -155,7 +155,7 @@ function MatchupAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
     .sort((a, b) => b.games - a.games);
   return (
     <div className="panel">
-      <div className="panel-heading-row">
+      <div className="panel-heading-row community-heading-row">
         <div>
           <div className="eyebrow">Matchup Atlas</div>
           <h2>{charName(characterId)} across the qualifying field</h2>
@@ -204,7 +204,7 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
   const own = executionSummary(selected, Number.MAX_SAFE_INTEGER);
   return (
     <div className="panel">
-      <div className="panel-heading-row">
+      <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">You vs Community</div><h2>Private local overlay on anonymous percentiles</h2></div>
         <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{id === -1 ? "All characters" : charName(id)}</option>)}</select></label></div>
       </div>
@@ -236,7 +236,7 @@ function MoveAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
   const totalDamage = rows.reduce((sum, r) => sum + r.damage, 0);
   return (
     <div className="panel">
-      <div className="panel-heading-row">
+      <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">Move Atlas</div><h2>How qualifying {charName(characterId)} players create damage and stocks</h2></div>
         <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label></div>
       </div>
@@ -264,7 +264,7 @@ function StageLab({ snapshot }: { snapshot: CommunitySnapshot }) {
   const chars = selectCharacters(snapshot);
   return (
     <div className="panel">
-      <div className="panel-heading-row">
+      <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">Stage Lab</div><h2>Where a community matchup bends</h2></div>
         <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => { const id = Number(e.target.value); setCharacterId(id); const next = overall.find((r) => r.characterId === id); if (next) setOpponentId(next.opponentCharacterId); }}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><label>Opponent<select value={opponentId} onChange={(e) => setOpponentId(Number(e.target.value))}>{opponents.map((r) => <option key={r.opponentCharacterId} value={r.opponentCharacterId}>{charName(r.opponentCharacterId)}</option>)}</select></label></div>
       </div>

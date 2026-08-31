@@ -2,7 +2,7 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } 
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeries, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
@@ -833,6 +833,18 @@ const MOVE_METRIC_EMPTY: Partial<Record<MoveMetricKey, string>> = {
   avgKillPct: "This move hasn't closed a stock in these games.",
 };
 
+// No red: it remains reserved for losses and danger throughout the dashboard.
+const MOVE_TREND_COLORS = [
+  "var(--accent)",
+  "#e8b54d",
+  "#3fcf8e",
+  "#6db3f2",
+  "#4fc9c4",
+  "#e87fd0",
+  "#9adb4f",
+  "#f2985e",
+];
+
 /**
  * Any cell of the Move effectiveness table, plotted over time. That table is a
  * snapshot of the last ROLLING_WINDOW games; this is the same figure computed
@@ -840,38 +852,82 @@ const MOVE_METRIC_EMPTY: Partial<Record<MoveMetricKey, string>> = {
  * the line behind it is how the number got there.
  */
 function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveRow[] }) {
-  const [moveKey, setMoveKey] = useState("");
+  const [moveKeys, setMoveKeys] = useState<Set<string>>(() => new Set(moves[0] ? [moves[0].key] : []));
   const [metric, setMetric] = useState<MoveMetricKey>("landedPerGame");
-  // Filters change which moves exist at all, so a held key goes stale — fall
-  // back to the top move rather than plotting nothing until the user works out
-  // that the dropdown is pointing at something no longer in the data.
-  const active = moves.find((m) => m.key === moveKey) ?? moves[0];
-  const activeKey = active?.key;
+  // Filters change which moves exist at all. Preserve selections that remain
+  // available and fall back to the top move only when every held key is stale.
+  const activeMoves = useMemo(() => {
+    const selected = moves.filter((move) => moveKeys.has(move.key));
+    return selected.length > 0 ? selected : moves.slice(0, 1);
+  }, [moves, moveKeys]);
   const def = MOVE_METRIC_CHOICES.find((m) => m.key === metric)!;
+  const points = useMemo(
+    () => moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric),
+    [games, activeMoves, metric],
+  );
   const data = useMemo(
-    () => (activeKey ? moveMetricSeries(games, activeKey, metric) : []),
-    [games, activeKey, metric],
+    () => points.map((point) => {
+      const row: Record<string, string | number | null> = { index: point.index, date: point.date };
+      for (let i = 0; i < activeMoves.length; i++) row[`move-${i}`] = point.values[i] ?? null;
+      return row;
+    }),
+    [activeMoves, points],
   );
   // Points are thinned across the whole history, so a tick's game index is no
   // longer its position in the array — look the date up instead of deriving it.
-  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
-  const hasData = data.some((p) => p.value !== null);
+  const dateByIndex = useMemo(() => new Map<number, string>(points.map((p) => [p.index, p.date])), [points]);
+  const hasData = points.some((point) => point.values.some((value) => value !== null));
+  const moveSummary = activeMoves.length === 1
+    ? activeMoves[0]!.label
+    : `${activeMoves.length} moves selected`;
+  const toggleMove = (key: string) => {
+    setMoveKeys(() => {
+      // Base the update on the effective selection so the fallback move stays
+      // selected when a second line is added after filters changed.
+      const next = new Set(activeMoves.map((move) => move.key));
+      if (next.has(key)) {
+        if (next.size > 1) next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  };
   return (
     <div className="panel">
       <div className="panel-heading-row">
         <div>
-          <h2>Move trend — {ROLLING_WINDOW}-game rolling average</h2>
+          <h2 className="panel-title">Move trend — {ROLLING_WINDOW}-game rolling average</h2>
         </div>
         <div className="panel-controls">
-          <label>
-            Move
-            <select value={activeKey ?? ""} onChange={(e) => setMoveKey(e.target.value)} disabled={moves.length === 0}>
-              {moves.length === 0 && <option value="">No move data</option>}
-              {moves.map((m) => (
-                <option key={m.key} value={m.key}>{m.label}</option>
-              ))}
-            </select>
-          </label>
+          <div className="panel-control">
+            <span>Moves</span>
+            {moves.length === 0 ? (
+              <button type="button" className="move-picker-empty" disabled>No move data</button>
+            ) : (
+              <details className="move-picker">
+                <summary aria-label={`Moves: ${moveSummary}`}>
+                  <span>{moveSummary}</span><span className="move-picker-chevron" aria-hidden="true">▾</span>
+                </summary>
+                <div className="move-picker-menu">
+                  {moves.map((move) => {
+                    const checked = activeMoves.some((active) => active.key === move.key);
+                    return (
+                      <label className="move-picker-option" key={move.key}>
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          disabled={checked && activeMoves.length === 1}
+                          onChange={() => toggleMove(move.key)}
+                        />
+                        <span>{move.label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </details>
+            )}
+          </div>
           <label>
             Metric
             <select value={metric} onChange={(e) => setMetric(e.target.value as MoveMetricKey)}>
@@ -882,15 +938,15 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
           </label>
         </div>
       </div>
-      {!active ? (
+      {activeMoves.length === 0 ? (
         <div className="empty-note">
           No per-move data in these games yet — it's computed at parse time, so hit <b>Refresh</b> (or re-pick your
           folder) to re-parse the library once.
         </div>
       ) : !hasData ? (
         <div className="empty-note">
-          Nothing to plot for {active.label} — {def.label}.{" "}
-          {MOVE_METRIC_EMPTY[metric] ?? "That move doesn't land in these games."}
+          Nothing to plot for the selected {activeMoves.length === 1 ? "move" : "moves"} — {def.label}.{" "}
+          {MOVE_METRIC_EMPTY[metric] ?? "Those moves don't land in these games."}
         </div>
       ) : (
         <>
@@ -913,22 +969,26 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
                   const d = payload?.[0]?.payload?.date;
                   return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
                 }}
-                formatter={(v) => [`${num(Number(v), def.digits)}${def.unit}`, `${active.label} — ${def.label}`]}
+                formatter={(v, name) => [`${num(Number(v), def.digits)}${def.unit}`, `${String(name)} — ${def.label}`]}
               />
-              <Line
-                type="monotone"
-                dataKey="value"
-                name={`${active.label} — ${def.label}`}
-                stroke="var(--accent)"
-                strokeWidth={2}
-                dot={false}
-                connectNulls
-              />
+              {activeMoves.length > 1 && <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />}
+              {activeMoves.map((move, i) => (
+                <Line
+                  key={move.key}
+                  type="monotone"
+                  dataKey={`move-${i}`}
+                  name={move.label}
+                  stroke={MOVE_TREND_COLORS[i % MOVE_TREND_COLORS.length]}
+                  strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
           <div className="hint">
-            Each point is {active.label} — {def.label} over the previous {ROLLING_WINDOW} games, so the last point
-            is the figure the Move effectiveness table below shows. The line spans all{" "}
+            Each line is {def.label} for a selected move over the previous {ROLLING_WINDOW} games, so its last point
+            is the figure the Move effectiveness table below shows. The chart spans all{" "}
             {games.length.toLocaleString()} games in this filter
             {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
             Gaps are windows with no denominator — games you never threw it in — rather than zeroes, which would claim
@@ -1110,10 +1170,18 @@ function MovesSection({
   career: { rows: MoveRow[]; covered: number };
   recent: { rows: MoveRow[]; covered: number };
 }) {
+  const [minMoveUsageInput, setMinMoveUsageInput] = useState("1");
   // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
   const impact = useMemo(
     () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
     [games],
+  );
+  const minMoveUsage = Math.min(100, Math.max(1, Math.round(Number(minMoveUsageInput) || 1)));
+  // The percentage threshold applies only to move share. Action usage is a
+  // different unit (/min), so it stays visible at every threshold.
+  const visibleImpact = useMemo(
+    () => impact.filter((row) => row.usageKind === "perMinute" || row.avgShare * 100 >= minMoveUsage),
+    [impact, minMoveUsage],
   );
   if (career.rows.length === 0) {
     return (
@@ -1211,7 +1279,27 @@ function MovesSection({
 
       {impact.length > 0 && (
         <div className="panel">
-          <h2>Move impact — volume vs wins</h2>
+          <div className="panel-heading-row">
+            <h2 className="panel-title">Move impact — volume vs wins</h2>
+            <div className="panel-controls">
+              <label>
+                Minimum move usage
+                <span className="number-suffix">
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    inputMode="numeric"
+                    value={minMoveUsageInput}
+                    onChange={(e) => setMinMoveUsageInput(e.target.value)}
+                    onBlur={() => setMinMoveUsageInput(String(minMoveUsage))}
+                  />
+                  <span aria-hidden="true">%</span>
+                </span>
+              </label>
+            </div>
+          </div>
           <table>
             <thead>
               <tr>
@@ -1223,7 +1311,7 @@ function MovesSection({
               </tr>
             </thead>
             <tbody>
-              {impact.map((r) => (
+              {visibleImpact.map((r) => (
                 <tr key={r.key} style={r.avgShare < 0.02 && r.usageKind !== "perMinute" ? { opacity: 0.55 } : undefined}>
                   <td>
                     {r.label}
@@ -1243,8 +1331,8 @@ function MovesSection({
             Move usage is that move's share of your landed hits that game (so "winners land more of everything" doesn't
             skew it); action usage is the count per minute of game time. Games are median-split into heavy vs light
             usage and the win rates compared. Red rows near the top are habits that swell in games you lose — a
-            practice lead, not proof. Faded rows are moves under 2% of your offense: their deltas run noisy, trust them
-            less.
+            practice lead, not proof. Move rows below {minMoveUsage}% usage are hidden; action rows use /min and are
+            never filtered by this control. Visible moves under 2% are faded because their deltas run noisy.
           </div>
         </div>
       )}
