@@ -622,6 +622,7 @@ select:disabled { opacity: 0.45; }
   font-family: var(--font-data);
   font-size: 13px;
 }
+.number-suffix.unitless input { padding-right: 10px; }
 .number-suffix > span {
   position: absolute;
   top: 50%;

@@ -877,7 +877,7 @@ const MOVE_TREND_COLORS = [
  */
 function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveRow[] }) {
   const [moveKeys, setMoveKeys] = useState<Set<string>>(() => new Set(moves[0] ? [moves[0].key] : []));
-  const [metric, setMetric] = useState<MoveMetricKey>("landedPerGame");
+  const [metric, setMetric] = useState<MoveMetricKey>("attemptsPerGame");
   // Filters change which moves exist at all. Preserve selections that remain
   // available and fall back to the top move only when every held key is stale.
   const activeMoves = useMemo(() => {
@@ -1200,13 +1200,33 @@ function MovesSection({
   career: { rows: MoveRow[]; covered: number };
   recent: { rows: MoveRow[]; covered: number };
 }) {
-  const [minMoveUsageInput, setMinMoveUsageInput] = useState("1");
+  const [minMoveUsageInput, setMinMoveUsageInput] = useState("3");
+  const [minOpeningShareInput, setMinOpeningShareInput] = useState("0.7");
+  const [minAttemptsPerGameInput, setMinAttemptsPerGameInput] = useState("0.5");
   // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
   const impact = useMemo(
     () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
     [games],
   );
   const minMoveUsage = Math.min(100, Math.max(1, Math.round(Number(minMoveUsageInput) || 1)));
+  const openingShareValue = Number(minOpeningShareInput);
+  const minOpeningShare = minOpeningShareInput.trim() !== "" && Number.isFinite(openingShareValue)
+    ? Math.min(100, Math.max(0, Math.round(openingShareValue * 10) / 10))
+    : 0.7;
+  const visibleOpeningRows = useMemo(
+    () => recent.rows
+      .filter((row) => row.openings > 0 && (row.openingShare ?? 0) * 100 >= minOpeningShare)
+      .sort((a, b) => b.openings - a.openings),
+    [recent.rows, minOpeningShare],
+  );
+  const attemptsPerGameValue = Number(minAttemptsPerGameInput);
+  const minAttemptsPerGame = minAttemptsPerGameInput.trim() !== "" && Number.isFinite(attemptsPerGameValue)
+    ? Math.max(0, Math.round(attemptsPerGameValue * 10) / 10)
+    : 0.5;
+  const visibleEffectivenessRows = useMemo(
+    () => recent.rows.filter((row) => row.attemptsPerGame === null || row.attemptsPerGame >= minAttemptsPerGame),
+    [recent.rows, minAttemptsPerGame],
+  );
   // The percentage threshold applies only to move share. Action usage is a
   // different unit (/min), so it stays visible at every threshold.
   const visibleImpact = useMemo(
@@ -1228,7 +1248,25 @@ function MovesSection({
   return (
     <>
       <div className="panel">
-        <h2>Move effectiveness (past {recent.covered.toLocaleString()} games)</h2>
+        <div className="panel-heading-row">
+          <h2 className="panel-title">Move effectiveness (past {recent.covered.toLocaleString()} games)</h2>
+          <div className="panel-controls">
+            <label>
+              Minimum attempted / game
+              <span className="number-suffix unitless">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={minAttemptsPerGameInput}
+                  onChange={(e) => setMinAttemptsPerGameInput(e.target.value)}
+                  onBlur={() => setMinAttemptsPerGameInput(String(minAttemptsPerGame))}
+                />
+              </span>
+            </label>
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
@@ -1245,7 +1283,7 @@ function MovesSection({
             </tr>
           </thead>
           <tbody>
-            {recent.rows.map((r) => (
+            {visibleEffectivenessRows.map((r) => (
               <tr key={r.key}>
                 <td>{r.label}</td>
                 <td className="data">{r.attemptsPerGame !== null ? num(r.attemptsPerGame, 1) : "—"}</td>
@@ -1270,12 +1308,33 @@ function MovesSection({
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
           headline rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a
-          stock — a high number on a kill move means you're fishing with it stale.
+          stock — a high number on a kill move means you're fishing with it stale. Tracked moves below {minAttemptsPerGame}
+          attempted per game are hidden; specials and throws stay visible because attempts are not tracked for them.
         </div>
       </div>
 
       <div className="panel">
-        <h2>Openings — which move starts your offense (past {recent.covered.toLocaleString()} games)</h2>
+        <div className="panel-heading-row">
+          <h2 className="panel-title">Openings — which move starts your offense (past {recent.covered.toLocaleString()} games)</h2>
+          <div className="panel-controls">
+            <label>
+              Minimum opening share
+              <span className="number-suffix">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  inputMode="decimal"
+                  value={minOpeningShareInput}
+                  onChange={(e) => setMinOpeningShareInput(e.target.value)}
+                  onBlur={() => setMinOpeningShareInput(String(minOpeningShare))}
+                />
+                <span aria-hidden="true">%</span>
+              </span>
+            </label>
+          </div>
+        </div>
         <table>
           <thead>
             <tr>
@@ -1286,10 +1345,7 @@ function MovesSection({
             </tr>
           </thead>
           <tbody>
-            {recent.rows
-              .filter((r) => r.openings > 0)
-              .sort((a, b) => b.openings - a.openings)
-              .map((r) => (
+            {visibleOpeningRows.map((r) => (
                 <tr key={r.key}>
                   <td>{r.label}</td>
                   <td className="data">{num(recent.covered ? r.openings / recent.covered : 0, 1)}</td>
@@ -1303,7 +1359,8 @@ function MovesSection({
           The first move of each conversion, over your most recent {recent.covered.toLocaleString()} games in this
           filter. High damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to
           see whether you're converting them. A short window makes the rare openings noisy — a move with a handful of
-          them can top the damage column on one good conversion.
+          them can top the damage column on one good conversion. Moves below {minOpeningShare}% of your openings are
+          hidden.
         </div>
       </div>
 

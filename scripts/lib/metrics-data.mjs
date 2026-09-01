@@ -91,6 +91,22 @@ export const SECTIONS = [
     title: "Insights (win model)",
     items: [
       {
+        term: "The short version — what to change",
+        def: "A ranked coaching list generated after at least 40 decided games. It scans 15 possible findings: opponent matchup, stage ban, stage pick, matchup × stage, tilt, fatigue, cold start, time of day, set deciders, a specific rival, queue mode, your character, move habits, action habits, and recent L-cancel drift. Most findings must clear |z| ≥ 2.0 (roughly a 98% one-sided evidence bar); the broad matchup × stage scan uses 2.5. The five highest scores show first, with every other qualifying finding behind Show more.",
+      },
+      {
+        term: "Recommendation parameters — matchups & stages",
+        def: "Opponent matchup: at least 20 decided games. A stage tip inside that matchup needs 8 games and a win rate at least 12 percentage points better than the matchup overall. Standalone stage bans and picks need 30 decided games. A matchup × stage warning needs 15 decided games, a rate at least 12 points below that character matchup, and the stricter z ≤ −2.5 gate.",
+      },
+      {
+        term: "Recommendation parameters — sessions & context",
+        def: "Tilt needs 25 decided next-games after two or more consecutive losses; cold start needs 25 session openers; fatigue needs 25 games played after game 15 of a session; a local time-of-day bucket needs 30. Set-decider advice needs 25 game-three deciders and compares against 50%. A rival needs 20 decided games, a mode needs 30, and a weak secondary character needs 30 with at least two characters independently clearing 30.",
+      },
+      {
+        term: "Recommendation parameters — habits & execution",
+        def: "A move habit must average at least 5% of landed hits, cover at least 60 heavy/light games, and show a heavy-usage win rate at least 8 percentage points worse with z ≤ −2.0. An action habit uses the same 60-game, 8-point and z gates, plus at least 0.5 uses/min. L-cancel drift needs 150 total games and compares the last 50 with career, surfacing at a 2-point change. Findings rank by effect size × √sample; move/action scores are halved and execution drift is doubled so unlike units do not dominate the list.",
+      },
+      {
         term: "Odds × per +1 SD",
         def: "From a logistic regression on your filtered games: one standard deviation above your average on that metric multiplies the odds of a win by this much, holding the other rows fixed. Above 1× favours wins, below 1× losses. The shift columns restate it in percentage points near an even game.",
       },
