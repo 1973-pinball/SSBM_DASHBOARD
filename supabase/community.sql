@@ -82,6 +82,7 @@ returns void
 language sql
 security definer
 set search_path = public, pg_temp
+set statement_timeout = '10min'
 as $$
 with
 params as (
