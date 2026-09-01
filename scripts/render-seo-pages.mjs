@@ -238,7 +238,7 @@ const about = page({
   // opening words on what the product is rather than on the word "About".
   title: "Slippi Replay Analytics, Parsed In Your Browser — SSBM Stats",
   description:
-    "How SSBM Stats reads your local Slippi replay folder to build a Super Smash Bros. Melee stats dashboard: what it computes, what browsers it needs, and the privacy contract — replays are parsed on your machine and never uploaded.",
+    "How SSBM Stats reads local .slp and compressed .slpz replays to build a Super Smash Bros. Melee stats dashboard: what it computes, what browsers it needs, and the privacy contract — replays are parsed on your machine and never uploaded.",
   heading: "About",
   body: `
 <h1>Slippi replay stats, parsed in your browser</h1>
@@ -248,10 +248,11 @@ readout of your Super Smash Bros. Melee play — without your replays ever leavi
 <a class="cta" href="/">Open the dashboard</a>
 
 <h2>How it works</h2>
-<p>You point the page at the folder Slippi already writes your <strong>.slp</strong> replays to.
-The browser reads those files directly off your disk, parses them in background workers, and
-caches the resulting per-game statistics locally. There is no upload step, because there is
-nowhere to upload to.</p>
+<p>You select a replay folder or individual replay files in either standard <strong>.slp</strong>
+or compressed <strong>.slpz</strong> format. The browser reads them directly off your disk,
+decompresses compressed replays locally, parses them in background workers, and caches the
+resulting per-game statistics locally. There is no upload step, because there is nowhere to
+upload to.</p>
 <p>The first run parses your whole library, which can take a while on a large collection. After
 that only new replays are parsed — a return visit re-scans the folder and skips everything it
 has already seen.</p>
@@ -259,8 +260,8 @@ has already seen.</p>
 <h2>The privacy contract</h2>
 <p>This is the claim the whole product rests on, so it is worth stating precisely:</p>
 <ul>
-  <li><strong>Raw replay files never leave your machine.</strong> No exceptions, no setting that
-  changes it. The parsing happens in your browser.</li>
+  <li><strong>Raw replay files (.slp and .slpz) never leave your machine.</strong> No exceptions,
+  no setting that changes it. Parsing and decompression happen in your browser.</li>
   <li><strong>Cloud sync is opt-in and stats-only.</strong> If you sign in, the roughly 5&nbsp;KB of
   parsed numbers per game can sync to your own private account so a second device can restore
   them. The replays themselves are not part of that, and are never sent.</li>

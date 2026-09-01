@@ -18,7 +18,7 @@ type SyncState = { kind: "idle" } | { kind: "busy" } | { kind: "done"; pushed: n
 
 /**
  * Optional account layer: sign in with Google to mirror the local record cache
- * to Supabase (flattened stats only — never .slp files). Renders nothing when
+ * to Supabase (flattened stats only — never raw .slp or .slpz files). Renders nothing when
  * the Supabase env vars are absent, keeping the app local-only by default.
  */
 export function CloudSync({ records, accounts, isDemo, generation, onPulled }: Props) {

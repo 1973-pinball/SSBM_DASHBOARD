@@ -5,6 +5,7 @@ import type { WorkerResult } from "../worker/parser.worker";
 export interface DiscoveredFile {
   id: string;
   path: string;
+  format: "slp" | "slpz";
   file: File;
   /**
    * Kept so the pipeline can re-stat the file immediately before reading it.
@@ -15,6 +16,13 @@ export interface DiscoveredFile {
 }
 
 const fileId = (path: string, f: File) => `${path}|${f.size}|${f.lastModified}`;
+
+const replayFormat = (name: string): DiscoveredFile["format"] | null => {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".slpz")) return "slpz";
+  if (lower.endsWith(".slp")) return "slp";
+  return null;
+};
 
 /**
  * A replay whose mtime is within seconds of now is almost certainly the game
@@ -35,18 +43,19 @@ const writtenJustNow = (f: File): boolean => {
 // keeps the scan fast without exhausting file-handle limits.
 const GETFILE_CONCURRENCY = 64;
 
-/** Recursively walk a FileSystemDirectoryHandle collecting .slp files. */
+/** Recursively walk a FileSystemDirectoryHandle collecting supported replay files. */
 export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix = ""): Promise<DiscoveredFile[]> {
   // Phase 1: walk the tree (subdirectories in parallel), collecting handles.
-  const found: { path: string; handle: FileSystemFileHandle }[] = [];
+  const found: { path: string; format: DiscoveredFile["format"]; handle: FileSystemFileHandle }[] = [];
   const walk = async (d: FileSystemDirectoryHandle, p: string): Promise<void> => {
     const subdirs: Promise<void>[] = [];
     for await (const [name, handle] of d.entries()) {
       const path = p ? `${p}/${name}` : name;
       if (handle.kind === "directory") {
         subdirs.push(walk(handle as FileSystemDirectoryHandle, path));
-      } else if (name.toLowerCase().endsWith(".slp")) {
-        found.push({ path, handle: handle as FileSystemFileHandle });
+      } else {
+        const format = replayFormat(name);
+        if (format) found.push({ path, format, handle: handle as FileSystemFileHandle });
       }
     }
     await Promise.all(subdirs);
@@ -67,7 +76,13 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
       const entry = found[i]!;
       try {
         const file = await entry.handle.getFile();
-        out[i] = { id: fileId(entry.path, file), path: entry.path, file, handle: entry.handle };
+        out[i] = {
+          id: fileId(entry.path, file),
+          path: entry.path,
+          format: entry.format,
+          file,
+          handle: entry.handle,
+        };
       } catch {
         // skip: locked or vanished mid-scan
       }
@@ -81,9 +96,10 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
 export function discoverFromFileList(files: FileList): DiscoveredFile[] {
   const out: DiscoveredFile[] = [];
   for (const file of Array.from(files)) {
-    if (!file.name.toLowerCase().endsWith(".slp")) continue;
+    const format = replayFormat(file.name);
+    if (!format) continue;
     const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
-    out.push({ id: fileId(path, file), path, file });
+    out.push({ id: fileId(path, file), path, format, file });
   }
   return out;
 }
@@ -309,7 +325,7 @@ export async function runParsePipeline(
             if (writtenJustNow(file)) return retire(true);
           }
           // Unread: the worker does the I/O. See the Job comment in the worker.
-          slot.worker.postMessage({ id, path: job.path, file, mode });
+          slot.worker.postMessage({ id, path: job.path, format: job.format, file, mode });
         })().catch(() => retire(false));
       };
 

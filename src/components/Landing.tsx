@@ -31,7 +31,8 @@ export function Landing({
   online,
   onInstall,
 }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const filesInputRef = useRef<HTMLInputElement>(null);
 
   return (
     <div className="landing">
@@ -45,7 +46,8 @@ export function Landing({
       </h1>
       <p className="sub">
         Point this page at your Slippi replay folder and get a full statistical readout of your play: win rates by
-        opponent, matchup, and stage, kill stats, and execution trends. Everything is parsed in your browser.
+        opponent, matchup, and stage, kill stats, and execution trends. Standard <span className="data">.slp</span> and
+        compressed <span className="data">.slpz</span> files can be mixed together, and everything is parsed in your browser.
       </p>
       <div className="cta-row">
         {supportsFsAccess ? (
@@ -53,10 +55,13 @@ export function Landing({
             Select replay folder
           </button>
         ) : (
-          <button className="primary" onClick={() => inputRef.current?.click()} disabled={cloudRestoring !== null}>
+          <button className="primary" onClick={() => folderInputRef.current?.click()} disabled={cloudRestoring !== null}>
             Select replay folder
           </button>
         )}
+        <button className="ghost" onClick={() => filesInputRef.current?.click()} disabled={cloudRestoring !== null}>
+          Add replay files
+        </button>
         <button className="ghost" onClick={onDemo} disabled={cloudRestoring !== null}>
           Explore with demo data
         </button>
@@ -84,13 +89,28 @@ export function Landing({
         )}
       </div>
       <input
-        ref={inputRef}
+        ref={folderInputRef}
         type="file"
         multiple
+        accept=".slp,.slpz"
         style={{ display: "none" }}
         // Non-standard attribute; enables folder selection in Chromium/Firefox/Safari.
         {...({ webkitdirectory: "" } as Record<string, string>)}
-        onChange={(e) => e.target.files && onPickFiles(e.target.files)}
+        onChange={(e) => {
+          if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+          e.currentTarget.value = "";
+        }}
+      />
+      <input
+        ref={filesInputRef}
+        type="file"
+        multiple
+        accept=".slp,.slpz"
+        style={{ display: "none" }}
+        onChange={(e) => {
+          if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+          e.currentTarget.value = "";
+        }}
       />
       {/* Neither public tab touches replays, so they should not sit behind the
           folder picker or demo mode. */}

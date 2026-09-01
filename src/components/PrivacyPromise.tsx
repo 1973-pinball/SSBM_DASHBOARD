@@ -45,7 +45,7 @@ export function PrivacyPromise({ onClose }: { onClose: () => void }) {
           <div className="privacy-promise-lead">Your replays are yours. Community research requires a separate yes.</div>
           <section>
             <h3>Raw replay files</h3>
-            <p>Raw <span className="data">.slp</span> files never leave your device. Parsing happens in your browser and frame data is discarded.</p>
+            <p>Raw replay files (<span className="data">.slp</span> and <span className="data">.slpz</span>) never leave your device. Parsing and decompression happen in your browser, and frame data is discarded.</p>
           </section>
           <section>
             <h3>Private cloud sync</h3>

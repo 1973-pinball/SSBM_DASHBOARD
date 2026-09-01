@@ -9,7 +9,7 @@ import { supabase } from "./supabase";
  * does, keyed (user_id, id) where id is path|size|mtime — identical on every
  * machine that parses the same file, so upsert is naturally idempotent. Each
  * sync diffs id sets both ways: push local-only records, pull remote-only ones.
- * Raw .slp files never leave the machine.
+ * Raw replay files (.slp and .slpz) never leave the machine.
  */
 
 /** Rows per upsert request — ~500 × ~4 KB ≈ 2 MB, safely under request limits. */

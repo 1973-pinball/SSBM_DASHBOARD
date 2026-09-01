@@ -1,7 +1,13 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS, hasCurrentStats, hasFullStats } from "./lib/types";
-import { discoverFromHandle, discoverFromFileList, runParsePipeline, RecordSaveError } from "./lib/pool";
+import {
+  discoverFromHandle,
+  discoverFromFileList,
+  runParsePipeline,
+  RecordSaveError,
+  type DiscoveredFile,
+} from "./lib/pool";
 import { allRecords, clearAll, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
 import { dedupeRecords } from "./lib/dedupe";
@@ -192,9 +198,10 @@ export default function App() {
   // When the last walk finished; throttles the re-focus rescan.
   const lastFolderSyncAt = useRef(0);
   // Browsers without the File System Access API can never remember a folder,
-  // so their only way to add newly played games is to re-pick — the topbar
-  // needs its own hidden input for that, same as the landing page.
-  const topbarPickRef = useRef<HTMLInputElement>(null);
+  // so the topbar keeps a directory input for re-picks. A separate ordinary
+  // multi-file input lets every browser add a one-off selection.
+  const topbarFolderPickRef = useRef<HTMLInputElement>(null);
+  const topbarFilesPickRef = useRef<HTMLInputElement>(null);
   // Bumped by reset(); async work captures the value at start and drops its
   // results if a reset happened in between, so an abandoned scan or cloud sync
   // can't write stale records into a wiped session.
@@ -449,7 +456,7 @@ export default function App() {
   }, [accountsForSession]);
 
   const startPipeline = useCallback(
-    async (discover: () => Promise<{ id: string; path: string; file: File }[]>) => {
+    async (discover: () => Promise<DiscoveredFile[]>) => {
       setPhase("parsing");
       setPipelineError(null);
       setSyncSkipped(null);
@@ -647,6 +654,54 @@ export default function App() {
     [appendRecords, markScanned],
   );
 
+  /** Add an explicit file selection without replacing or disconnecting the folder. */
+  const syncPickedFiles = useCallback(
+    async (files: DiscoveredFile[]) => {
+      if (files.length === 0 || scanBusy.current) return;
+      scanBusy.current = true;
+      setSyncing({ pass: "full", total: 0, done: 0, skippedCached: 0, failed: 0, unreadable: 0, deferred: 0 });
+      setSyncSkipped(null);
+      setPipelineError(null);
+      const gen = generation.current;
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const tally: { last: ParseProgress | null } = { last: null };
+      try {
+        await runParsePipeline(
+          files,
+          (p, newRecords) => {
+            if (generation.current !== gen) return;
+            tally.last = p;
+            setSyncing(p);
+            appendRecords(newRecords);
+          },
+          controller.signal,
+        );
+        const done = tally.last;
+        if (generation.current === gen) {
+          setSyncSkipped(
+            done && done.failed + done.unreadable + done.deferred > 0
+              ? { failed: done.failed, unreadable: done.unreadable, deferred: done.deferred }
+              : null,
+          );
+          if (done && done.done > done.skippedCached) setRecords(await allRecords());
+        }
+      } catch (err) {
+        console.error(err);
+        if (generation.current !== gen) return;
+        setPipelineError(
+          err instanceof RecordSaveError
+            ? err.message
+            : "Adding replay files failed. Reload the page and try again — this usually happens when the site updated while this tab was open.",
+        );
+      } finally {
+        scanBusy.current = false;
+        if (generation.current === gen) setSyncing(null);
+      }
+    },
+    [appendRecords],
+  );
+
   // Warm the lazy view chunks once the dashboard is idle so the first click
   // on each tab renders instantly instead of showing the Suspense fallback.
   useEffect(() => {
@@ -758,10 +813,23 @@ export default function App() {
 
   const onPickFiles = useCallback(
     (list: FileList) => {
-      void startPipeline(async () => discoverFromFileList(list));
+      // Materialize before the input value is reset. FileList is live in some
+      // browsers, so deferring discovery can otherwise turn a real selection
+      // into an empty one.
+      const files = discoverFromFileList(list);
+      if (phase === "dashboard") void syncPickedFiles(files);
+      else void startPipeline(async () => files);
     },
-    [startPipeline],
+    [phase, startPipeline, syncPickedFiles],
   );
+
+  const onAddReplayFiles = useCallback(() => {
+    // Returning from the OS file picker fires window.focus. Without refreshing
+    // this throttle first, the automatic folder rescan can win that race and
+    // make the explicit selection arrive while the parse pool is already busy.
+    lastFolderSyncAt.current = Date.now();
+    topbarFilesPickRef.current?.click();
+  }, []);
 
   /**
    * Attach a folder to a dashboard that has none — a cloud restore on a new
@@ -776,7 +844,7 @@ export default function App() {
    */
   const onConnectFolder = useCallback(() => {
     if (!supportsFsAccess) {
-      topbarPickRef.current?.click();
+      topbarFolderPickRef.current?.click();
       return;
     }
     void (async () => {
@@ -973,12 +1041,32 @@ export default function App() {
                 </button>
               )}
               <input
-                ref={topbarPickRef}
+                ref={topbarFolderPickRef}
                 type="file"
                 multiple
+                accept=".slp,.slpz"
                 style={{ display: "none" }}
                 {...({ webkitdirectory: "" } as Record<string, string>)}
-                onChange={(e) => e.target.files && onPickFiles(e.target.files)}
+                onChange={(e) => {
+                  if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+                  e.currentTarget.value = "";
+                }}
+              />
+              {!isDemo && (
+                <button className="ghost" onClick={onAddReplayFiles} disabled={syncing !== null}>
+                  Add replay files
+                </button>
+              )}
+              <input
+                ref={topbarFilesPickRef}
+                type="file"
+                multiple
+                accept=".slp,.slpz"
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+                  e.currentTarget.value = "";
+                }}
               />
               {!isDemo && !syncing && syncSkipped && (
                 <span className="tag" title={skippedDetail(syncSkipped)}>
