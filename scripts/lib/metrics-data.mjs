@@ -70,6 +70,10 @@ export const SECTIONS = [
         def: "Successful L-cancels ÷ attempts, where an attempt is any aerial landing that allowed one. Success halves your landing lag.",
       },
       {
+        term: "Tech success",
+        def: "Made ground techs plus wall techs ÷ all ground/wall tech attempts. The tech breakdown's in-place, toward-opponent and away-from-opponent rows are shares of successful ground techs; direction is relative to the opponent, not stage left/right.",
+      },
+      {
         term: "Inputs per minute",
         def: "Controller inputs per minute of game time. A speed gauge, not a quality one — high IPM with low damage per opening is just noise.",
       },
@@ -150,7 +154,7 @@ export const SECTIONS = [
       },
       {
         term: "Execution — me vs teammate",
-        def: "L-cancel %, inputs/min and movement counts per player, from running the singles machinery pairwise across teams. “Teammate” aggregates whoever you queued with under the current filters.",
+        def: "L-cancel %, tech success, inputs/min and movement counts per player, from running the singles machinery pairwise across teams. “Teammate” aggregates whoever you queued with under the current filters.",
       },
     ],
   },

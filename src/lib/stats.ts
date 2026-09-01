@@ -1,4 +1,4 @@
-import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame } from "./types";
+import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame, TechCounts } from "./types";
 import { ACTION_LABELS, hasFullStats } from "./types";
 import { INCLUDED_CHARACTER_ID_SET, INCLUDED_STAGE_ID_SET } from "./config";
 import { moveGroup } from "./melee";
@@ -281,6 +281,9 @@ export interface NeutralSummaryRow {
   mine: number;
   theirs: number;
   perGame: number;
+  oppPerGame?: number;
+  minePct?: number | null;
+  theirsPct?: number | null;
   share: number | null; // mine / (mine + theirs)
 }
 
@@ -290,17 +293,12 @@ export interface NeutralSummaryRow {
  * counts — the caller names that number, not the array length, or a window
  * still filling with header previews reads as a full one.
  */
-export function neutralSummary(games: ResolvedGame[]): { rows: NeutralSummaryRow[]; covered: number } {
+export function neutralSummary(games: ResolvedGame[]): { rows: NeutralSummaryRow[]; techRows: NeutralSummaryRow[]; covered: number } {
   // `share` is a ratio of sums and would survive a header preview, but
   // `perGame` would not: a preview contributes nothing to the numerator and a
   // whole game to the denominator.
   const measured = games.filter((g) => hasFullStats(g.rec));
-  const defs = [
-    { label: "Neutral wins", pick: (p: { neutralWins: number }) => p.neutralWins },
-    { label: "Counter hits", pick: (p: { counterHits: number }) => p.counterHits },
-    { label: "Beneficial trades", pick: (p: { beneficialTrades: number }) => p.beneficialTrades },
-  ];
-  const rows = defs.map(({ label, pick }) => {
+  const summarize = (defs: { label: string; pick: (p: PlayerSide) => number }[]) => defs.map(({ label, pick }) => {
     let mine = 0;
     let theirs = 0;
     for (const g of measured) {
@@ -312,14 +310,46 @@ export function neutralSummary(games: ResolvedGame[]): { rows: NeutralSummaryRow
       mine,
       theirs,
       perGame: measured.length ? mine / measured.length : 0,
+      oppPerGame: measured.length ? theirs / measured.length : 0,
       share: mine + theirs > 0 ? mine / (mine + theirs) : null,
     };
   });
-  return { rows, covered: measured.length };
+  const rows = summarize([
+    { label: "Neutral wins", pick: (p) => p.neutralWins },
+    { label: "Counter hits", pick: (p) => p.counterHits },
+    { label: "Beneficial trades", pick: (p) => p.beneficialTrades },
+  ]);
+  const techRows = summarize([
+    { label: "Tech in place", pick: (p) => p.techs?.inPlace ?? 0 },
+    { label: "Tech in", pick: (p) => p.techs?.toward ?? 0 },
+    { label: "Tech away", pick: (p) => p.techs?.away ?? 0 },
+  ]);
+  const mineGroundTechs = techRows.reduce((sum, row) => sum + row.mine, 0);
+  const theirGroundTechs = techRows.reduce((sum, row) => sum + row.theirs, 0);
+  return {
+    rows,
+    techRows: techRows.map((row) => ({
+      ...row,
+      minePct: mineGroundTechs > 0 ? row.mine / mineGroundTechs : null,
+      theirsPct: theirGroundTechs > 0 ? row.theirs / theirGroundTechs : null,
+    })),
+    covered: measured.length,
+  };
 }
 
+const TECH_ACTION_LABELS: { key: string; label: string; pick: (p: PlayerSide) => number }[] = [
+  { key: "techInPlace", label: "Tech in place", pick: (p) => p.techs?.inPlace ?? 0 },
+  { key: "techIn", label: "Tech in", pick: (p) => p.techs?.toward ?? 0 },
+  { key: "techAway", label: "Tech away", pick: (p) => p.techs?.away ?? 0 },
+];
+
+const ACTION_AVERAGE_LABELS: { key: string; label: string; pick: (p: PlayerSide) => number }[] = [
+  ...ACTION_LABELS.map(({ key, label }) => ({ key, label, pick: (p: PlayerSide) => p.actions?.[key] ?? 0 })),
+  ...TECH_ACTION_LABELS,
+];
+
 export interface ActionAverageRow {
-  key: keyof ActionCounts;
+  key: string;
   label: string;
   perGame: number;
   perMinute: number;
@@ -337,30 +367,67 @@ export function actionAverages(games: ResolvedGame[]): { rows: ActionAverageRow[
   // game count and total minutes — would otherwise include them.
   const measured = games.filter((g) => hasFullStats(g.rec));
   if (measured.length === 0) return { rows: [], covered: 0 };
-  const totals: Record<keyof ActionCounts, number> = {
-    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
-  };
-  const oppTotals: Record<keyof ActionCounts, number> = {
-    rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0,
-  };
-  let frames = 0;
-  for (const g of measured) {
-    frames += g.rec.durationFrames;
-    for (const { key } of ACTION_LABELS) {
-      totals[key] += g.me.actions?.[key] ?? 0;
-      oppTotals[key] += g.opp.actions?.[key] ?? 0;
+  const minutes = measured.reduce((sum, g) => sum + g.rec.durationFrames, 0) / 3600;
+  const rows = ACTION_AVERAGE_LABELS.map(({ key, label, pick }) => {
+    let mine = 0;
+    let theirs = 0;
+    for (const g of measured) {
+      mine += pick(g.me);
+      theirs += pick(g.opp);
     }
-  }
-  const minutes = frames / 3600;
-  const rows = ACTION_LABELS.map(({ key, label }) => ({
-    key,
-    label,
-    perGame: totals[key] / measured.length,
-    perMinute: minutes > 0 ? totals[key] / minutes : 0,
-    oppPerGame: oppTotals[key] / measured.length,
-    oppPerMinute: minutes > 0 ? oppTotals[key] / minutes : 0,
-  }));
+    return {
+      key,
+      label,
+      perGame: mine / measured.length,
+      perMinute: minutes > 0 ? mine / minutes : 0,
+      oppPerGame: theirs / measured.length,
+      oppPerMinute: minutes > 0 ? theirs / minutes : 0,
+    };
+  });
   return { rows, covered: measured.length };
+}
+
+const EMPTY_TECH_COUNTS: TechCounts = {
+  inPlace: 0,
+  toward: 0,
+  away: 0,
+  missed: 0,
+  wallSuccess: 0,
+  wallMissed: 0,
+};
+
+function playerTechCounts(p: PlayerSide): TechCounts {
+  return p.techs ?? EMPTY_TECH_COUNTS;
+}
+
+function groundTechSuccess(t: TechCounts): number {
+  return t.inPlace + t.toward + t.away;
+}
+
+function groundTechAttempts(t: TechCounts): number {
+  return groundTechSuccess(t) + t.missed;
+}
+
+function wallTechAttempts(t: TechCounts): number {
+  return t.wallSuccess + t.wallMissed;
+}
+
+function allTechSuccess(t: TechCounts): number {
+  return groundTechSuccess(t) + t.wallSuccess;
+}
+
+function allTechAttempts(t: TechCounts): number {
+  return groundTechAttempts(t) + wallTechAttempts(t);
+}
+
+function addTechCounts(total: TechCounts, p: PlayerSide): void {
+  const t = playerTechCounts(p);
+  total.inPlace += t.inPlace;
+  total.toward += t.toward;
+  total.away += t.away;
+  total.missed += t.missed;
+  total.wallSuccess += t.wallSuccess;
+  total.wallMissed += t.wallMissed;
 }
 
 export interface RollingPoint {
@@ -1535,10 +1602,12 @@ export interface ExecutionPoint {
   index: number;
   date: string;
   lCancel: number | null;
+  techSuccess: number | null;
   opk: number | null;
   dpo: number | null;
   ipm: number | null;
   oppLCancel: number | null;
+  oppTechSuccess: number | null;
   oppOpk: number | null;
   oppDpo: number | null;
   oppIpm: number | null;
@@ -1555,11 +1624,18 @@ export function executionTrend(games: ResolvedGame[], window = ROLLING_WINDOW): 
     const slice = games.slice(Math.max(0, i - window + 1), i + 1);
     let lcS = 0, lcF = 0, opkSum = 0, opkN = 0, dpoSum = 0, dpoN = 0, ipmSum = 0, ipmN = 0;
     let oLcS = 0, oLcF = 0, oOpkSum = 0, oOpkN = 0, oDpoSum = 0, oDpoN = 0, oIpmSum = 0, oIpmN = 0;
+    let techS = 0, techA = 0, oTechS = 0, oTechA = 0;
     for (const g of slice) {
       lcS += g.me.lCancelSuccess;
       lcF += g.me.lCancelFail;
       oLcS += g.opp.lCancelSuccess;
       oLcF += g.opp.lCancelFail;
+      const mt = playerTechCounts(g.me);
+      const ot = playerTechCounts(g.opp);
+      techS += allTechSuccess(mt);
+      techA += allTechAttempts(mt);
+      oTechS += allTechSuccess(ot);
+      oTechA += allTechAttempts(ot);
       if (g.me.openingsPerKill !== null) { opkSum += g.me.openingsPerKill; opkN++; }
       if (g.me.damagePerOpening !== null) { dpoSum += g.me.damagePerOpening; dpoN++; }
       if (g.me.inputsPerMinute !== null) { ipmSum += g.me.inputsPerMinute; ipmN++; }
@@ -1571,10 +1647,12 @@ export function executionTrend(games: ResolvedGame[], window = ROLLING_WINDOW): 
       index: i + 1,
       date: dayLabel(games[i]!.date),
       lCancel: lcS + lcF > 0 ? (lcS / (lcS + lcF)) * 100 : null,
+      techSuccess: techA > 0 ? (techS / techA) * 100 : null,
       opk: opkN ? opkSum / opkN : null,
       dpo: dpoN ? dpoSum / dpoN : null,
       ipm: ipmN ? ipmSum / ipmN : null,
       oppLCancel: oLcS + oLcF > 0 ? (oLcS / (oLcS + oLcF)) * 100 : null,
+      oppTechSuccess: oTechA > 0 ? (oTechS / oTechA) * 100 : null,
       oppOpk: oOpkN ? oOpkSum / oOpkN : null,
       oppDpo: oDpoN ? oDpoSum / oDpoN : null,
       oppIpm: oIpmN ? oIpmSum / oIpmN : null,
@@ -1583,23 +1661,30 @@ export function executionTrend(games: ResolvedGame[], window = ROLLING_WINDOW): 
   return out;
 }
 
-export type ExecMetricKey = "lCancel" | "opk" | "dpo" | "ipm";
+export type ExecMetricKey = "lCancel" | "groundTechSuccess" | "wallTechSuccess" | "opk" | "dpo" | "ipm";
 
 /**
  * Each execution metric expressed as a numerator/denominator pair so windowed
  * averages compose by summing: L-cancel is a ratio of counts (success over
  * attempts), the others are means over games where the value is known.
  */
-const EXEC_METRICS: Record<ExecMetricKey, { num: (g: ResolvedGame) => number; den: (g: ResolvedGame) => number; scale: number }> = {
-  lCancel: { num: (g) => g.me.lCancelSuccess, den: (g) => g.me.lCancelSuccess + g.me.lCancelFail, scale: 100 },
-  opk: { num: (g) => g.me.openingsPerKill ?? 0, den: (g) => (g.me.openingsPerKill !== null ? 1 : 0), scale: 1 },
-  dpo: { num: (g) => g.me.damagePerOpening ?? 0, den: (g) => (g.me.damagePerOpening !== null ? 1 : 0), scale: 1 },
-  ipm: { num: (g) => g.me.inputsPerMinute ?? 0, den: (g) => (g.me.inputsPerMinute !== null ? 1 : 0), scale: 1 },
+const EXEC_METRICS: Record<ExecMetricKey, { num: (p: PlayerSide) => number; den: (p: PlayerSide) => number; scale: number }> = {
+  lCancel: { num: (p) => p.lCancelSuccess, den: (p) => p.lCancelSuccess + p.lCancelFail, scale: 100 },
+  groundTechSuccess: { num: (p) => groundTechSuccess(playerTechCounts(p)), den: (p) => groundTechAttempts(playerTechCounts(p)), scale: 100 },
+  wallTechSuccess: { num: (p) => playerTechCounts(p).wallSuccess, den: (p) => wallTechAttempts(playerTechCounts(p)), scale: 100 },
+  opk: { num: (p) => p.openingsPerKill ?? 0, den: (p) => (p.openingsPerKill !== null ? 1 : 0), scale: 1 },
+  dpo: { num: (p) => p.damagePerOpening ?? 0, den: (p) => (p.damagePerOpening !== null ? 1 : 0), scale: 1 },
+  ipm: { num: (p) => p.inputsPerMinute ?? 0, den: (p) => (p.inputsPerMinute !== null ? 1 : 0), scale: 1 },
 };
 
 export interface ExecutionSummary {
   games: number;
   lCancel: number | null;
+  groundTechSuccess: number | null;
+  wallTechSuccess: number | null;
+  groundTechInPlace: number | null;
+  groundTechIn: number | null;
+  groundTechAway: number | null;
   opk: number | null;
   dpo: number | null;
   ipm: number | null;
@@ -1615,12 +1700,23 @@ export function executionSummary(games: ResolvedGame[], window = ROLLING_WINDOW)
   const value = (key: ExecMetricKey): number | null => {
     const { num, den, scale } = EXEC_METRICS[key];
     let n = 0, d = 0;
-    for (const g of slice) { n += num(g); d += den(g); }
+    for (const g of slice) { n += num(g.me); d += den(g.me); }
     return d > 0 ? (n / d) * scale : null;
   };
+  const techs: TechCounts = { ...EMPTY_TECH_COUNTS };
+  for (const g of slice) addTechCounts(techs, g.me);
+  const groundSuccess = groundTechSuccess(techs);
+  const groundAttempts = groundTechAttempts(techs);
+  const wallAttempts = wallTechAttempts(techs);
+  const pctOf = (num: number, den: number): number | null => (den > 0 ? (num / den) * 100 : null);
   return {
     games: slice.length,
     lCancel: value("lCancel"),
+    groundTechSuccess: pctOf(groundSuccess, groundAttempts),
+    wallTechSuccess: pctOf(techs.wallSuccess, wallAttempts),
+    groundTechInPlace: pctOf(techs.inPlace, groundSuccess),
+    groundTechIn: pctOf(techs.toward, groundSuccess),
+    groundTechAway: pctOf(techs.away, groundSuccess),
     opk: value("opk"),
     dpo: value("dpo"),
     ipm: value("ipm"),
@@ -1631,6 +1727,7 @@ export interface RollingExecutionPoint {
   index: number;
   date: string;
   value: number | null;
+  oppValue?: number | null;
 }
 
 /**
@@ -1647,21 +1744,26 @@ export function rollingExecutionSeries(
   const { num, den, scale } = EXEC_METRICS[metric];
   const stride = seriesStride(games.length, maxPoints);
   const out: RollingExecutionPoint[] = [];
-  let numSum = 0, denSum = 0;
+  let numSum = 0, denSum = 0, oppNumSum = 0, oppDenSum = 0;
   for (let i = 0; i < games.length; i++) {
     const g = games[i]!;
-    numSum += num(g);
-    denSum += den(g);
+    numSum += num(g.me);
+    denSum += den(g.me);
+    oppNumSum += num(g.opp);
+    oppDenSum += den(g.opp);
     if (i >= window) {
       const old = games[i - window]!;
-      numSum -= num(old);
-      denSum -= den(old);
+      numSum -= num(old.me);
+      denSum -= den(old.me);
+      oppNumSum -= num(old.opp);
+      oppDenSum -= den(old.opp);
     }
     if (!emitsAt(i, games.length, stride)) continue;
     out.push({
       index: i + 1,
       date: dayLabel(g.date),
       value: denSum > 0 ? (numSum / denSum) * scale : null,
+      oppValue: oppDenSum > 0 ? (oppNumSum / oppDenSum) * scale : null,
     });
   }
   return out;
@@ -2103,6 +2205,7 @@ export function teamsDamageByWeek(games: ResolvedTeamGame[]): TeamsDamageWeek[] 
 export interface TeamsExecutionRow {
   who: "Me" | "Teammate";
   lCancelPct: number | null;
+  techSuccessPct: number | null;
   ipm: number | null;
   wavedashesPerGame: number | null;
   dashDancesPerGame: number | null;
@@ -2111,7 +2214,7 @@ export interface TeamsExecutionRow {
 
 /** Execution comparison (me vs teammate) over teams games. */
 export function teamsExecution(games: ResolvedTeamGame[]): TeamsExecutionRow[] {
-  const mk = () => ({ lcS: 0, lcF: 0, ipmSum: 0, ipmGames: 0, wd: 0, dd: 0, grabS: 0, grabs: 0, games: 0 });
+  const mk = () => ({ lcS: 0, lcF: 0, techS: 0, techA: 0, ipmSum: 0, ipmGames: 0, wd: 0, dd: 0, grabS: 0, grabs: 0, games: 0 });
   const me = mk();
   const mate = mk();
   for (const g of games) {
@@ -2126,6 +2229,9 @@ export function teamsExecution(games: ResolvedTeamGame[]): TeamsExecutionRow[] {
       agg.games++;
       agg.lcS += p.lCancelSuccess;
       agg.lcF += p.lCancelFail;
+      const tech = playerTechCounts(p);
+      agg.techS += allTechSuccess(tech);
+      agg.techA += allTechAttempts(tech);
       if (p.inputsPerMinute !== null) {
         agg.ipmSum += p.inputsPerMinute;
         agg.ipmGames++;
@@ -2139,6 +2245,7 @@ export function teamsExecution(games: ResolvedTeamGame[]): TeamsExecutionRow[] {
   const row = (who: TeamsExecutionRow["who"], a: ReturnType<typeof mk>): TeamsExecutionRow => ({
     who,
     lCancelPct: a.lcS + a.lcF > 0 ? a.lcS / (a.lcS + a.lcF) : null,
+    techSuccessPct: a.techA > 0 ? a.techS / a.techA : null,
     ipm: a.ipmGames ? a.ipmSum / a.ipmGames : null,
     wavedashesPerGame: a.games ? a.wd / a.games : null,
     dashDancesPerGame: a.games ? a.dd / a.games : null,

@@ -29,7 +29,7 @@ Filters (date range, mode, character, stage, opponent, and account when you have
 - **Overview** — KPIs, rolling win rate, weekly volume, a per-character table (win rate, kills, L-cancel), and an exportable share-card PNG. With several accounts it also breaks results down per account, which — like the mode table — ignores the account filter so they stay comparable.
 - **Matchups / Stages / Opponents** — character × character matrix, per-stage and stage × opponent-character counterpick tables, per-opponent records with recent sets.
 - **Sessions** — a session is games separated by gaps under 30 minutes: per-session W/L plus fatigue and tilt tables.
-- **Execution** — L-cancel %, openings per kill, damage per opening, inputs per minute, with per-move effectiveness, opening moves, and kill-move impact.
+- **Execution** — L-cancel %, tech success and direction mix, openings per kill, damage per opening, inputs per minute, with per-move effectiveness, opening moves, and kill-move impact.
 - **Insights / Records / Game log** — a logistic-regression win-factor model with coaching hints, personal bests (streaks, fastest win, nemesis), and a game log with CSV export.
 - **Community** — thresholded, aggregate-only Matchup Atlas, personal-vs-community execution quartiles, Move Atlas, Stage Lab, and monthly Community Pulse. It is public from the landing page; contributing is a separate, default-off choice in My Account.
 - **Teams** — 2v2 replays get one consolidated view (team-level W/L, teammate breakdowns) behind the singles/teams switch; they never mix into the singles aggregates.

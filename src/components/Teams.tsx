@@ -314,6 +314,7 @@ function DamageTab({ games, onSelectTeammate }: Props) {
             <tr>
               <th></th>
               <th className="data">L-cancel</th>
+              <th className="data">Tech success</th>
               <th className="data">Inputs / min</th>
               <th className="data">Wavedashes / game</th>
               <th className="data">Dash dances / game</th>
@@ -325,6 +326,7 @@ function DamageTab({ games, onSelectTeammate }: Props) {
               <tr key={r.who}>
                 <td>{r.who}</td>
                 <td className="data">{pct(r.lCancelPct)}</td>
+                <td className="data">{pct(r.techSuccessPct)}</td>
                 <td className="data">{int(r.ipm)}</td>
                 <td className="data">{num(r.wavedashesPerGame, 1)}</td>
                 <td className="data">{num(r.dashDancesPerGame, 1)}</td>

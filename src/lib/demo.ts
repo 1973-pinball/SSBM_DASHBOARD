@@ -1,4 +1,4 @@
-import type { Account, ActionCounts, GameRecord, MoveAgg, PlayerSide } from "./types";
+import type { Account, ActionCounts, GameRecord, MoveAgg, PlayerSide, TechCounts } from "./types";
 import { INCLUDED_STAGE_IDS } from "./config";
 
 /**
@@ -89,6 +89,26 @@ function mkActions(rand: () => number, minutes: number, tech: number): ActionCou
     dashDances: per(12 + tech * 14, 10),
     ledgeGrabs: per(1.5, 2),
     grabs: per(2.5, 2.5),
+  };
+}
+
+/** Plausible tech outcomes, scaled by game length; directions are relative to the opponent. */
+function mkTechs(rand: () => number, minutes: number, tech: number): TechCounts {
+  const groundAttempts = Math.round(minutes * (2.8 + tech * 3.2 + rand() * 3.5));
+  const groundRate = Math.min(0.96, Math.max(0.35, 0.55 + tech * 0.3 + (rand() - 0.5) * 0.16));
+  const groundSuccess = Math.round(groundAttempts * groundRate);
+  const inPlace = Math.min(groundSuccess, Math.round(groundSuccess * (0.28 + rand() * 0.2)));
+  const toward = Math.min(groundSuccess - inPlace, Math.round(groundSuccess * (0.2 + rand() * 0.22)));
+  const away = groundSuccess - inPlace - toward;
+  const wallAttempts = Math.round(minutes * (0.15 + rand() * 0.55));
+  const wallSuccess = Math.round(wallAttempts * Math.min(0.92, Math.max(0.3, groundRate - 0.08 + (rand() - 0.5) * 0.18)));
+  return {
+    inPlace,
+    toward,
+    away,
+    missed: groundAttempts - groundSuccess,
+    wallSuccess,
+    wallMissed: wallAttempts - wallSuccess,
   };
 }
 
@@ -211,29 +231,31 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const myCode = onAltAccount(i) ? DEMO_ALT_CODE : DEMO_CODE;
 
     const mkSide = (kills: number, taken: number, isMe: boolean): PlayerSide => {
-      const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
+      const techSkill = isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5;
+      const acts = mkActions(rand, minutes, techSkill);
       const totalDamage = kills * (95 + rand() * 40);
       return {
-      moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin, isMe ? lcRate : 0.6 + rand() * 0.3),
-      port: isMe ? 1 : 2,
-      connectCode: isMe ? myCode : rival.code,
-      displayName: isMe ? (myCode === DEMO_CODE ? "demo" : "demo alt") : rival.name,
-      characterId: isMe ? mine.id : oppChar,
-      colorId: 0,
-      teamId: null,
-      stocksRemaining: kills === 4 ? Math.max(1, 4 - taken) : 0,
-      kills,
-      totalDamage,
-      openingsPerKill: kills > 0 ? +(2.2 + rand() * 3.5 - (isMe ? t * 0.7 : 0)).toFixed(2) : null,
-      damagePerOpening: +(18 + rand() * 18 + (isMe ? t * 4 : 0)).toFixed(2),
-      inputsPerMinute: Math.floor(isMe ? 340 + t * 90 + rand() * 60 : 260 + rand() * 200),
-      neutralWins: Math.floor(6 + rand() * 14),
-      counterHits: Math.floor(2 + rand() * 9),
-      beneficialTrades: Math.floor(rand() * 3),
-      lCancelSuccess: isMe ? Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * (0.6 + rand() * 0.3)),
-      lCancelFail: isMe ? lcAttempts - Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * 0.3),
-      grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
-      actions: acts,
+        moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin, isMe ? lcRate : 0.6 + rand() * 0.3),
+        port: isMe ? 1 : 2,
+        connectCode: isMe ? myCode : rival.code,
+        displayName: isMe ? (myCode === DEMO_CODE ? "demo" : "demo alt") : rival.name,
+        characterId: isMe ? mine.id : oppChar,
+        colorId: 0,
+        teamId: null,
+        stocksRemaining: kills === 4 ? Math.max(1, 4 - taken) : 0,
+        kills,
+        totalDamage,
+        openingsPerKill: kills > 0 ? +(2.2 + rand() * 3.5 - (isMe ? t * 0.7 : 0)).toFixed(2) : null,
+        damagePerOpening: +(18 + rand() * 18 + (isMe ? t * 4 : 0)).toFixed(2),
+        inputsPerMinute: Math.floor(isMe ? 340 + t * 90 + rand() * 60 : 260 + rand() * 200),
+        neutralWins: Math.floor(6 + rand() * 14),
+        counterHits: Math.floor(2 + rand() * 9),
+        beneficialTrades: Math.floor(rand() * 3),
+        lCancelSuccess: isMe ? Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * (0.6 + rand() * 0.3)),
+        lCancelFail: isMe ? lcAttempts - Math.floor(lcAttempts * lcRate) : Math.floor(lcAttempts * 0.3),
+        grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
+        techs: mkTechs(rand, minutes, techSkill),
+        actions: acts,
       };
     };
 
@@ -310,7 +332,8 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       const enemies = idx < 2 ? [2, 3] : [0, 1];
       const lcAttempts = Math.floor(minutes * (24 + rand() * 12));
       const lcRate = isMe ? Math.min(0.98, 0.68 + t * 0.16 + (rand() - 0.5) * 0.1) : 0.6 + rand() * 0.3;
-      const acts = mkActions(rand, minutes, isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5);
+      const techSkill = isMe ? 0.4 + t * 0.5 : 0.3 + rand() * 0.5;
+      const acts = mkActions(rand, minutes, techSkill);
       return {
         port: idx + 1,
         connectCode: code,
@@ -332,6 +355,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
         lCancelSuccess: Math.floor(lcAttempts * lcRate),
         lCancelFail: lcAttempts - Math.floor(lcAttempts * lcRate),
         grabSuccess: Math.floor(acts.grabs * (0.5 + rand() * 0.35)),
+        techs: mkTechs(rand, minutes, techSkill),
         actions: acts,
       };
     };

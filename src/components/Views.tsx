@@ -2,8 +2,8 @@ import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } 
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
-import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionTrend, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
-import type { ExecMetricKey, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
+import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
+import type { ExecMetricKey, ExecutionSummary, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
 import { charName, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
@@ -572,21 +572,10 @@ export function Opponents({
 
 // ---------------- Execution ----------------
 
-const EXEC_CHARTS: {
-  key: string;
-  label: string;
-  unit: string;
-  color: string;
-  compare?: { key: string; label: string; color: string };
-}[] = [
-  { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)", compare: { key: "oppLCancel", label: "Opponents", color: OPP_SERIES_COLOR } },
-  { key: "opk", label: "Openings per kill (lower is better)", unit: "", color: "#e8b54d", compare: { key: "oppOpk", label: "Opponents", color: OPP_SERIES_COLOR } },
-  { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e", compare: { key: "oppDpo", label: "Opponents", color: OPP_SERIES_COLOR } },
-  { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2", compare: { key: "oppIpm", label: "Opponents", color: OPP_SERIES_COLOR } },
-];
-
 const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color: string }[] = [
   { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)" },
+  { key: "groundTechSuccess", label: "Ground Tech Success", unit: "%", color: "#9adb4f" },
+  { key: "wallTechSuccess", label: "Wall Tech Success", unit: "%", color: "#72d6a4" },
   { key: "opk", label: "Openings per kill", unit: "", color: "#e8b54d" },
   { key: "dpo", label: "Damage per opening", unit: "", color: "#3fcf8e" },
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
@@ -639,9 +628,21 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
               const d = payload?.[0]?.payload?.date;
               return d ? `Game ${v} — ${dayTick(d)}` : `Game ${v}`;
             }}
-            formatter={(v) => [`${Number(v).toFixed(1)}${def.unit}`, def.label]}
+            formatter={(v, name) => [`${Number(v).toFixed(1)}${def.unit}`, name]}
           />
-          <Line type="monotone" dataKey="value" name={def.label} stroke={def.color} strokeWidth={2} dot={false} connectNulls />
+          <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
+          <Line type="monotone" dataKey="value" name="Me" stroke={def.color} strokeWidth={2} dot={false} connectNulls />
+          <Line
+            type="monotone"
+            dataKey="oppValue"
+            name="Opponents"
+            stroke={OPP_SERIES_COLOR}
+            strokeWidth={1.5}
+            strokeDasharray="5 4"
+            strokeOpacity={0.9}
+            dot={false}
+            connectNulls
+          />
         </LineChart>
       </ResponsiveContainer>
       <div className="hint">
@@ -674,13 +675,36 @@ const ACTION_COLORS: Record<keyof ActionCounts, string> = {
   grabs: "#f2985e",
 };
 
-const ACTION_SERIES: SeriesDef[] = ACTION_LABELS.map(({ key, label }) => ({
-  key,
-  label,
-  color: ACTION_COLORS[key],
-  value: (g) => g.me.actions?.[key] ?? 0,
-  oppValue: (g) => g.opp.actions?.[key] ?? 0,
-}));
+const ACTION_SERIES: SeriesDef[] = [
+  ...ACTION_LABELS.map<SeriesDef>(({ key, label }) => ({
+    key,
+    label,
+    color: ACTION_COLORS[key],
+    value: (g) => g.me.actions?.[key] ?? 0,
+    oppValue: (g) => g.opp.actions?.[key] ?? 0,
+  })),
+  {
+    key: "techInPlace",
+    label: "Tech in place",
+    color: "#c4e86b",
+    value: (g) => g.me.techs?.inPlace ?? 0,
+    oppValue: (g) => g.opp.techs?.inPlace ?? 0,
+  },
+  {
+    key: "techIn",
+    label: "Tech in",
+    color: "#72d6a4",
+    value: (g) => g.me.techs?.toward ?? 0,
+    oppValue: (g) => g.opp.techs?.toward ?? 0,
+  },
+  {
+    key: "techAway",
+    label: "Tech away",
+    color: "#f2c45e",
+    value: (g) => g.me.techs?.away ?? 0,
+    oppValue: (g) => g.opp.techs?.away ?? 0,
+  },
+];
 
 /** Per-game line chart with chip toggles choosing which metrics are plotted. */
 function PerGameMetricChart({
@@ -1000,12 +1024,28 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
   );
 }
 
+const kpiPctLine = (value: number | null, label: string) => `${value !== null ? `${num(value, 1)}%` : "—"} ${label}`;
+
+function TechKpi({ summary }: { summary: ExecutionSummary }) {
+  return (
+    <div className="kpi tech-kpi">
+      <div className="label">Tech success % — last {summary.games}</div>
+      <div className="tech-kpi-line primary">{kpiPctLine(summary.groundTechSuccess, "groundTechs")}</div>
+      <div className="tech-kpi-line">{kpiPctLine(summary.wallTechSuccess, "wallTechs")}</div>
+      <div className="tech-kpi-split">
+        % of total (in-place/in/away): {summary.groundTechInPlace !== null ? `${num(summary.groundTechInPlace, 0)}%` : "—"}/
+        {summary.groundTechIn !== null ? `${num(summary.groundTechIn, 0)}%` : "—"}/
+        {summary.groundTechAway !== null ? `${num(summary.groundTechAway, 0)}%` : "—"}
+      </div>
+    </div>
+  );
+}
+
 export function Execution({ games }: { games: ResolvedGame[] }) {
   // The charts cover the whole filter; everything under them describes current
   // form, so it reads the trailing window the charts smooth over. The same
   // number on purpose — see ROLLING_WINDOW.
   const recentGames = useMemo(() => games.slice(-ROLLING_WINDOW), [games]);
-  const points = useMemo(() => executionTrend(games), [games]);
   const summary = useMemo(() => executionSummary(games), [games]);
   const actions = useMemo(() => actionAverages(recentGames), [recentGames]);
   const neutral = useMemo(() => neutralSummary(recentGames), [recentGames]);
@@ -1013,55 +1053,15 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
   // the window pass feeds the two tables that report current habits.
   const career = useMemo(() => moveTable(games), [games]);
   const recentMoves = useMemo(() => moveTable(recentGames), [recentGames]);
-  if (points.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
+  if (games.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
-      <div className="kpi-strip">
-        <Kpi label={`L-cancel — last ${summary.games}`} value={summary.lCancel !== null ? `${num(summary.lCancel, 1)}%` : "—"} />
+      <div className="kpi-strip compact">
+        <Kpi label={`L-cancel success % — last ${summary.games}`} value={summary.lCancel !== null ? `${num(summary.lCancel, 1)}%` : "—"} />
+        <TechKpi summary={summary} />
         <Kpi label={`Openings / kill — last ${summary.games}`} value={num(summary.opk, 2)} />
         <Kpi label={`Damage / opening — last ${summary.games}`} value={num(summary.dpo, 1)} />
         <Kpi label={`Inputs / min — last ${summary.games}`} value={int(summary.ipm)} />
-      </div>
-
-      <div className="grid-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
-        {EXEC_CHARTS.map((c) => (
-          <div className="panel" key={c.key}>
-            <h2>{c.label} — {ROLLING_WINDOW}-game rolling average</h2>
-            <ResponsiveContainer width="100%" height={180}>
-              <LineChart data={points} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
-                <CartesianGrid {...gridStyle} />
-                <XAxis
-                  dataKey="date"
-                  tick={axisStyle}
-                  tickLine={false}
-                  axisLine={{ stroke: "var(--line)" }}
-                  minTickGap={48}
-                  tickFormatter={dayTick}
-                />
-                <YAxis tick={axisStyle} tickLine={false} axisLine={false} domain={["auto", "auto"]} unit={c.unit} />
-                <Tooltip
-                  {...tooltipStyle}
-                  labelFormatter={(v) => dayTick(String(v))}
-                  formatter={(v, name) => [`${Number(v).toFixed(1)}${c.unit}`, name]}
-                />
-                {c.compare && <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />}
-                <Line type="monotone" dataKey={c.key} name={c.compare ? "Me" : c.label} stroke={c.color} strokeWidth={2} dot={false} connectNulls />
-                {c.compare && (
-                  <Line
-                    type="monotone"
-                    dataKey={c.compare.key}
-                    name={c.compare.label}
-                    stroke={c.compare.color}
-                    strokeWidth={2}
-                    strokeDasharray="5 4"
-                    dot={false}
-                    connectNulls
-                  />
-                )}
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-        ))}
       </div>
 
       <RollingExecChart games={games} />
@@ -1099,6 +1099,33 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
                     <td className="data">{r.theirs.toLocaleString()}</td>
                     <td className="data">{num(r.perGame, 1)}</td>
                     <td className="data" style={{ color: winRateColor(r.share) }}>{pct(r.share, 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <h3 className="table-subhead">Ground tech directions</h3>
+            <table className="subtable">
+              <thead>
+                <tr>
+                  <th>Tech</th>
+                  <th className="data">Me</th>
+                  <th className="data">Me / game</th>
+                  <th className="data">Me %</th>
+                  <th className="data">Opponents</th>
+                  <th className="data">Opp / game</th>
+                  <th className="data">Opp %</th>
+                </tr>
+              </thead>
+              <tbody>
+                {neutral.techRows.map((r) => (
+                  <tr key={r.label}>
+                    <td>{r.label}</td>
+                    <td className="data">{r.mine.toLocaleString()}</td>
+                    <td className="data">{num(r.perGame, 1)}</td>
+                    <td className="data">{pct(r.minePct ?? null, 0)}</td>
+                    <td className="data">{r.theirs.toLocaleString()}</td>
+                    <td className="data">{num(r.oppPerGame ?? 0, 1)}</td>
+                    <td className="data">{pct(r.theirsPct ?? null, 0)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1353,6 +1380,24 @@ const GAME_LOG_ROWS = 50;
 const withShare = (mine: number, theirs: number) =>
   mine + theirs > 0 ? `${mine} (${pct(mine / (mine + theirs), 0)})` : "0";
 
+const techSuccessLabel = (p: PlayerSide): string => {
+  const t = p.techs;
+  if (!t) return "—";
+  const groundSuccess = t.inPlace + t.toward + t.away;
+  const success = groundSuccess + t.wallSuccess;
+  const attempts = success + t.missed + t.wallMissed;
+  return attempts === 0 ? "—" : `${success}/${attempts} (${pct(success / attempts, 0)})`;
+};
+
+const techDirectionLabel = (p: PlayerSide): string => {
+  const t = p.techs;
+  if (!t) return "—";
+  const groundSuccess = t.inPlace + t.toward + t.away;
+  return groundSuccess === 0
+    ? "—"
+    : `${pct(t.inPlace / groundSuccess, 0)} / ${pct(t.toward / groundSuccess, 0)} / ${pct(t.away / groundSuccess, 0)}`;
+};
+
 const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) => string }[] = [
   { label: "Kills", value: (p) => int(p.kills) },
   { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
@@ -1369,6 +1414,8 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) =
       return attempts === 0 ? "—" : `${p.lCancelSuccess}/${attempts} (${pct(p.lCancelSuccess / attempts, 0)})`;
     },
   },
+  { label: "Tech success", value: techSuccessLabel },
+  { label: "Tech dirs (IP/in/away)", value: techDirectionLabel },
   { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
   {
     label: "Grabs (landed)",

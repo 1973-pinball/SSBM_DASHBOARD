@@ -13,7 +13,7 @@ import {
   didLoseStock,
 } from "@slippi/slippi-js";
 import type { FrameEntryType, FramesType, GameEndType, GameStartType, MetadataType } from "@slippi/slippi-js";
-import type { GameRecord, GameType, MoveAgg, PlayerSide } from "./types";
+import type { GameRecord, GameType, MoveAgg, PlayerSide, TechCounts } from "./types";
 
 const MIN_GAME_SECONDS = 30;
 
@@ -83,6 +83,28 @@ interface TeamsStats {
   killMatrix: number[][]; // same shape; diagonal = self-destructs
   actionsByPlayerIndex: Map<number, ReturnType<ActionsComputer["fetch"]>[number]>;
   inputCountByPlayerIndex: Map<number, number>;
+}
+
+type SlippiActionCounts = ReturnType<ActionsComputer["fetch"]>[number];
+
+const emptyTechCounts = (): TechCounts => ({
+  inPlace: 0,
+  toward: 0,
+  away: 0,
+  missed: 0,
+  wallSuccess: 0,
+  wallMissed: 0,
+});
+
+function techCountsFrom(actions: SlippiActionCounts | undefined): TechCounts {
+  return {
+    inPlace: actions?.groundTechCount?.neutral ?? 0,
+    toward: actions?.groundTechCount?.in ?? 0,
+    away: actions?.groundTechCount?.away ?? 0,
+    missed: actions?.groundTechCount?.fail ?? 0,
+    wallSuccess: actions?.wallTechCount?.success ?? 0,
+    wallMissed: actions?.wallTechCount?.fail ?? 0,
+  };
 }
 
 interface TeamsAccumulator {
@@ -179,8 +201,8 @@ function finishTeamsAccumulator(acc: TeamsAccumulator): TeamsStats {
  * attacker→victim matrix — that one structure yields enemy damage, friendly
  * fire (both directions), damage taken by source, and real stock captures.
  * Action/input counts reuse the library's own per-player state machines by
- * running them pairwise across teams (they only read the opponent's position,
- * for tech direction, which we don't surface).
+ * running them pairwise across teams; the opponent's position determines tech
+ * direction relative to that opponent.
  */
 function computeTeamsStats(game: SlippiGame, settings: GameStartType, lastFrame: number): TeamsStats | null {
   const acc = createTeamsAccumulator(settings);
@@ -546,6 +568,7 @@ function parseReplayWithMode(id: string, path: string, buf: ArrayBuffer, bounded
       lCancelSuccess: actions?.lCancelCount?.success ?? 0,
       lCancelFail: actions?.lCancelCount?.fail ?? 0,
       grabSuccess: actions?.grabCount?.success ?? 0,
+      techs: techCountsFrom(actions),
       actions: {
         rolls: actions?.rollCount ?? 0,
         airDodges: actions?.airDodgeCount ?? 0,
@@ -660,6 +683,7 @@ function parseReplayWithMode(id: string, path: string, buf: ArrayBuffer, bounded
         side.lCancelSuccess = ac.lCancelCount?.success ?? 0;
         side.lCancelFail = ac.lCancelCount?.fail ?? 0;
         side.grabSuccess = ac.grabCount?.success ?? 0;
+        side.techs = techCountsFrom(ac);
         side.actions = {
           rolls: ac.rollCount ?? 0,
           airDodges: ac.airDodgeCount ?? 0,
@@ -755,6 +779,7 @@ function buildHeaderRecord(
     lCancelSuccess: 0,
     lCancelFail: 0,
     grabSuccess: 0,
+    techs: emptyTechCounts(),
     actions: { rolls: 0, airDodges: 0, spotDodges: 0, wavedashes: 0, wavelands: 0, dashDances: 0, ledgeGrabs: 0, grabs: 0 },
   }));
 

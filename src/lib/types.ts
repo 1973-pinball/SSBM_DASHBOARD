@@ -26,6 +26,16 @@ export const ACTION_LABELS: { key: keyof ActionCounts; label: string }[] = [
   { key: "grabs", label: "Grabs" },
 ];
 
+/** Tech outcome counts for one player in one game. */
+export interface TechCounts {
+  inPlace: number; // ground tech in place
+  toward: number; // ground tech toward the opponent
+  away: number; // ground tech away from the opponent
+  missed: number; // missed ground techs
+  wallSuccess: number;
+  wallMissed: number;
+}
+
 /** Per-move landed-hit aggregates for one player in one game (from conversions). */
 export interface MoveAgg {
   landed: number; // landed instances (a multi-hit move counts once per landing)
@@ -61,6 +71,7 @@ export interface PlayerSide {
   lCancelSuccess: number;
   lCancelFail: number;
   grabSuccess: number; // landed grabs; actions.grabs is total attempts
+  techs: TechCounts;
   actions: ActionCounts;
   /** Keyed by Melee move ID. Singles only (conversions no-op in teams). */
   moveStats?: Record<number, MoveAgg>;

@@ -318,6 +318,7 @@ select:disabled { opacity: 0.45; }
 .kpi-strip:has(> .kpi:nth-child(10):last-child) { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .kpi-strip:has(> .kpi:nth-child(8):last-child) { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .kpi-strip:has(> .kpi:nth-child(6):last-child) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.kpi-strip.compact { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .kpi {
   background: linear-gradient(180deg, var(--panel-2) 0%, var(--panel) 100%);
   border: 1px solid var(--line);
@@ -347,6 +348,29 @@ select:disabled { opacity: 0.45; }
   font-variant-numeric: tabular-nums;
 }
 .kpi .delta { font-family: var(--font-data); font-size: 12px; }
+.kpi-strip.compact .kpi { padding: 10px 11px 9px; }
+.kpi-strip.compact .kpi .label { font-size: 10.5px; }
+.kpi-strip.compact .kpi .value { font-size: 24px; }
+.tech-kpi-line {
+  font-family: var(--font-data);
+  font-size: 13px;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.tech-kpi-line.primary {
+  margin-top: 3px;
+  color: var(--text);
+  font-weight: 600;
+}
+.tech-kpi-split {
+  margin-top: 2px;
+  color: var(--faint);
+  font-family: var(--font-data);
+  font-size: 10px;
+  line-height: 1.25;
+  white-space: normal;
+}
 .up { color: var(--win); }
 .down { color: var(--loss); }
 .gold { color: var(--gold); }
@@ -675,6 +699,16 @@ select:disabled { opacity: 0.45; }
 
 /* ---- Tables ---- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.subtable { margin-top: 4px; }
+.table-subhead {
+  margin: 14px 10px 2px;
+  color: var(--muted);
+  font-family: var(--font-display);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
 th {
   text-align: left;
   font-size: 11px;
@@ -1615,6 +1649,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   .panel { padding: 14px; }
   .kpi { padding: 11px 12px 9px; }
   .kpi .value { font-size: 24px; }
+  .kpi-strip.compact { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
   .game-log-table { display: none; }
   .game-log-cards { display: grid; gap: 8px; }

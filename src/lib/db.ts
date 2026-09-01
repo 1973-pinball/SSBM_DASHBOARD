@@ -213,6 +213,20 @@ class SsbmDb extends Dexie {
         }
         await tx.table("seen").bulkDelete(deadIds);
       });
+    // v13 added PlayerSide.techs from slippi-js's ground/wall tech counts.
+    // Older packed records lack the field and would read as zero tech attempts,
+    // so clear and let the folder rescan fill the real counters.
+    this.version(13)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        await tx.table("packs").clear();
+        await tx.table("seen").clear();
+      });
   }
 }
 
