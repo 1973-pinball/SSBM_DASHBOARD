@@ -1029,15 +1029,16 @@ const kpiPctValue = (value: number | null, digits: number) => value !== null ? `
 function TechKpi({ summary }: { summary: ExecutionSummary }) {
   const ground = kpiPctValue(summary.groundTechSuccess, 1);
   const wall = kpiPctValue(summary.wallTechSuccess, 1);
-  const split = [summary.groundTechInPlace, summary.groundTechIn, summary.groundTechAway]
-    .map((value) => kpiPctValue(value, 0))
-    .join("/");
+  const inPlace = kpiPctValue(summary.groundTechInPlace, 0);
+  const inward = kpiPctValue(summary.groundTechIn, 0);
+  const away = kpiPctValue(summary.groundTechAway, 0);
+  const split = `${inPlace}/${inward}/${away}`;
   return (
     <div className="kpi tech-kpi">
       <div className="label">Tech success % — last {summary.games}</div>
-      <div className="tech-kpi-line primary" title="Ground Tech Success" aria-label={`Ground Tech Success: ${ground}`}>{ground}</div>
-      <div className="tech-kpi-line" title="Wall Tech Success" aria-label={`Wall Tech Success: ${wall}`}>{wall}</div>
-      <div className="tech-kpi-split" title="Ground tech mix: in-place / in / away" aria-label={`Ground tech mix, in-place, in, away: ${split}`}>% of total (in-place/in/away): {split}</div>
+      <div className="tech-kpi-line primary" title="Ground Tech Success" aria-label={`Ground Tech Success: ${ground}`}>Ground Tech: {ground}</div>
+      <div className="tech-kpi-line" title="Wall Tech Success" aria-label={`Wall Tech Success: ${wall}`}>Wall Tech: {wall}</div>
+      <div className="tech-kpi-split" title="Ground tech mix: in-place / in / away" aria-label={`Ground tech mix, in-place, in, away: ${split}`}>% of ground total (in-place/in/away): {split}</div>
     </div>
   );
 }
@@ -1134,7 +1135,8 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
             <div className="hint">
               Your most recent {neutral.covered.toLocaleString()} games in this filter — current form, not career
               totals. Share is your count ÷ the game total, so over 50% means you're winning that kind of exchange
-              more often than your opponents.
+              more often than your opponents. The % breakdown columns show the in-place / in / away composition of your ground techs and
+              your opponents' ground techs.
             </div>
           </>
         )}

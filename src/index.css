@@ -367,8 +367,8 @@ select:disabled { opacity: 0.45; }
   margin-top: 2px;
   color: var(--faint);
   font-family: var(--font-data);
-  font-size: 10px;
-  line-height: 1.25;
+  font-size: 11px;
+  line-height: 1.2;
   white-space: normal;
 }
 .up { color: var(--win); }
