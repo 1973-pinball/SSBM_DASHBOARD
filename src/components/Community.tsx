@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { ResolvedGame } from "../lib/types";
 import {
+  COMMUNITY_MIN_CONTRIBUTORS,
+  COMMUNITY_MIN_GAMES,
   demoCommunitySnapshot,
   fetchCommunitySnapshot,
   type CommunityBenchmarkRow,
@@ -30,6 +32,21 @@ const VIEWS: { id: CommunityView; label: string }[] = [
 ];
 
 const gameTypes = ["all", "ranked", "unranked", "direct", "offline"];
+
+const EMPTY_COMMUNITY_SNAPSHOT: CommunitySnapshot = {
+  refreshedAt: "",
+  contributorCount: 0,
+  playerGameCount: 0,
+  minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+  minGames: COMMUNITY_MIN_GAMES,
+  matchups: [],
+  benchmarks: [],
+  moves: [],
+  execution: [],
+  months: [],
+  characters: [],
+  stages: [],
+};
 
 interface Props {
   games: ResolvedGame[];
@@ -65,54 +82,55 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
 
   if (loading) return <div className="empty-note">Loading anonymous community aggregates…</div>;
 
-  if (!snapshot) {
-    return (
-      <div className="panel community-warmup">
-        <div className="eyebrow">Community Lab</div>
-        <h2>{error ? "Community data is temporarily unavailable" : "Community benchmarks are available on the hosted app"}</h2>
-        <p>{error ?? "This local build has no Supabase connection. Your personal dashboard remains fully local."}</p>
-      </div>
-    );
-  }
-
-  const ready = snapshot.contributorCount >= snapshot.minContributors && snapshot.matchups.length > 0;
-  if (!ready) {
-    const progress = Math.min(100, (snapshot.contributorCount / snapshot.minContributors) * 100);
-    return (
-      <div className="panel community-warmup">
-        <div className="eyebrow">Community Lab</div>
-        <h2>Building a privacy-safe sample</h2>
-        <p>
-          Community views open after at least {snapshot.minContributors} distinct contributors and {snapshot.minGames} player-games
-          qualify. Small cohorts stay hidden rather than becoming identifiable.
-        </p>
-        <div className="community-progress" aria-label={`${snapshot.contributorCount} of ${snapshot.minContributors} contributors`}>
-          <span style={{ width: `${progress}%` }} />
-        </div>
-        <div className="community-progress-label">
-          <b>{snapshot.contributorCount}</b> / {snapshot.minContributors} contributors
-        </div>
-        <button className="primary" onClick={onOpenAccount}>Review contribution settings</button>
-        {error && <div className="error-note" role="alert">{error}</div>}
-      </div>
-    );
-  }
+  // Demo data is derived synchronously, so use it on the first render instead
+  // of mounting placeholder controls that would retain their empty selection.
+  const displaySnapshot = snapshot ?? (isDemo ? demo : EMPTY_COMMUNITY_SNAPSHOT);
+  const hasSnapshot = snapshot !== null || isDemo;
+  const ready = hasSnapshot && displaySnapshot.contributorCount >= displaySnapshot.minContributors && displaySnapshot.matchups.length > 0;
+  const progress = Math.min(100, (displaySnapshot.contributorCount / displaySnapshot.minContributors) * 100);
 
   return (
     <>
+      {!ready && (
+        <div className="panel community-warmup community-preview-progress">
+          <div className="eyebrow">Community Lab · Unlock progress</div>
+          <h2>Help build a privacy-safe sample</h2>
+          <p>
+            Explore every planned view below now. A dash marks a result that stays private until at least{" "}
+            {displaySnapshot.minContributors} distinct contributors and {displaySnapshot.minGames} player-games qualify.
+          </p>
+          <div
+            className="community-progress"
+            aria-label={`${displaySnapshot.contributorCount} of ${displaySnapshot.minContributors} contributors`}
+          >
+            <span style={{ width: `${progress}%` }} />
+          </div>
+          <div className="community-progress-label">
+            <b>{hasSnapshot ? displaySnapshot.contributorCount.toLocaleString() : "—"}</b> /{" "}
+            {displaySnapshot.minContributors.toLocaleString()} contributors ·{" "}
+            <b>{hasSnapshot ? displaySnapshot.playerGameCount.toLocaleString() : "—"}</b> player-games collected
+          </div>
+          <button className="primary" onClick={onOpenAccount}>Review contribution settings</button>
+          {error && <div className="error-note" role="alert">{error}</div>}
+        </div>
+      )}
+
       <div className="community-hero panel">
         <div>
-          <div className="eyebrow">Community Lab {snapshot.demo && <span className="tag">demo preview</span>}</div>
-          <h2>Learn from the field without exposing the players</h2>
+          <div className="eyebrow">
+            Community Lab {displaySnapshot.demo && <span className="tag">demo preview</span>}
+            {!ready && <span className="tag">view preview</span>}
+          </div>
+          <h2>{ready ? "Learn from the field without exposing the players" : "See what anonymous community data can unlock"}</h2>
           <p>
             Only thresholded aggregates appear here—never connect codes, names, emails, replay paths, exact activity
-            timelines, or row-level downloads. Community controls are independent of your dashboard filters.
+            timelines, or row-level downloads. Placeholder dashes mark data that has not cleared the thresholds yet.
           </p>
         </div>
         <div className="community-hero-stats">
-          <span><b>{snapshot.contributorCount.toLocaleString()}</b> contributors</span>
-          <span><b>{snapshot.playerGameCount.toLocaleString()}</b> player-games</span>
-          <span>Refreshed {shortDate(snapshot.refreshedAt)}</span>
+          <span><b>{hasSnapshot ? displaySnapshot.contributorCount.toLocaleString() : "—"}</b> contributors</span>
+          <span><b>{hasSnapshot ? displaySnapshot.playerGameCount.toLocaleString() : "—"}</b> player-games</span>
+          <span>Refreshed {hasSnapshot ? shortDate(displaySnapshot.refreshedAt) : "—"}</span>
         </div>
       </div>
 
@@ -137,18 +155,18 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
         ))}
       </div>
 
-      {view === "matchups" && <MatchupAtlas snapshot={snapshot} />}
-      {view === "benchmarks" && <CommunityBenchmarks snapshot={snapshot} games={games} />}
-      {view === "moves" && <MoveAtlas snapshot={snapshot} />}
-      {view === "stages" && <StageLab snapshot={snapshot} />}
-      {view === "pulse" && <CommunityPulse snapshot={snapshot} />}
+      {view === "matchups" && <MatchupAtlas snapshot={displaySnapshot} />}
+      {view === "benchmarks" && <CommunityBenchmarks snapshot={displaySnapshot} games={games} />}
+      {view === "moves" && <MoveAtlas snapshot={displaySnapshot} />}
+      {view === "stages" && <StageLab snapshot={displaySnapshot} />}
+      {view === "pulse" && <CommunityPulse snapshot={displaySnapshot} />}
     </>
   );
 }
 
 function MatchupAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
   const chars = selectCharacters(snapshot);
-  const [characterId, setCharacterId] = useState(chars[0] ?? 20);
+  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
   const [stageId, setStageId] = useState(0);
   const [gameType, setGameType] = useState("all");
   const rows = snapshot.matchups
@@ -159,10 +177,10 @@ function MatchupAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
       <div className="panel-heading-row community-heading-row">
         <div>
           <div className="eyebrow">Matchup Atlas</div>
-          <h2>{charName(characterId)} across the qualifying field</h2>
+          <h2>{characterId === -1 ? "Character matchups across the qualifying field" : `${charName(characterId)} across the qualifying field`}</h2>
         </div>
         <div className="community-controls">
-          <label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
+          <label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
           <label>Stage<select value={stageId} onChange={(e) => setStageId(Number(e.target.value))}><option value={0}>All legal stages</option>{INCLUDED_STAGE_IDS.map((id) => <option key={id} value={id}>{stageName(id)}</option>)}</select></label>
           <label>Mode<select value={gameType} onChange={(e) => setGameType(e.target.value)}>{gameTypes.map((mode) => <option key={mode} value={mode}>{mode === "all" ? "All modes" : mode}</option>)}</select></label>
         </div>
@@ -177,7 +195,17 @@ function MatchupAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
             </article>
           ))}
         </div>
-      ) : <div className="empty-note">That slice is suppressed because it does not clear the privacy and sample thresholds.</div>}
+      ) : (
+        <div className="community-matchup-grid" aria-label="Matchup data awaiting a qualifying sample">
+          {Array.from({ length: 4 }, (_, index) => (
+            <article key={index} className="community-matchup-card community-placeholder">
+              <div className="community-card-label">vs —</div>
+              <div className="community-card-value">—</div>
+              <div className="community-card-meta">— games · — contributors</div>
+            </article>
+          ))}
+        </div>
+      )}
       <div className="hint">Results are contributor player-games, not an official sample of every Slippi player. Every visible cell clears both the contributor and game minimum.</div>
     </div>
   );
@@ -191,7 +219,8 @@ const benchmarkDefs: { key: keyof Pick<CommunityBenchmarkRow, "lCancel" | "openi
 ];
 
 function quartileLabel(value: number | null, q: Quartiles | null, lowerBetter = false): string {
-  if (value === null || !q) return "Not enough local data";
+  if (value === null) return "Not enough local data";
+  if (!q) return "Community cohort not yet available";
   if (value < q.p25) return lowerBetter ? "Below the middle band · efficient" : "Below the community middle band";
   if (value > q.p75) return lowerBetter ? "Above the middle band" : "Above the community middle band";
   return "Inside the community middle 50%";
@@ -209,22 +238,20 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
         <div><div className="eyebrow">You vs Community</div><h2>Private local overlay on anonymous percentiles</h2></div>
         <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{id === -1 ? "All characters" : charName(id)}</option>)}</select></label></div>
       </div>
-      {row ? (
-        <div className="benchmark-grid">
-          {benchmarkDefs.map((def) => {
-            const q = row[def.key];
-            const value = own[def.local];
-            return (
-              <article className="benchmark-card" key={def.key}>
-                <div className="community-card-label">{def.label}</div>
-                <div className="benchmark-values"><span><small>You</small><b>{value === null ? "—" : `${value.toFixed(def.digits)}${def.suffix}`}</b></span><span><small>Median</small><b>{q ? `${q.p50.toFixed(def.digits)}${def.suffix}` : "—"}</b></span></div>
-                <div className="benchmark-range">Middle 50%: {q ? `${q.p25.toFixed(def.digits)}–${q.p75.toFixed(def.digits)}${def.suffix}` : "—"}</div>
-                <div className="benchmark-note">{quartileLabel(value, q, def.lowerBetter)}</div>
-              </article>
-            );
-          })}
-        </div>
-      ) : <div className="empty-note">That character does not yet have a qualifying benchmark cohort.</div>}
+      <div className="benchmark-grid">
+        {benchmarkDefs.map((def) => {
+          const q = row?.[def.key] ?? null;
+          const value = own[def.local];
+          return (
+            <article className={`benchmark-card ${q ? "" : "community-placeholder"}`} key={def.key}>
+              <div className="community-card-label">{def.label}</div>
+              <div className="benchmark-values"><span><small>You</small><b>{value === null ? "—" : `${value.toFixed(def.digits)}${def.suffix}`}</b></span><span><small>Median</small><b>{q ? `${q.p50.toFixed(def.digits)}${def.suffix}` : "—"}</b></span></div>
+              <div className="benchmark-range">Middle 50%: {q ? `${q.p25.toFixed(def.digits)}–${q.p75.toFixed(def.digits)}${def.suffix}` : "—"}</div>
+              <div className="benchmark-note">{quartileLabel(value, q, def.lowerBetter)}</div>
+            </article>
+          );
+        })}
+      </div>
       <div className="hint">Your values are computed in this browser and are never sent by this comparison. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else.</div>
     </div>
   );
@@ -248,18 +275,14 @@ function MoveAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
       </div>
 
       <h3 className="table-subhead community-table-subhead">Execution profile</h3>
-      {execution ? <CommunityExecutionTable row={execution} /> : (
-        <div className="empty-note">This execution cohort does not clear the privacy and sample thresholds yet.</div>
-      )}
+      <CommunityExecutionTable row={execution} characterId={characterId} />
 
       <h3 className="table-subhead community-table-subhead">Move effectiveness</h3>
-      {characterId === -1 ? (
-        <div className="empty-note">Choose a character to see its move-by-move damage and stock profile.</div>
-      ) : rows.length ? (
-        <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Kills</th><th className="data">Avg kill %</th><th className="data">Contributors</th></tr></thead><tbody>
-          {rows.map((row) => <MoveRowView key={row.moveKey} row={row} totalDamage={totalDamage} />)}
-        </tbody></table></div>
-      ) : <div className="empty-note">No move group for this character clears the privacy threshold yet.</div>}
+      <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Kills</th><th className="data">Avg kill %</th><th className="data">Contributors</th></tr></thead><tbody>
+        {rows.length ? rows.map((row) => <MoveRowView key={row.moveKey} row={row} totalDamage={totalDamage} />) : (
+          <tr className="community-placeholder-row"><td>—</td>{Array.from({ length: 7 }, (_, index) => <td key={index} className="data">—</td>)}</tr>
+        )}
+      </tbody></table></div>
       <div className="hint">Execution rates are attempt-weighted across current-stat player-games. Ground-tech direction is the share of successful ground techs, so in-place + in + away totals 100%. Attempt counts include whiffs where replay parsing supports them; rare moves stay suppressed even when a character’s overall cohort qualifies.</div>
     </div>
   );
@@ -267,7 +290,7 @@ function MoveAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
 
 const communityExecutionPct = (value: number | null): string => value === null ? "—" : `${num(value, 1)}%`;
 
-function CommunityExecutionTable({ row }: { row: CommunityExecutionRow }) {
+function CommunityExecutionTable({ row, characterId }: { row: CommunityExecutionRow | undefined; characterId: number }) {
   return (
     <div className="table-scroll community-execution-table">
       <table>
@@ -285,14 +308,14 @@ function CommunityExecutionTable({ row }: { row: CommunityExecutionRow }) {
         </thead>
         <tbody>
           <tr>
-            <td>{row.characterId === -1 ? "All characters" : charName(row.characterId)}</td>
-            <td className="data">{communityExecutionPct(row.lCancelSuccess)}</td>
-            <td className="data">{communityExecutionPct(row.groundTechSuccess)}</td>
-            <td className="data">{communityExecutionPct(row.groundTechInPlace)}</td>
-            <td className="data">{communityExecutionPct(row.groundTechIn)}</td>
-            <td className="data">{communityExecutionPct(row.groundTechAway)}</td>
-            <td className="data">{row.games.toLocaleString()}</td>
-            <td className="data">{row.contributors.toLocaleString()}</td>
+            <td>{characterId === -1 ? "All characters" : charName(characterId)}</td>
+            <td className="data">{communityExecutionPct(row?.lCancelSuccess ?? null)}</td>
+            <td className="data">{communityExecutionPct(row?.groundTechSuccess ?? null)}</td>
+            <td className="data">{communityExecutionPct(row?.groundTechInPlace ?? null)}</td>
+            <td className="data">{communityExecutionPct(row?.groundTechIn ?? null)}</td>
+            <td className="data">{communityExecutionPct(row?.groundTechAway ?? null)}</td>
+            <td className="data">{row ? row.games.toLocaleString() : "—"}</td>
+            <td className="data">{row ? row.contributors.toLocaleString() : "—"}</td>
           </tr>
         </tbody>
       </table>
@@ -307,18 +330,18 @@ function MoveRowView({ row, totalDamage }: { row: CommunityMoveRow; totalDamage:
 function StageLab({ snapshot }: { snapshot: CommunitySnapshot }) {
   const overall = snapshot.matchups.filter((r) => r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
   const first = overall[0];
-  const [characterId, setCharacterId] = useState(first?.characterId ?? 20);
+  const [characterId, setCharacterId] = useState(first?.characterId ?? -1);
   const opponents = overall.filter((r) => r.characterId === characterId);
-  const [opponentId, setOpponentId] = useState(first?.opponentCharacterId ?? 2);
+  const [opponentId, setOpponentId] = useState(first?.opponentCharacterId ?? -1);
   const rows = snapshot.matchups.filter((r) => r.characterId === characterId && r.opponentCharacterId === opponentId && r.stageId !== 0 && r.gameType === "all").sort((a, b) => b.winRate - a.winRate);
   const chars = selectCharacters(snapshot);
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">Stage Lab</div><h2>Where a community matchup bends</h2></div>
-        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => { const id = Number(e.target.value); setCharacterId(id); const next = overall.find((r) => r.characterId === id); if (next) setOpponentId(next.opponentCharacterId); }}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><label>Opponent<select value={opponentId} onChange={(e) => setOpponentId(Number(e.target.value))}>{opponents.map((r) => <option key={r.opponentCharacterId} value={r.opponentCharacterId}>{charName(r.opponentCharacterId)}</option>)}</select></label></div>
+        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => { const id = Number(e.target.value); setCharacterId(id); const next = overall.find((r) => r.characterId === id); if (next) setOpponentId(next.opponentCharacterId); }}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><label>Opponent<select value={opponentId} onChange={(e) => setOpponentId(Number(e.target.value))}>{opponents.length === 0 && <option value={-1}>—</option>}{opponents.map((r) => <option key={r.opponentCharacterId} value={r.opponentCharacterId}>{charName(r.opponentCharacterId)}</option>)}</select></label></div>
       </div>
-      {rows.length ? <div className="stage-lab-list">{rows.map((row) => <article key={row.stageId}><div><b>{stageName(row.stageId)}</b><span>{row.games.toLocaleString()} games · {row.contributors} contributors</span></div><div className="stage-rate"><span style={{ width: `${row.winRate * 100}%`, background: winRateColor(row.winRate) }} /><b>{pct(row.winRate)}</b></div></article>)}</div> : <div className="empty-note">No individual stage clears the threshold for this matchup yet.</div>}
+      <div className="stage-lab-list">{rows.length ? rows.map((row) => <article key={row.stageId}><div><b>{stageName(row.stageId)}</b><span>{row.games.toLocaleString()} games · {row.contributors} contributors</span></div><div className="stage-rate"><span style={{ width: `${row.winRate * 100}%`, background: winRateColor(row.winRate) }} /><b>{pct(row.winRate)}</b></div></article>) : INCLUDED_STAGE_IDS.map((stageId) => <article key={stageId} className="community-placeholder"><div><b>{stageName(stageId)}</b><span>— games · — contributors</span></div><div className="stage-rate community-stage-placeholder"><b>—</b></div></article>)}</div>
       <div className="hint">Use this as a field-level counterpick signal, not a ruleset verdict. Player strength and stage-selection habits are not controlled here.</div>
     </div>
   );
@@ -337,12 +360,12 @@ function CommunityPulse({ snapshot }: { snapshot: CommunitySnapshot }) {
       </div>
       <div className="panel">
         <h2>Qualifying player-games by month</h2>
-        {months.length > 1 ? <ResponsiveContainer width="100%" height={240}><LineChart data={months} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}><CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={42} /><YAxis tick={axisStyle} tickLine={false} axisLine={false} /><Tooltip {...tooltipStyle} formatter={(value) => [Number(value).toLocaleString(), "Player-games"]} /><Line type="monotone" dataKey="playerGames" stroke="var(--accent)" strokeWidth={2.5} dot={false} /></LineChart></ResponsiveContainer> : <div className="empty-note">A second qualifying month is needed for a trend.</div>}
+        {months.length > 1 ? <ResponsiveContainer width="100%" height={240}><LineChart data={months} margin={{ top: 4, right: 8, left: -10, bottom: 0 }}><CartesianGrid {...gridStyle} /><XAxis dataKey="label" tick={axisStyle} tickLine={false} axisLine={{ stroke: "var(--line)" }} minTickGap={42} /><YAxis tick={axisStyle} tickLine={false} axisLine={false} /><Tooltip {...tooltipStyle} formatter={(value) => [Number(value).toLocaleString(), "Player-games"]} /><Line type="monotone" dataKey="playerGames" stroke="var(--accent)" strokeWidth={2.5} dot={false} /></LineChart></ResponsiveContainer> : <div className="community-chart-placeholder"><b>—</b><span>A second qualifying month will unlock this trend</span></div>}
         <div className="hint">Months that do not independently clear the contributor and game thresholds are omitted.</div>
       </div>
       <div className="grid-2 community-pulse-grid">
-        <div className="panel"><h2>Character share</h2><div className="table-scroll"><table><thead><tr><th>Character</th><th className="data">Player-games</th><th className="data">Win rate</th><th className="data">Contributors</th></tr></thead><tbody>{snapshot.characters.map((row) => <tr key={row.characterId}><td>{charName(row.characterId)}</td><td className="data">{row.playerGames.toLocaleString()}</td><td className="data">{pct(row.winRate)}</td><td className="data">{row.contributors}</td></tr>)}</tbody></table></div></div>
-        <div className="panel"><h2>Stage share</h2><div className="table-scroll"><table><thead><tr><th>Stage</th><th className="data">Player-games</th><th className="data">Avg length</th><th className="data">Contributors</th></tr></thead><tbody>{snapshot.stages.map((row) => <tr key={row.stageId}><td>{stageName(row.stageId)}</td><td className="data">{row.playerGames.toLocaleString()}</td><td className="data">{duration(row.averageDurationSeconds)}</td><td className="data">{row.contributors}</td></tr>)}</tbody></table></div></div>
+        <div className="panel"><h2>Character share</h2><div className="table-scroll"><table><thead><tr><th>Character</th><th className="data">Player-games</th><th className="data">Win rate</th><th className="data">Contributors</th></tr></thead><tbody>{snapshot.characters.length ? snapshot.characters.map((row) => <tr key={row.characterId}><td>{charName(row.characterId)}</td><td className="data">{row.playerGames.toLocaleString()}</td><td className="data">{pct(row.winRate)}</td><td className="data">{row.contributors}</td></tr>) : <tr className="community-placeholder-row"><td>—</td><td className="data">—</td><td className="data">—</td><td className="data">—</td></tr>}</tbody></table></div></div>
+        <div className="panel"><h2>Stage share</h2><div className="table-scroll"><table><thead><tr><th>Stage</th><th className="data">Player-games</th><th className="data">Avg length</th><th className="data">Contributors</th></tr></thead><tbody>{snapshot.stages.length ? snapshot.stages.map((row) => <tr key={row.stageId}><td>{stageName(row.stageId)}</td><td className="data">{row.playerGames.toLocaleString()}</td><td className="data">{duration(row.averageDurationSeconds)}</td><td className="data">{row.contributors}</td></tr>) : <tr className="community-placeholder-row"><td>—</td><td className="data">—</td><td className="data">—</td><td className="data">—</td></tr>}</tbody></table></div></div>
       </div>
     </>
   );

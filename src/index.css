@@ -701,10 +701,30 @@ select:disabled { opacity: 0.45; }
 .community-pulse-grid { grid-template-columns: 1fr 1fr; }
 .community-warmup { max-width: 720px; margin: 30px auto; padding: 28px; }
 .community-warmup .primary { margin-top: 16px; }
+.community-preview-progress { max-width: none; margin: 0 0 var(--gap); }
 .community-progress { height: 8px; margin-top: 18px; overflow: hidden; border-radius: 999px; background: var(--panel-2); }
 .community-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--win)); }
 .community-progress-label { margin-top: 6px; color: var(--muted); font-family: var(--font-data); font-size: 11px; }
 .community-progress-label b { color: var(--text); }
+.community-placeholder { border-style: dashed; }
+.community-placeholder .community-card-value,
+.community-placeholder-row td { color: var(--faint); }
+.community-stage-placeholder b { color: var(--faint); }
+.community-chart-placeholder {
+  display: flex;
+  height: 240px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 7px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(143, 127, 247, 0.035), transparent);
+  color: var(--faint);
+  font-family: var(--font-data);
+  font-size: 11px;
+}
+.community-chart-placeholder b { color: var(--muted); font-size: 28px; }
 .community-table-subhead {
   margin: 18px 10px 5px;
 }

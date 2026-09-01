@@ -274,10 +274,12 @@ export function Overview({
             <tr>
               <th>Character</th>
               <th className="data">Games</th>
+              <th className="data">% of games</th>
               <th className="data">W–L</th>
               <th className="data">Win rate</th>
               <th className="data">Kills / game</th>
               <th className="data">Deaths / game</th>
+              <th className="data">Inputs / min</th>
               <th className="data">L-cancel</th>
             </tr>
           </thead>
@@ -294,6 +296,7 @@ export function Overview({
               >
                 <td>{charName(row.characterId)}</td>
                 <td className="data">{row.games.toLocaleString()}</td>
+                <td className="data">{pct(row.games / stats.games)}</td>
                 <td className="data">
                   <span className="wl-pill">
                     <span className="up">{row.wins}</span>–<span className="down">{row.losses}</span>
@@ -302,6 +305,7 @@ export function Overview({
                 <td className="data">{pct(row.winRate)}</td>
                 <td className="data">{num(row.killsPerGame, 2)}</td>
                 <td className="data">{num(row.deathsPerGame, 2)}</td>
+                <td className="data">{int(row.inputsPerMinute)}</td>
                 <td
                   className="data"
                   style={row.lCancelAttempts < 100 ? { opacity: 0.55 } : undefined}
