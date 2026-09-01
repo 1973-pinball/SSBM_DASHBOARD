@@ -714,6 +714,34 @@ select:disabled { opacity: 0.45; }
   color: var(--text);
   font-weight: 600;
 }
+.community-comparison-table .community-own-row { background: rgba(143, 127, 247, 0.08); }
+.community-comparison-table .community-own-row td:first-child { color: var(--accent); font-weight: 600; }
+.community-move-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(54px, 1fr));
+  gap: 5px;
+  min-width: 118px;
+}
+.community-move-pair span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 1px;
+  border-radius: 5px;
+  background: var(--panel-2);
+  padding: 4px 6px;
+}
+.community-move-pair small {
+  overflow: hidden;
+  color: var(--faint);
+  font-family: var(--font-body);
+  font-size: 8px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+}
+.community-move-pair b { color: var(--text); font-size: 12px; font-weight: 600; }
 
 /* ---- Tables ---- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }

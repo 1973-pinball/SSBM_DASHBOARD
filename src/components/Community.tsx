@@ -12,7 +12,7 @@ import {
   type CommunitySnapshot,
   type Quartiles,
 } from "../lib/community";
-import { executionSummary } from "../lib/stats";
+import { executionSummary, moveTable, type ExecutionSummary } from "../lib/stats";
 import { charName, moveGroupLabel, stageName } from "../lib/melee";
 import { duration, int, num, pct, shortDate, winRateColor } from "../lib/format";
 import { INCLUDED_STAGE_IDS } from "../lib/config";
@@ -202,17 +202,45 @@ function quartileLabel(value: number | null, q: Quartiles | null, lowerBetter = 
 }
 
 function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot; games: ResolvedGame[] }) {
-  const chars = [-1, ...selectCharacters(snapshot)];
+  const chars = useMemo(() => {
+    const ids = new Set(selectCharacters(snapshot));
+    for (const game of games) ids.add(game.me.characterId);
+    return [-1, ...[...ids].sort((a, b) => charName(a).localeCompare(charName(b)))];
+  }, [games, snapshot]);
   const [characterId, setCharacterId] = useState(-1);
-  const row = snapshot.benchmarks.find((b) => b.characterId === characterId) ?? snapshot.benchmarks.find((b) => b.characterId === -1);
-  const selected = characterId === -1 ? games : games.filter((g) => g.me.characterId === characterId);
-  const own = executionSummary(selected, Number.MAX_SAFE_INTEGER);
+  const [lookbackInput, setLookbackInput] = useState("100");
+  const parsedLookback = Number(lookbackInput);
+  const lookback = Number.isFinite(parsedLookback) && parsedLookback > 0
+    ? Math.max(25, Math.round(parsedLookback))
+    : 100;
+  const row = snapshot.benchmarks.find((b) => b.characterId === characterId);
+  const communityExecution = snapshot.execution.find((item) => item.characterId === characterId);
+  const communityMoves = characterId === -1 ? [] : snapshot.moves.filter((move) => move.characterId === characterId);
+  const selected = useMemo(
+    () => {
+      const matching = characterId === -1 ? games : games.filter((game) => game.me.characterId === characterId);
+      return matching.slice(-lookback);
+    },
+    [characterId, games, lookback],
+  );
+  const own = useMemo(() => executionSummary(selected, Number.MAX_SAFE_INTEGER), [selected]);
+  const ownMoves = useMemo(() => moveTable(selected), [selected]);
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
-        <div><div className="eyebrow">You vs Community</div><h2>Private local overlay on anonymous percentiles</h2></div>
-        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{id === -1 ? "All characters" : charName(id)}</option>)}</select></label></div>
+        <div><div className="eyebrow">You vs Community</div><h2>Your character compared with the qualifying field</h2></div>
+        <div className="community-controls">
+          <label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{id === -1 ? "All characters" : charName(id)}</option>)}</select></label>
+          <label>
+            My games lookback
+            <span className="number-suffix unitless">
+              <input type="number" min={25} step={25} inputMode="numeric" value={lookbackInput} onChange={(e) => setLookbackInput(e.target.value)} onBlur={() => setLookbackInput(String(lookback))} />
+            </span>
+          </label>
+        </div>
       </div>
+
+      <h3 className="table-subhead community-table-subhead">Headline execution</h3>
       <div className="benchmark-grid">
         {benchmarkDefs.map((def) => {
           const q = row?.[def.key] ?? null;
@@ -227,7 +255,83 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
           );
         })}
       </div>
-      <div className="hint">Your values are computed in this browser and are never sent by this comparison. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else.</div>
+
+      <h3 className="table-subhead community-table-subhead">Tech profile</h3>
+      <CommunityTechComparison community={communityExecution} own={own} />
+
+      <h3 className="table-subhead community-table-subhead">Move usage and effectiveness</h3>
+      {characterId === -1 ? (
+        <div className="empty-note">Choose a character to compare your move profile with its community cohort.</div>
+      ) : (
+        <CommunityMoveComparison community={communityMoves} own={ownMoves} />
+      )}
+
+      <div className="hint">Your values use the most recent {own.games.toLocaleString()} matching games in the selected lookback, are computed in this browser, and are never sent by this comparison. The field side stays on the full qualifying aggregate. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else. Move cells show your value beside the qualifying community value; a dash means that side has not cleared the required data threshold.</div>
+    </div>
+  );
+}
+
+function CommunityTechComparison({ community, own }: { community: CommunityExecutionRow | undefined; own: ExecutionSummary }) {
+  return (
+    <div className="table-scroll community-comparison-table">
+      <table>
+        <thead><tr><th>Cohort</th><th className="data">Ground tech success</th><th className="data">In-place</th><th className="data">In</th><th className="data">Away</th><th className="data">Player-games</th><th className="data">Contributors</th></tr></thead>
+        <tbody>
+          <tr className="community-own-row"><td>You</td><td className="data">{communityExecutionPct(own.groundTechSuccess)}</td><td className="data">{communityExecutionPct(own.groundTechInPlace)}</td><td className="data">{communityExecutionPct(own.groundTechIn)}</td><td className="data">{communityExecutionPct(own.groundTechAway)}</td><td className="data">{own.games.toLocaleString()}</td><td className="data">{own.games > 0 ? "1" : "—"}</td></tr>
+          <tr><td>Community</td><td className="data">{communityExecutionPct(community?.groundTechSuccess ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechInPlace ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechIn ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechAway ?? null)}</td><td className="data">{community ? community.games.toLocaleString() : "—"}</td><td className="data">{community ? community.contributors.toLocaleString() : "—"}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function MoveCompareCell({ community, own }: { community: string; own: string }) {
+  return (
+    <td className="data">
+      <div className="community-move-pair">
+        <span><small>You</small><b>{own}</b></span>
+        <span><small>Field</small><b>{community}</b></span>
+      </div>
+    </td>
+  );
+}
+
+function CommunityMoveComparison({ community, own }: { community: CommunityMoveRow[]; own: ReturnType<typeof moveTable> }) {
+  const communityDamage = community.reduce((sum, row) => sum + row.damage, 0);
+  const ownByKey = new Map(own.rows.map((row) => [row.key, row]));
+  const communityByKey = new Map(community.map((row) => [row.moveKey, row]));
+  const rows = [...new Set([...ownByKey.keys(), ...communityByKey.keys()])]
+    .map((key) => {
+      const mine = ownByKey.get(key);
+      const field = communityByKey.get(key);
+      const fieldDamageShare = field && communityDamage > 0 ? field.damage / communityDamage : null;
+      return { key, mine, field, fieldDamageShare };
+    })
+    .sort((a, b) => Math.max(b.mine?.dmgShare ?? 0, b.fieldDamageShare ?? 0) - Math.max(a.mine?.dmgShare ?? 0, a.fieldDamageShare ?? 0));
+
+  if (rows.length === 0) {
+    return <div className="empty-note">Move data is not available for this character yet.</div>;
+  }
+
+  const number = (value: number | null | undefined, digits = 1) => value === null || value === undefined ? "—" : num(value, digits);
+  const percent = (value: number | null | undefined) => value === null || value === undefined ? "—" : pct(value, 0);
+  return (
+    <div className="table-scroll community-move-comparison">
+      <table>
+        <thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Openings / game</th><th className="data">Kills / game</th><th className="data">Avg kill %</th></tr></thead>
+        <tbody>{rows.map(({ key, mine, field, fieldDamageShare }) => (
+          <tr key={key}>
+            <td>{mine?.label ?? moveGroupLabel(key)}{field && <span className="sample-note">{field.contributors.toLocaleString()} contributors</span>}</td>
+            <MoveCompareCell own={number(mine?.attemptsPerGame)} community={number(field && field.attempts !== null && field.characterGames > 0 ? field.attempts / field.characterGames : null)} />
+            <MoveCompareCell own={number(mine?.landedPerGame)} community={number(field && field.characterGames ? field.landed / field.characterGames : null)} />
+            <MoveCompareCell own={percent(mine?.dmgShare)} community={percent(fieldDamageShare)} />
+            <MoveCompareCell own={number(mine?.avgDmgPerHit)} community={number(field && field.landed ? field.damage / field.landed : null)} />
+            <MoveCompareCell own={number(mine && own.covered ? mine.openings / own.covered : null)} community={number(field && field.characterGames ? field.openings / field.characterGames : null)} />
+            <MoveCompareCell own={number(mine && own.covered ? mine.kills / own.covered : null)} community={number(field && field.characterGames ? field.kills / field.characterGames : null)} />
+            <MoveCompareCell own={mine?.avgKillPct === null || mine?.avgKillPct === undefined ? "—" : `${num(mine.avgKillPct, 0)}%`} community={field && field.kills ? `${num(field.killPctSum / field.kills, 0)}%` : "—"} />
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   );
 }
