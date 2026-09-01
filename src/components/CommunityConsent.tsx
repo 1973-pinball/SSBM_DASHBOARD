@@ -9,12 +9,10 @@ interface Props {
   /**
    * `bar` is the slim strip above the topbar — the switch in front of everyone
    * who opens the dashboard, with the "does this expose my code?" answer next
-   * to it. `feature` is the standalone panel on the Community tab, where
-   * someone is already reading aggregates and is most likely to want to be in
-   * them. `inline` is the copy inside My Account, which stays the canonical
+   * to it. `inline` is the copy inside My Account, which stays the canonical
    * place to find the setting again and turn it back off.
    */
-  variant?: "inline" | "feature" | "bar";
+  variant?: "inline" | "bar";
   /** Jumps to the Community tab from the strip's copy. `bar` only. */
   onOpenCommunity?: () => void;
 }

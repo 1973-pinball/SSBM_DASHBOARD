@@ -19,7 +19,6 @@ import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { moveTabFocus } from "../lib/a11y";
 import { axisStyle, gridStyle, tooltipStyle } from "./chartStyle";
 import { Kpi } from "./Kpi";
-import { CommunityConsent } from "./CommunityConsent";
 
 type CommunityView = "matchups" | "benchmarks" | "moves" | "stages" | "pulse";
 
@@ -114,30 +113,6 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           {error && <div className="error-note" role="alert">{error}</div>}
         </div>
       )}
-
-      <div className="community-hero panel">
-        <div>
-          <div className="eyebrow">
-            Community Lab {displaySnapshot.demo && <span className="tag">demo preview</span>}
-            {!ready && <span className="tag">view preview</span>}
-          </div>
-          <h2>{ready ? "Learn from the field without exposing the players" : "See what anonymous community data can unlock"}</h2>
-          <p>
-            Only thresholded aggregates appear here—never connect codes, names, emails, replay paths, exact activity
-            timelines, or row-level downloads. Placeholder dashes mark data that has not cleared the thresholds yet.
-          </p>
-        </div>
-        <div className="community-hero-stats">
-          <span><b>{hasSnapshot ? displaySnapshot.contributorCount.toLocaleString() : "—"}</b> contributors</span>
-          <span><b>{hasSnapshot ? displaySnapshot.playerGameCount.toLocaleString() : "—"}</b> player-games</span>
-          <span>Refreshed {hasSnapshot ? shortDate(displaySnapshot.refreshedAt) : "—"}</span>
-        </div>
-      </div>
-
-      {/* Directly under the contributor count, which is the moment the question
-          "am I in this?" actually occurs to someone. It used to live only at
-          the bottom of the My Account dialog. */}
-      <CommunityConsent isDemo={isDemo} variant="feature" />
 
       <div className="tabs community-tabs" role="tablist" aria-label="Community views">
         {VIEWS.map((item) => (

@@ -489,15 +489,6 @@ select:disabled { opacity: 0.45; }
   letter-spacing: 0.1em;
   text-transform: uppercase;
 }
-.community-hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 28px;
-  background: linear-gradient(135deg, rgba(143, 127, 247, 0.13), var(--panel) 62%);
-  border-color: rgba(143, 127, 247, 0.45);
-}
-.community-hero h2,
 .community-warmup h2,
 .community-heading-row h2 {
   margin-top: 5px;
@@ -506,22 +497,12 @@ select:disabled { opacity: 0.45; }
   font-size: 20px;
   line-height: 1.2;
 }
-.community-hero p,
 .community-warmup p {
   max-width: 720px;
   margin-top: 7px;
   color: var(--muted);
   font-size: 13px;
 }
-.community-hero-stats {
-  display: grid;
-  min-width: 190px;
-  gap: 6px;
-  color: var(--muted);
-  font-family: var(--font-data);
-  font-size: 11px;
-}
-.community-hero-stats b { color: var(--text); font-size: 15px; }
 .community-tabs { margin-bottom: var(--gap); overflow-x: auto; }
 .panel-heading-row {
   display: flex;
@@ -1500,16 +1481,6 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   padding-top: 18px;
   border-top: 1px solid var(--line);
 }
-/* Standalone panel on the Community tab: same content, given the weight of a
-   card so it reads as an offer rather than a footnote. */
-.community-consent.feature {
-  margin: 0 0 18px;
-  padding: 18px 20px;
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  border-radius: 10px;
-  background: var(--panel);
-}
 /* Slim strip under the topbar. Same switch as My Account — only the frame and
    the scale change — carrying the one sentence that answers "does this expose
    my code?" before anyone has to go looking. Deliberately quiet: it sits above
@@ -1542,9 +1513,6 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 .cc-bar-note { color: var(--faint); font-size: 11px; line-height: 1.45; flex: 1 1 260px; min-width: 0; }
 .cc-bar-note b { color: var(--muted); }
 .cc-bar-note .linky { font-size: inherit; }
-.community-consent.feature h3 { font-size: 18px; }
-.community-consent.feature > p { font-size: 13px; }
-.community-consent.feature .consent-switch { margin-top: 14px; font-size: 14px; }
 .community-consent-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .community-consent h3 { margin-top: 4px; color: var(--text); font-family: var(--font-display); font-size: 16px; }
 .community-consent > p { margin-top: 8px; color: var(--muted); font-size: 12px; }
@@ -1693,9 +1661,7 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   /* The disclosure header wraps instead of squeezing the export button. */
   .panel-disclosure-row { flex-wrap: wrap; }
 
-  .community-hero,
   .panel-heading-row { flex-direction: column; }
-  .community-hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .community-controls,
   .panel-controls { justify-content: stretch; width: 100%; }
   .community-controls label,
