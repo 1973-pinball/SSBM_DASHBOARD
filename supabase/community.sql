@@ -82,7 +82,6 @@ returns void
 language sql
 security definer
 set search_path = public, pg_temp
-set statement_timeout = '10min'
 as $$
 with
 params as (
@@ -476,8 +475,12 @@ revoke all on function public.refresh_community_snapshot() from public, anon, au
 grant execute on function public.refresh_community_snapshot() to service_role;
 
 -- First run / manual refresh:
+--   set statement_timeout = '10min';
 --   select public.refresh_community_snapshot();
 --
--- In production, schedule that statement every 15 minutes with Supabase Cron.
+-- In production, schedule both statements as one command every 15 minutes with
+-- Supabase Cron. The SET must precede the SELECT in the scheduled command: a
+-- function-level SET happens after Postgres has already armed the caller's
+-- statement timer, so it cannot extend the refresh's two-minute default.
 -- The refresh replaces the snapshot, so switching consent off removes a user's
 -- private rows from the next aggregate instead of trying to subtract deltas.

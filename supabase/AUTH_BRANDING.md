@@ -55,9 +55,12 @@ an available vanity subdomain.
 Run `schema.sql`, then `community.sql`. Create a Supabase Cron job that runs:
 
 ```sql
+set statement_timeout = '10min';
 select public.refresh_community_snapshot();
 ```
 
-Run it every 15 minutes while the community is growing. The refresh rebuilds
-aggregates from currently consenting accounts; it is deliberately not callable
-by the PWA.
+Run both statements as one command every 15 minutes while the community is
+growing. The longer statement timeout is required for a large replay library;
+setting it on the function itself is too late to extend the caller's timer. The
+refresh rebuilds aggregates from currently consenting accounts and is
+deliberately not callable by the PWA.
