@@ -1037,7 +1037,7 @@ function TechKpi({ summary }: { summary: ExecutionSummary }) {
       <div className="label">Tech success % — last {summary.games}</div>
       <div className="tech-kpi-line primary" title="Ground Tech Success" aria-label={`Ground Tech Success: ${ground}`}>{ground}</div>
       <div className="tech-kpi-line" title="Wall Tech Success" aria-label={`Wall Tech Success: ${wall}`}>{wall}</div>
-      <div className="tech-kpi-split" title="Ground tech mix: in-place / in / away" aria-label={`Ground tech mix, in-place, in, away: ${split}`}>{split}</div>
+      <div className="tech-kpi-split" title="Ground tech mix: in-place / in / away" aria-label={`Ground tech mix, in-place, in, away: ${split}`}>% of total (in-place/in/away): {split}</div>
     </div>
   );
 }
