@@ -1169,7 +1169,7 @@ on conflict (user_id) do nothing;
 --   set statement_timeout = '10min';
 --   select public.refresh_community_snapshot();
 --
--- In production, schedule both statements as one command every four hours with
+-- In production, schedule both statements as one command every 15 minutes with
 -- Supabase Cron. The SET must precede the SELECT in the scheduled command: a
 -- function-level SET happens after Postgres has already armed the caller's
 -- statement timer, so it cannot extend the refresh's two-minute default.

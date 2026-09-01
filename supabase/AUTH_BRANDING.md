@@ -59,7 +59,7 @@ set statement_timeout = '10min';
 select public.refresh_community_snapshot();
 ```
 
-Run both statements as one command every four hours. The longer statement
+Run both statements as one command every 15 minutes. The longer statement
 timeout is needed for the one-time per-user cache backfill; setting it on the
 function itself is too late to extend the caller's timer. Later refreshes return
 immediately when nothing changed and replace only the private rollup for a user
