@@ -59,8 +59,9 @@ set statement_timeout = '10min';
 select public.refresh_community_snapshot();
 ```
 
-Run both statements as one command every 15 minutes while the community is
-growing. The longer statement timeout is required for a large replay library;
-setting it on the function itself is too late to extend the caller's timer. The
-refresh rebuilds aggregates from currently consenting accounts and is
-deliberately not callable by the PWA.
+Run both statements as one command every four hours. The longer statement
+timeout is needed for the one-time per-user cache backfill; setting it on the
+function itself is too late to extend the caller's timer. Later refreshes return
+immediately when nothing changed and replace only the private rollup for a user
+whose games, account codes, or consent changed. The refresh remains deliberately
+not callable by the PWA.
