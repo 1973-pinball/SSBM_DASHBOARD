@@ -361,8 +361,8 @@ select:disabled { opacity: 0.45; }
 .tech-kpi-line.primary {
   margin-top: 3px;
   color: var(--text);
-  font-weight: 600;
 }
+.tech-kpi-value { font-weight: 600; }
 .tech-kpi-split {
   margin-top: 2px;
   color: var(--faint);
