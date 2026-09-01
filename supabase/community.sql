@@ -161,6 +161,11 @@ base as (
     end as win,
     coalesce((own_side->>'lCancelSuccess')::numeric, 0) as l_cancel_success,
     coalesce((own_side->>'lCancelFail')::numeric, 0) as l_cancel_fail,
+    own_side ? 'techs' as has_techs,
+    coalesce((own_side->'techs'->>'inPlace')::numeric, 0) as tech_in_place,
+    coalesce((own_side->'techs'->>'toward')::numeric, 0) as tech_in,
+    coalesce((own_side->'techs'->>'away')::numeric, 0) as tech_away,
+    coalesce((own_side->'techs'->>'missed')::numeric, 0) as tech_missed,
     nullif(own_side->>'openingsPerKill', '')::numeric as openings_per_kill,
     nullif(own_side->>'damagePerOpening', '')::numeric as damage_per_opening,
     nullif(own_side->>'inputsPerMinute', '')::numeric as inputs_per_minute,
@@ -249,6 +254,36 @@ benchmark_rollup as (
   from benchmark_user, params
   group by character_id, params.min_contributors, params.min_games
   having count(*) >= params.min_contributors and sum(games) >= params.min_games
+),
+execution_rollup as (
+  -- Tech counts arrived after the original cached stat shape. Excluding rows
+  -- without the object keeps a legacy game from reading as a perfect zero-
+  -- attempt game. Each visible cohort clears the same k/game thresholds as the
+  -- rest of Community; the empty grouping is the deliberate overall row.
+  select
+    (case when grouping(character_id) = 1 then -1 else character_id end)::int as character_id,
+    count(*)::int as games,
+    count(distinct user_id)::int as contributors,
+    case when sum(l_cancel_success + l_cancel_fail) > 0
+      then 100.0 * sum(l_cancel_success) / sum(l_cancel_success + l_cancel_fail)
+    end as l_cancel_success,
+    case when sum(tech_in_place + tech_in + tech_away + tech_missed) > 0
+      then 100.0 * sum(tech_in_place + tech_in + tech_away)
+        / sum(tech_in_place + tech_in + tech_away + tech_missed)
+    end as ground_tech_success,
+    case when sum(tech_in_place + tech_in + tech_away) > 0
+      then 100.0 * sum(tech_in_place) / sum(tech_in_place + tech_in + tech_away)
+    end as ground_tech_in_place,
+    case when sum(tech_in_place + tech_in + tech_away) > 0
+      then 100.0 * sum(tech_in) / sum(tech_in_place + tech_in + tech_away)
+    end as ground_tech_in,
+    case when sum(tech_in_place + tech_in + tech_away) > 0
+      then 100.0 * sum(tech_away) / sum(tech_in_place + tech_in + tech_away)
+    end as ground_tech_away
+  from base, params
+  where has_techs and character_id between 0 and 25
+  group by grouping sets ((character_id), ()), params.min_contributors, params.min_games
+  having count(*) >= params.min_games and count(distinct user_id) >= params.min_contributors
 ),
 character_totals as (
   select character_id, count(*)::int as games, count(distinct user_id)::int as contributors
@@ -376,6 +411,15 @@ assembled as (
       'damagePerOpening', case when dpo_q is null then null else jsonb_build_object('p25', round(dpo_q[1], 1), 'p50', round(dpo_q[2], 1), 'p75', round(dpo_q[3], 1)) end,
       'inputsPerMinute', case when ipm_q is null then null else jsonb_build_object('p25', round(ipm_q[1], 1), 'p50', round(ipm_q[2], 1), 'p75', round(ipm_q[3], 1)) end
     ) order by character_id) from benchmark_rollup), '[]'::jsonb),
+    'execution', coalesce((select jsonb_agg(jsonb_build_object(
+      'characterId', character_id, 'games', public.pub_bucket(games, 25),
+      'contributors', public.pub_bucket(contributors, 5),
+      'lCancelSuccess', round(l_cancel_success, 1),
+      'groundTechSuccess', round(ground_tech_success, 1),
+      'groundTechInPlace', round(ground_tech_in_place, 1),
+      'groundTechIn', round(ground_tech_in, 1),
+      'groundTechAway', round(ground_tech_away, 1)
+    ) order by character_id) from execution_rollup), '[]'::jsonb),
     -- The move sums below are deliberately NOT bucketed. They span orders of
     -- magnitude in the same column -- a jab lands thousands of times while its
     -- kill count is single digits -- so any bucket wide enough to mask one

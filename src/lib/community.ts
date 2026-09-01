@@ -51,6 +51,17 @@ export interface CommunityMoveRow {
   lCancelFail: number;
 }
 
+export interface CommunityExecutionRow {
+  characterId: number; // -1 = every character
+  games: number;
+  contributors: number;
+  lCancelSuccess: number | null;
+  groundTechSuccess: number | null;
+  groundTechInPlace: number | null;
+  groundTechIn: number | null;
+  groundTechAway: number | null;
+}
+
 export interface CommunityMonthRow {
   month: string;
   playerGames: number;
@@ -87,6 +98,7 @@ export interface CommunitySnapshot {
   matchups: CommunityMatchupRow[];
   benchmarks: CommunityBenchmarkRow[];
   moves: CommunityMoveRow[];
+  execution: CommunityExecutionRow[];
   months: CommunityMonthRow[];
   characters: CommunityCharacterRow[];
   stages: CommunityStageRow[];
@@ -97,6 +109,7 @@ interface SnapshotPayload {
   matchups?: CommunityMatchupRow[];
   benchmarks?: CommunityBenchmarkRow[];
   moves?: CommunityMoveRow[];
+  execution?: CommunityExecutionRow[];
   months?: CommunityMonthRow[];
   characters?: CommunityCharacterRow[];
   stages?: CommunityStageRow[];
@@ -116,7 +129,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     playerGameCount: 0,
     minContributors: COMMUNITY_MIN_CONTRIBUTORS,
     minGames: COMMUNITY_MIN_GAMES,
-    matchups: [], benchmarks: [], moves: [], months: [], characters: [], stages: [],
+    matchups: [], benchmarks: [], moves: [], execution: [], months: [], characters: [], stages: [],
   };
   const payload = (data.payload ?? {}) as SnapshotPayload;
   return {
@@ -128,6 +141,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     matchups: (payload.matchups ?? []).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
     benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
     moves: (payload.moves ?? []).filter((r) => playable(r.characterId)),
+    execution: (payload.execution ?? []).filter((r) => playable(r.characterId)),
     months: payload.months ?? [],
     characters: (payload.characters ?? []).filter((r) => playable(r.characterId)),
     stages: payload.stages ?? [],
@@ -247,6 +261,21 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
     });
   }
 
+  const execution = benchmarkChars.map((characterId): CommunityExecutionRow => {
+    const selected = characterId === -1 ? games : games.filter((g) => g.me.characterId === characterId);
+    const summary = executionSummary(selected, Number.MAX_SAFE_INTEGER);
+    return {
+      characterId,
+      games: selected.length,
+      contributors: 64,
+      lCancelSuccess: summary.lCancel,
+      groundTechSuccess: summary.groundTechSuccess,
+      groundTechInPlace: summary.groundTechInPlace,
+      groundTechIn: summary.groundTechIn,
+      groundTechAway: summary.groundTechAway,
+    };
+  });
+
   const refreshedAt = games.at(-1)?.date?.toISOString() ?? new Date().toISOString();
   return {
     refreshedAt,
@@ -258,6 +287,7 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
     matchups: [...matchups.values()].filter((r) => r.games >= 5).map((r) => ({ ...r, contributors: Math.max(25, Math.min(84, Math.round(r.games / 3))), winRate: r.wins / r.games })),
     benchmarks,
     moves,
+    execution,
     months: [...months.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, m]) => ({ month, playerGames: m.playerGames, contributors: 52, averageDurationSeconds: m.seconds / m.playerGames, ranked: m.ranked, unranked: m.unranked, direct: m.direct, offline: m.offline })),
     characters: [...chars.entries()].map(([characterId, c]) => ({ characterId, ...c, contributors: 56, winRate: c.decided ? c.wins / c.decided : null })),
     stages: [...stages.entries()].map(([stageId, s]) => ({ stageId, playerGames: s.playerGames, contributors: 60, averageDurationSeconds: s.seconds / s.playerGames })),

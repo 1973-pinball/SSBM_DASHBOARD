@@ -5,6 +5,7 @@ import {
   demoCommunitySnapshot,
   fetchCommunitySnapshot,
   type CommunityBenchmarkRow,
+  type CommunityExecutionRow,
   type CommunityMoveRow,
   type CommunitySnapshot,
   type Quartiles,
@@ -230,22 +231,71 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
 }
 
 function MoveAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
-  const chars = [...new Set(snapshot.moves.map((m) => m.characterId))].sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [characterId, setCharacterId] = useState(chars[0] ?? 20);
+  const chars = [...new Set([
+    ...snapshot.moves.map((m) => m.characterId),
+    ...snapshot.execution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
+  ])].sort((a, b) => charName(a).localeCompare(charName(b)));
+  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
   const rows = snapshot.moves.filter((m) => m.characterId === characterId).sort((a, b) => b.damage - a.damage);
+  const execution = snapshot.execution.find((r) => r.characterId === characterId);
   const totalDamage = rows.reduce((sum, r) => sum + r.damage, 0);
+  const cohort = characterId === -1 ? "the qualifying field" : `qualifying ${charName(characterId)} players`;
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
-        <div><div className="eyebrow">Move Atlas</div><h2>How qualifying {charName(characterId)} players create damage and stocks</h2></div>
-        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label></div>
+        <div><div className="eyebrow">Move Atlas</div><h2>How {cohort} execute and create openings</h2></div>
+        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}><option value={-1}>All characters</option>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label></div>
       </div>
-      {rows.length ? (
+
+      <h3 className="table-subhead community-table-subhead">Execution profile</h3>
+      {execution ? <CommunityExecutionTable row={execution} /> : (
+        <div className="empty-note">This execution cohort does not clear the privacy and sample thresholds yet.</div>
+      )}
+
+      <h3 className="table-subhead community-table-subhead">Move effectiveness</h3>
+      {characterId === -1 ? (
+        <div className="empty-note">Choose a character to see its move-by-move damage and stock profile.</div>
+      ) : rows.length ? (
         <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Kills</th><th className="data">Avg kill %</th><th className="data">Contributors</th></tr></thead><tbody>
           {rows.map((row) => <MoveRowView key={row.moveKey} row={row} totalDamage={totalDamage} />)}
         </tbody></table></div>
       ) : <div className="empty-note">No move group for this character clears the privacy threshold yet.</div>}
-      <div className="hint">Attempt counts include whiffs where replay parsing supports them. Rare moves are suppressed even when the character’s overall cohort qualifies.</div>
+      <div className="hint">Execution rates are attempt-weighted across current-stat player-games. Ground-tech direction is the share of successful ground techs, so in-place + in + away totals 100%. Attempt counts include whiffs where replay parsing supports them; rare moves stay suppressed even when a character’s overall cohort qualifies.</div>
+    </div>
+  );
+}
+
+const communityExecutionPct = (value: number | null): string => value === null ? "—" : `${num(value, 1)}%`;
+
+function CommunityExecutionTable({ row }: { row: CommunityExecutionRow }) {
+  return (
+    <div className="table-scroll community-execution-table">
+      <table>
+        <thead>
+          <tr>
+            <th>Cohort</th>
+            <th className="data">L-cancel success</th>
+            <th className="data">Ground tech success</th>
+            <th className="data">In-place</th>
+            <th className="data">In</th>
+            <th className="data">Away</th>
+            <th className="data">Player-games</th>
+            <th className="data">Contributors</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>{row.characterId === -1 ? "All characters" : charName(row.characterId)}</td>
+            <td className="data">{communityExecutionPct(row.lCancelSuccess)}</td>
+            <td className="data">{communityExecutionPct(row.groundTechSuccess)}</td>
+            <td className="data">{communityExecutionPct(row.groundTechInPlace)}</td>
+            <td className="data">{communityExecutionPct(row.groundTechIn)}</td>
+            <td className="data">{communityExecutionPct(row.groundTechAway)}</td>
+            <td className="data">{row.games.toLocaleString()}</td>
+            <td className="data">{row.contributors.toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

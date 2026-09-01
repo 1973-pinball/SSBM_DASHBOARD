@@ -697,6 +697,14 @@ select:disabled { opacity: 0.45; }
 .community-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--win)); }
 .community-progress-label { margin-top: 6px; color: var(--muted); font-family: var(--font-data); font-size: 11px; }
 .community-progress-label b { color: var(--text); }
+.community-table-subhead {
+  margin: 18px 10px 5px;
+}
+.community-heading-row + .community-table-subhead { margin-top: 0; }
+.community-execution-table td:nth-child(n + 2):nth-child(-n + 6) {
+  color: var(--text);
+  font-weight: 600;
+}
 
 /* ---- Tables ---- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
