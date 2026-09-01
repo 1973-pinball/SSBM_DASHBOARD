@@ -1111,10 +1111,10 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
                   <th>Tech</th>
                   <th className="data">Me</th>
                   <th className="data">Me / game</th>
-                  <th className="data">Me %</th>
+                  <th className="data">Me %<br />breakdown</th>
                   <th className="data">Opponents</th>
                   <th className="data">Opp / game</th>
-                  <th className="data">Opp %</th>
+                  <th className="data">Opp %<br />breakdown</th>
                 </tr>
               </thead>
               <tbody>
