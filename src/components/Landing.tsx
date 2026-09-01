@@ -45,7 +45,7 @@ export function Landing({
         Slippi replay stats, <span className="accent">parsed in your browser</span>
       </h1>
       <p className="sub">
-        Point this page at your Slippi replay folder and get a full statistical readout of your play: win rates by
+        Point this page at your top-level Slippi replay folder and get a full statistical readout of your play: win rates by
         opponent, matchup, and stage, kill stats, and execution trends. Standard <span className="data">.slp</span> and
         compressed <span className="data">.slpz</span> files can be mixed together, and everything is parsed in your browser.
       </p>
@@ -88,6 +88,10 @@ export function Landing({
           </button>
         )}
       </div>
+      <p className="folder-scan-note">
+        <b>Select the folder that contains all your replay folders.</b> Every replay inside its month, year, and other
+        subfolders is found automatically — you do not need to select each one separately.
+      </p>
       <input
         ref={folderInputRef}
         type="file"

@@ -232,6 +232,14 @@ select:disabled { opacity: 0.45; }
 .landing .privacy-points b { color: var(--text); }
 .landing .cta-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
 .landing button.primary { font-size: 16px; padding: 12px 22px; }
+.landing .folder-scan-note {
+  max-width: 580px;
+  margin: -8px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.landing .folder-scan-note b { color: var(--text); }
 
 /* ---- Progress ---- */
 .progress-panel {
