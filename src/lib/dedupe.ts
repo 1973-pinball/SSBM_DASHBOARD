@@ -1,5 +1,5 @@
 import type { GameRecord } from "./types";
-import { hasFullStats } from "./types";
+import { hasCurrentStats, hasFullStats } from "./types";
 
 /**
  * `GameRecord.id` is `path|size|mtime`. It answers "have I already parsed this
@@ -51,6 +51,11 @@ function preferred(a: GameRecord, b: GameRecord): boolean {
   const aFull = hasFullStats(a);
   const bFull = hasFullStats(b);
   if (aFull !== bFull) return aFull;
+  // A replay reparsed with the current stat payload beats its pre-tech cloud
+  // copy, including when a moved folder gave the two records different ids.
+  const aCurrent = hasCurrentStats(a);
+  const bCurrent = hasCurrentStats(b);
+  if (aCurrent !== bCurrent) return aCurrent;
   return a.id < b.id;
 }
 

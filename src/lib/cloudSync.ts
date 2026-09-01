@@ -1,5 +1,5 @@
 import type { Account, GameRecord } from "./types";
-import { hasFullStats } from "./types";
+import { CURRENT_STATS_VERSION, hasCurrentStats, hasFullStats } from "./types";
 import { putRecords } from "./db";
 import { dedupeRecords, gameKey } from "./dedupe";
 import { supabase } from "./supabase";
@@ -22,6 +22,9 @@ const ID_PAGE = 1000;
  *  empty device can stream full rows directly instead of listing every id and
  *  then fetching them again in much smaller query-string batches. */
 const RESTORE_PAGE = 1000;
+
+const stampCurrentVersion = (rec: GameRecord): GameRecord =>
+  rec.statsVersion === CURRENT_STATS_VERSION ? rec : { ...rec, statsVersion: CURRENT_STATS_VERSION };
 
 export interface SyncResult {
   pushed: number;
@@ -55,7 +58,11 @@ export async function restoreCloudRecords(
     if (rows.length < RESTORE_PAGE) break;
   }
   const restored = dedupeRecords(records);
-  if (restored.length) await putRecords(restored);
+  // Pre-tech rows remain available in memory so the rest of the dashboard does
+  // not vanish during migration, but they must not enter `seen`: the remembered
+  // replay folder needs to regard those files as unparsed and replace them.
+  const current = restored.filter(hasCurrentStats).map(stampCurrentVersion);
+  if (current.length) await putRecords(current);
   return restored;
 }
 
@@ -82,33 +89,44 @@ export function isSyncable(rec: GameRecord, myCodes: Set<string>): boolean {
   // both share the (user_id, id) key — and because the preview is never written
   // to the local cache, nothing here would ever correct it back.
   if (!hasFullStats(rec)) return false;
+  // A pre-tech cloud row must never overwrite the current copy on another
+  // device. It becomes syncable only after that device reparses the replay.
+  if (!hasCurrentStats(rec)) return false;
   return rec.players.some((p) => p.connectCode !== null && myCodes.has(p.connectCode));
 }
 
 interface RemoteIndex {
   ids: Set<string>;
-  /** Content keys of what's up there. Rows pushed before game_key existed have
-   *  none and simply don't participate — correctness lives in the client-side
-   *  dedup, this only stops copies from bloating storage. */
-  keys: Set<string>;
+  staleIds: Set<string>;
+  /** One existing row per content key. Current rows win over stale duplicates. */
+  idByKey: Map<string, string>;
 }
 
 async function remoteIndex(): Promise<RemoteIndex> {
   const ids = new Set<string>();
-  const keys = new Set<string>();
-  if (!supabase) return { ids, keys };
+  const staleIds = new Set<string>();
+  const idByKey = new Map<string, string>();
+  if (!supabase) return { ids, staleIds, idByKey };
   for (let from = 0; ; from += ID_PAGE) {
     const { data, error } = await supabase
       .from("game_records")
-      .select("id, game_key")
+      // JSON projection returns one scalar instead of downloading every ~5 KB
+      // record merely to decide whether its payload predates tech stats.
+      .select("id, game_key, stats_version:data->>statsVersion")
+      .order("id", { ascending: true })
       .range(from, from + ID_PAGE - 1);
     if (error) throw error;
-    for (const row of data) {
-      ids.add(row.id as string);
-      const key = row.game_key as string | null;
-      if (key) keys.add(key);
+    for (const raw of data) {
+      const row = raw as { id: string; game_key: string | null; stats_version: string | number | null };
+      ids.add(row.id);
+      const stale = Number(row.stats_version) !== CURRENT_STATS_VERSION;
+      if (stale) staleIds.add(row.id);
+      if (row.game_key) {
+        const existing = idByKey.get(row.game_key);
+        if (!existing || (staleIds.has(existing) && !stale)) idByKey.set(row.game_key, row.id);
+      }
     }
-    if (data.length < ID_PAGE) return { ids, keys };
+    if (data.length < ID_PAGE) return { ids, staleIds, idByKey };
   }
 }
 
@@ -118,19 +136,32 @@ async function pushMissing(local: GameRecord[], remote: RemoteIndex, myCodes: Se
   // A record whose *game* is already up there under a different file key is a
   // folder copy rather than a new game: pushing it would double the library in
   // the cloud every time the folder moves.
-  const claimed = new Set(remote.keys);
-  const toPush: { rec: GameRecord; key: string }[] = [];
+  const toPush: { rec: GameRecord; key: string; targetId: string }[] = [];
   for (const rec of local) {
-    if (!isSyncable(rec, myCodes) || remote.ids.has(rec.id)) continue;
+    if (!isSyncable(rec, myCodes)) continue;
     const key = gameKey(rec);
-    if (claimed.has(key)) continue;
-    claimed.add(key); // two local copies must not push each other up either
-    toPush.push({ rec, key });
+    const sameIdExists = remote.ids.has(rec.id);
+    if (sameIdExists && !remote.staleIds.has(rec.id)) continue;
+
+    let targetId = rec.id;
+    if (!sameIdExists) {
+      const existing = remote.idByKey.get(key);
+      if (existing) {
+        if (!remote.staleIds.has(existing)) continue;
+        // Same game under a moved/copied file id: update the stale row in place
+        // instead of appending a second cloud record.
+        targetId = existing;
+      }
+    }
+    toPush.push({ rec, key, targetId });
+    remote.ids.add(targetId);
+    remote.staleIds.delete(targetId);
+    remote.idByKey.set(key, targetId);
   }
   for (let i = 0; i < toPush.length; i += PUSH_CHUNK) {
-    const chunk = toPush.slice(i, i + PUSH_CHUNK).map(({ rec, key }) => ({
-      id: rec.id,
-      data: rec,
+    const chunk = toPush.slice(i, i + PUSH_CHUNK).map(({ rec, key, targetId }) => ({
+      id: targetId,
+      data: { ...stampCurrentVersion(rec), id: targetId },
       played_at: rec.playedAt,
       game_key: key,
     }));
@@ -147,7 +178,9 @@ async function pullMissing(local: GameRecord[], remote: RemoteIndex): Promise<Ga
   // own copy of the folder holds every game already, under different ids.
   // Pulling those would plant duplicates straight into the local cache.
   const haveKeys = new Set(local.map(gameKey));
-  const missing = [...remote.ids].filter((id) => !haveIds.has(id));
+  // Stale remote rows stay available through the fresh-device restore path,
+  // but normal sync must not persist them locally and mark the replay parsed.
+  const missing = [...remote.ids].filter((id) => !haveIds.has(id) && !remote.staleIds.has(id));
   const pulled: GameRecord[] = [];
   for (let i = 0; i < missing.length; i += PULL_CHUNK) {
     const { data, error } = await supabase

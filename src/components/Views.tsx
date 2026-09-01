@@ -1024,19 +1024,20 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
   );
 }
 
-const kpiPctLine = (value: number | null, label: string) => `${value !== null ? `${num(value, 1)}%` : "—"} ${label}`;
+const kpiPctValue = (value: number | null, digits: number) => value !== null ? `${num(value, digits)}%` : "—";
 
 function TechKpi({ summary }: { summary: ExecutionSummary }) {
+  const ground = kpiPctValue(summary.groundTechSuccess, 1);
+  const wall = kpiPctValue(summary.wallTechSuccess, 1);
+  const split = [summary.groundTechInPlace, summary.groundTechIn, summary.groundTechAway]
+    .map((value) => kpiPctValue(value, 0))
+    .join("/");
   return (
     <div className="kpi tech-kpi">
       <div className="label">Tech success % — last {summary.games}</div>
-      <div className="tech-kpi-line primary">{kpiPctLine(summary.groundTechSuccess, "groundTechs")}</div>
-      <div className="tech-kpi-line">{kpiPctLine(summary.wallTechSuccess, "wallTechs")}</div>
-      <div className="tech-kpi-split">
-        % of total (in-place/in/away): {summary.groundTechInPlace !== null ? `${num(summary.groundTechInPlace, 0)}%` : "—"}/
-        {summary.groundTechIn !== null ? `${num(summary.groundTechIn, 0)}%` : "—"}/
-        {summary.groundTechAway !== null ? `${num(summary.groundTechAway, 0)}%` : "—"}
-      </div>
+      <div className="tech-kpi-line primary" title="Ground Tech Success" aria-label={`Ground Tech Success: ${ground}`}>{ground}</div>
+      <div className="tech-kpi-line" title="Wall Tech Success" aria-label={`Wall Tech Success: ${wall}`}>{wall}</div>
+      <div className="tech-kpi-split" title="Ground tech mix: in-place / in / away" aria-label={`Ground tech mix, in-place, in, away: ${split}`}>{split}</div>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
-import { DEFAULT_FILTERS, hasFullStats } from "./lib/types";
+import { DEFAULT_FILTERS, hasCurrentStats, hasFullStats } from "./lib/types";
 import { discoverFromHandle, discoverFromFileList, runParsePipeline, RecordSaveError } from "./lib/pool";
 import { allRecords, clearAll, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
@@ -410,13 +410,14 @@ export default function App() {
               pullMyAccounts(restoreController.signal),
             ]);
             const cloudAccounts = cloudAccountsResult ?? [];
-            if (generation.current !== gen || pulled.length === 0) return;
-            setRecords(pulled);
-            if (cloudAccounts.length > 0) {
-              setAccountsState(cloudAccounts);
-              void setMyAccounts(cloudAccounts);
+            if (generation.current !== gen) return;
+            if (pulled.length > 0) setRecords(pulled);
+            const known = cloudAccounts.length > 0 ? cloudAccounts : accts;
+            if (known.length > 0 && (pulled.length > 0 || handle)) {
+              setAccountsState(known);
+              if (cloudAccounts.length > 0) void setMyAccounts(cloudAccounts);
               setPhase("dashboard");
-            } else {
+            } else if (pulled.length > 0) {
               setPhase("identity");
             }
           } catch (err) {
@@ -431,6 +432,12 @@ export default function App() {
             window.clearTimeout(timeout);
             if (generation.current === gen) setCloudRestoring(null);
           }
+        } else if (handle && accts.length > 0) {
+          // A stats-schema migration may leave no cached rows, but the stored
+          // handle can rebuild them without making the user pick the folder
+          // again. Dashboard entry lets the auto-sync effect do that in place.
+          setAccountsState(accts);
+          setPhase("dashboard");
         }
       } catch (err) {
         console.error(err);
@@ -619,7 +626,7 @@ export default function App() {
           // only when this run actually parsed something — the auto-sync on
           // every page load normally finds nothing and shouldn't pay for a
           // full re-read plus the resolve+sort it invalidates.
-          if (done && done.done > done.skippedCached) setRecords(await allRecords());
+          if (done && done.done > done.skippedCached) appendRecords(await allRecords());
         }
       } catch (err) {
         console.error(err);
@@ -879,6 +886,10 @@ export default function App() {
   // running" flag to keep in step. An incremental refresh never sets it: below
   // HEADER_PASS_MIN the pipeline skips the preview pass entirely.
   const hasPreviews = useMemo(() => deduped.some((r) => !hasFullStats(r)), [deduped]);
+  const needsStatsRefresh = useMemo(
+    () => deduped.some((r) => hasFullStats(r) && !hasCurrentStats(r)),
+    [deduped],
+  );
   const isTabPending = (id: Tab) => hasPreviews && NEEDS_FULL_STATS.has(id);
 
   // Never strand the user in a teams view they have no games for.
@@ -923,10 +934,12 @@ export default function App() {
                 </span>
               </span>
               <span
-                className={`app-state ${!online ? "offline" : needsFolder ? "warn" : ""}`}
+                className={`app-state ${!online ? "offline" : needsFolder || needsStatsRefresh ? "warn" : ""}`}
                 title={
                   !online
                     ? "Offline — local stats still work"
+                    : needsStatsRefresh
+                      ? "Some cached or cloud records predate tech stats. Refresh the replay folder to update them in place."
                     : needsFolder
                       ? "These stats came from the cache or the cloud. Connect your replay folder to pick up games played from now on."
                       : "Local features are ready"
@@ -934,6 +947,8 @@ export default function App() {
               >
                 {!online
                   ? "Offline · local stats available"
+                  : needsStatsRefresh
+                    ? "Execution stats need refresh"
                   : needsFolder
                     ? "No folder connected"
                     : lastScanLabel
@@ -942,7 +957,7 @@ export default function App() {
               </span>
               {!isDemo && (
                 <button
-                  className={needsFolder ? "ghost attn" : "ghost"}
+                  className={needsFolder || needsStatsRefresh ? "ghost attn" : "ghost"}
                   onClick={dirHandle ? onRefresh : onConnectFolder}
                   disabled={syncing !== null}
                 >
@@ -952,7 +967,9 @@ export default function App() {
                       : `${syncing.pass === "header" ? "Reading" : "Parsing"} ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
                     : !dirHandle
                       ? supportsFsAccess ? "Connect replay folder" : "Add replays"
-                      : folderPermission === "granted" ? "Refresh" : "Reconnect folder"}
+                      : folderPermission === "granted"
+                        ? needsStatsRefresh ? "Refresh execution stats" : "Refresh"
+                        : needsStatsRefresh ? "Reconnect to refresh" : "Reconnect folder"}
                 </button>
               )}
               <input

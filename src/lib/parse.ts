@@ -13,6 +13,7 @@ import {
   didLoseStock,
 } from "@slippi/slippi-js";
 import type { FrameEntryType, FramesType, GameEndType, GameStartType, MetadataType } from "@slippi/slippi-js";
+import { CURRENT_STATS_VERSION } from "./types";
 import type { GameRecord, GameType, MoveAgg, PlayerSide, TechCounts } from "./types";
 
 const MIN_GAME_SECONDS = 30;
@@ -703,6 +704,7 @@ function parseReplayWithMode(id: string, path: string, buf: ArrayBuffer, bounded
   const { winnerIndex, winnerTeamId } = decideWinner(settings, gameEnd, players, isTeams, durationFrames);
 
   return {
+    statsVersion: CURRENT_STATS_VERSION,
     id,
     path,
     playedAt: metadata?.startAt ?? null,
@@ -786,6 +788,7 @@ function buildHeaderRecord(
   const { winnerIndex, winnerTeamId } = decideWinner(settings, gameEnd, players, isTeams, durationFrames);
 
   return {
+    statsVersion: CURRENT_STATS_VERSION,
     id,
     path,
     playedAt: metadata.startAt ?? null,

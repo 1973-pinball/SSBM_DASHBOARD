@@ -1,4 +1,5 @@
 import Dexie, { type Table } from "dexie";
+import { CURRENT_STATS_VERSION, hasCurrentStats } from "./types";
 import type { Account, GameRecord } from "./types";
 import { dedupeRecords } from "./dedupe";
 
@@ -226,6 +227,43 @@ class SsbmDb extends Dexie {
       .upgrade(async (tx) => {
         await tx.table("packs").clear();
         await tx.table("seen").clear();
+      });
+    // v13 correctly invalidated the local cache, but a signed-in cloud restore
+    // could immediately persist pre-tech rows again and put their ids back in
+    // `seen`. v14 removes only those stale rows, preserving any replay already
+    // reparsed by v13, and backfills the lightweight cloud payload version.
+    this.version(14)
+      .stores({
+        games: "id, playedAt, stageId, gameType",
+        packs: "++id",
+        seen: "id",
+        kv: "key",
+      })
+      .upgrade(async (tx) => {
+        const packs = tx.table<RecordPack>("packs");
+        const rows = await packs.toArray();
+        const staleIds: string[] = [];
+        for (const pack of rows) {
+          let dirty = false;
+          const kept: GameRecord[] = [];
+          for (const rec of pack.records) {
+            if (!hasCurrentStats(rec)) {
+              staleIds.push(rec.id);
+              dirty = true;
+              continue;
+            }
+            if (rec.statsVersion !== CURRENT_STATS_VERSION) {
+              kept.push({ ...rec, statsVersion: CURRENT_STATS_VERSION });
+              dirty = true;
+            } else {
+              kept.push(rec);
+            }
+          }
+          if (!dirty || pack.id === undefined) continue;
+          if (kept.length > 0) await packs.put({ ...pack, records: kept });
+          else await packs.delete(pack.id);
+        }
+        if (staleIds.length > 0) await tx.table("seen").bulkDelete(staleIds);
       });
   }
 }

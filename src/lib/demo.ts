@@ -1,3 +1,4 @@
+import { CURRENT_STATS_VERSION } from "./types";
 import type { Account, ActionCounts, GameRecord, MoveAgg, PlayerSide, TechCounts } from "./types";
 import { INCLUDED_STAGE_IDS } from "./config";
 
@@ -263,6 +264,7 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
     const opp = mkSide(oppKills, myKills, false);
     const rare = rand();
     records.push({
+      statsVersion: CURRENT_STATS_VERSION,
       id: `demo-${i}`,
       path: `demo/Game_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),
@@ -369,6 +371,7 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
 
     const rare = rand();
     records.push({
+      statsVersion: CURRENT_STATS_VERSION,
       id: `demo-teams-${i}`,
       path: `demo/Teams_${playedAt.toISOString().replace(/[:.]/g, "")}.slp`,
       playedAt: playedAt.toISOString(),

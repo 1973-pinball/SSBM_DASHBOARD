@@ -82,6 +82,8 @@ export interface PlayerSide {
  * so identity can be chosen or changed after parsing without a re-parse.
  */
 export interface GameRecord {
+  /** Version of the full parsed-stat payload. Missing on records from before tech stats. */
+  statsVersion?: number;
   id: string; // path|size|mtime
   path: string;
   playedAt: string | null; // ISO
@@ -126,6 +128,18 @@ export interface GameRecord {
  */
 export function hasFullStats(rec: GameRecord): boolean {
   return rec.statsLevel === undefined;
+}
+
+/**
+ * Bump when a full replay parse gains fields that cannot be derived from an
+ * older cached/cloud record. The marker lives inside the cloud JSON payload,
+ * so no Supabase schema migration is needed.
+ */
+export const CURRENT_STATS_VERSION = 1;
+
+/** Older records have no `techs`; a real zero-attempt game has an all-zero object. */
+export function hasCurrentStats(rec: GameRecord): boolean {
+  return hasFullStats(rec) && Array.isArray(rec.players) && rec.players.length > 0 && rec.players.every((p) => p.techs != null);
 }
 
 /**
