@@ -201,6 +201,31 @@ function quartileLabel(value: number | null, q: Quartiles | null, lowerBetter = 
   return "Inside the community middle 50%";
 }
 
+type DifferenceDirection = "above" | "below" | null;
+
+const differenceClass = (direction: DifferenceDirection): string => direction ? `community-diff-${direction}` : "";
+const differenceTitle = (direction: DifferenceDirection): string | undefined =>
+  direction ? `Large difference: ${direction} the field` : undefined;
+
+function largeDifference(
+  mine: number | null | undefined,
+  field: number | null | undefined,
+  minimumGap: number,
+  relativeGap = 0,
+): DifferenceDirection {
+  if (mine === null || mine === undefined || field === null || field === undefined) return null;
+  const gap = mine - field;
+  if (Math.abs(gap) < Math.max(minimumGap, Math.abs(field) * relativeGap)) return null;
+  return gap > 0 ? "above" : "below";
+}
+
+function quartileDifference(value: number | null, q: Quartiles | null, games: number): DifferenceDirection {
+  if (games < 10 || value === null || q === null) return null;
+  if (value > q.p75) return "above";
+  if (value < q.p25) return "below";
+  return null;
+}
+
 function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot; games: ResolvedGame[] }) {
   const chars = useMemo(() => {
     const ids = new Set(selectCharacters(snapshot));
@@ -245,10 +270,11 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
         {benchmarkDefs.map((def) => {
           const q = row?.[def.key] ?? null;
           const value = own[def.local];
+          const direction = quartileDifference(value, q, own.games);
           return (
             <article className={`benchmark-card ${q ? "" : "community-placeholder"}`} key={def.key}>
               <div className="community-card-label">{def.label}</div>
-              <div className="benchmark-values"><span><small>You</small><b>{value === null ? "—" : `${value.toFixed(def.digits)}${def.suffix}`}</b></span><span><small>Median</small><b>{q ? `${q.p50.toFixed(def.digits)}${def.suffix}` : "—"}</b></span></div>
+              <div className="benchmark-values"><span className={differenceClass(direction)} title={differenceTitle(direction)}><small>You</small><b>{value === null ? "—" : `${value.toFixed(def.digits)}${def.suffix}`}</b></span><span><small>Median</small><b>{q ? `${q.p50.toFixed(def.digits)}${def.suffix}` : "—"}</b></span></div>
               <div className="benchmark-range">Middle 50%: {q ? `${q.p25.toFixed(def.digits)}–${q.p75.toFixed(def.digits)}${def.suffix}` : "—"}</div>
               <div className="benchmark-note">{quartileLabel(value, q, def.lowerBetter)}</div>
             </article>
@@ -266,18 +292,22 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
         <CommunityMoveComparison community={communityMoves} own={ownMoves} />
       )}
 
-      <div className="hint">Your values use the most recent {own.games.toLocaleString()} matching games in the selected lookback, are computed in this browser, and are never sent by this comparison. The field side stays on the full qualifying aggregate. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else. Move cells show your value beside the qualifying community value; a dash means that side has not cleared the required data threshold.</div>
+      <div className="hint">Your values use the most recent {own.games.toLocaleString()} matching games in the selected lookback, are computed in this browser, and are never sent by this comparison. The field side stays on the full qualifying aggregate. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else. Gold marks meaningfully above the field; violet marks meaningfully below. Direction is descriptive, not a quality judgment, and highlights require at least 10 local games. A dash means that side has not cleared the required data threshold.</div>
     </div>
   );
 }
 
 function CommunityTechComparison({ community, own }: { community: CommunityExecutionRow | undefined; own: ExecutionSummary }) {
+  const ownTechCell = (value: number | null, field: number | null | undefined) => {
+    const direction = own.games >= 10 ? largeDifference(value, field, 10) : null;
+    return <td className={`data ${differenceClass(direction)}`} title={differenceTitle(direction)}>{communityExecutionPct(value)}</td>;
+  };
   return (
     <div className="table-scroll community-comparison-table">
       <table>
         <thead><tr><th>Cohort</th><th className="data">Ground tech success</th><th className="data">In-place</th><th className="data">In</th><th className="data">Away</th><th className="data">Player-games</th><th className="data">Contributors</th></tr></thead>
         <tbody>
-          <tr className="community-own-row"><td>You</td><td className="data">{communityExecutionPct(own.groundTechSuccess)}</td><td className="data">{communityExecutionPct(own.groundTechInPlace)}</td><td className="data">{communityExecutionPct(own.groundTechIn)}</td><td className="data">{communityExecutionPct(own.groundTechAway)}</td><td className="data">{own.games.toLocaleString()}</td><td className="data">{own.games > 0 ? "1" : "—"}</td></tr>
+          <tr className="community-own-row"><td>You</td>{ownTechCell(own.groundTechSuccess, community?.groundTechSuccess)}{ownTechCell(own.groundTechInPlace, community?.groundTechInPlace)}{ownTechCell(own.groundTechIn, community?.groundTechIn)}{ownTechCell(own.groundTechAway, community?.groundTechAway)}<td className="data">{own.games.toLocaleString()}</td><td className="data">{own.games > 0 ? "1" : "—"}</td></tr>
           <tr><td>Community</td><td className="data">{communityExecutionPct(community?.groundTechSuccess ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechInPlace ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechIn ?? null)}</td><td className="data">{communityExecutionPct(community?.groundTechAway ?? null)}</td><td className="data">{community ? community.games.toLocaleString() : "—"}</td><td className="data">{community ? community.contributors.toLocaleString() : "—"}</td></tr>
         </tbody>
       </table>
@@ -285,11 +315,11 @@ function CommunityTechComparison({ community, own }: { community: CommunityExecu
   );
 }
 
-function MoveCompareCell({ community, own }: { community: string; own: string }) {
+function MoveCompareCell({ community, own, direction = null }: { community: string; own: string; direction?: DifferenceDirection }) {
   return (
     <td className="data">
       <div className="community-move-pair">
-        <span><small>You</small><b>{own}</b></span>
+        <span className={differenceClass(direction)} title={differenceTitle(direction)}><small>You</small><b>{own}</b></span>
         <span><small>Field</small><b>{community}</b></span>
       </div>
     </td>
@@ -319,18 +349,34 @@ function CommunityMoveComparison({ community, own }: { community: CommunityMoveR
     <div className="table-scroll community-move-comparison">
       <table>
         <thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Openings / game</th><th className="data">Kills / game</th><th className="data">Avg kill %</th></tr></thead>
-        <tbody>{rows.map(({ key, mine, field, fieldDamageShare }) => (
-          <tr key={key}>
-            <td>{mine?.label ?? moveGroupLabel(key)}{field && <span className="sample-note">{field.contributors.toLocaleString()} contributors</span>}</td>
-            <MoveCompareCell own={number(mine?.attemptsPerGame)} community={number(field && field.attempts !== null && field.characterGames > 0 ? field.attempts / field.characterGames : null)} />
-            <MoveCompareCell own={number(mine?.landedPerGame)} community={number(field && field.characterGames ? field.landed / field.characterGames : null)} />
-            <MoveCompareCell own={percent(mine?.dmgShare)} community={percent(fieldDamageShare)} />
-            <MoveCompareCell own={number(mine?.avgDmgPerHit)} community={number(field && field.landed ? field.damage / field.landed : null)} />
-            <MoveCompareCell own={number(mine && own.covered ? mine.openings / own.covered : null)} community={number(field && field.characterGames ? field.openings / field.characterGames : null)} />
-            <MoveCompareCell own={number(mine && own.covered ? mine.kills / own.covered : null)} community={number(field && field.characterGames ? field.kills / field.characterGames : null)} />
-            <MoveCompareCell own={mine?.avgKillPct === null || mine?.avgKillPct === undefined ? "—" : `${num(mine.avgKillPct, 0)}%`} community={field && field.kills ? `${num(field.killPctSum / field.kills, 0)}%` : "—"} />
-          </tr>
-        ))}</tbody>
+        <tbody>{rows.map(({ key, mine, field, fieldDamageShare }) => {
+          const mineAttempts = mine?.attemptsPerGame ?? null;
+          const fieldAttempts = field && field.attempts !== null && field.characterGames > 0 ? field.attempts / field.characterGames : null;
+          const mineLanded = mine?.landedPerGame ?? null;
+          const fieldLanded = field && field.characterGames > 0 ? field.landed / field.characterGames : null;
+          const mineDamageShare = mine?.dmgShare ?? null;
+          const mineDamagePerHit = mine?.avgDmgPerHit ?? null;
+          const fieldDamagePerHit = field && field.landed > 0 ? field.damage / field.landed : null;
+          const mineOpenings = mine && own.covered > 0 ? mine.openings / own.covered : null;
+          const fieldOpenings = field && field.characterGames > 0 ? field.openings / field.characterGames : null;
+          const mineKills = mine && own.covered > 0 ? mine.kills / own.covered : null;
+          const fieldKills = field && field.characterGames > 0 ? field.kills / field.characterGames : null;
+          const mineKillPct = mine?.avgKillPct ?? null;
+          const fieldKillPct = field && field.kills > 0 ? field.killPctSum / field.kills : null;
+          const highlight = own.covered >= 10;
+          return (
+            <tr key={key}>
+              <td>{mine?.label ?? moveGroupLabel(key)}{field && <span className="sample-note">{field.contributors.toLocaleString()} contributors</span>}</td>
+              <MoveCompareCell own={number(mineAttempts)} community={number(fieldAttempts)} direction={highlight ? largeDifference(mineAttempts, fieldAttempts, 0.5, 0.25) : null} />
+              <MoveCompareCell own={number(mineLanded)} community={number(fieldLanded)} direction={highlight ? largeDifference(mineLanded, fieldLanded, 0.25, 0.25) : null} />
+              <MoveCompareCell own={percent(mineDamageShare)} community={percent(fieldDamageShare)} direction={highlight ? largeDifference(mineDamageShare, fieldDamageShare, 0.05) : null} />
+              <MoveCompareCell own={number(mineDamagePerHit)} community={number(fieldDamagePerHit)} direction={highlight ? largeDifference(mineDamagePerHit, fieldDamagePerHit, 1.5, 0.15) : null} />
+              <MoveCompareCell own={number(mineOpenings)} community={number(fieldOpenings)} direction={highlight ? largeDifference(mineOpenings, fieldOpenings, 0.1, 0.25) : null} />
+              <MoveCompareCell own={number(mineKills)} community={number(fieldKills)} direction={highlight ? largeDifference(mineKills, fieldKills, 0.05, 0.25) : null} />
+              <MoveCompareCell own={mineKillPct === null ? "—" : `${num(mineKillPct, 0)}%`} community={fieldKillPct === null ? "—" : `${num(fieldKillPct, 0)}%`} direction={highlight ? largeDifference(mineKillPct, fieldKillPct, 10) : null} />
+            </tr>
+          );
+        })}</tbody>
       </table>
     </div>
   );

@@ -742,6 +742,23 @@ select:disabled { opacity: 0.45; }
   text-transform: uppercase;
 }
 .community-move-pair b { color: var(--text); font-size: 12px; font-weight: 600; }
+.community-diff-above {
+  background: rgba(232, 181, 77, 0.12) !important;
+  box-shadow: inset 0 0 0 1px rgba(232, 181, 77, 0.35);
+  color: var(--gold) !important;
+}
+.community-diff-below {
+  background: rgba(143, 127, 247, 0.13) !important;
+  box-shadow: inset 0 0 0 1px rgba(143, 127, 247, 0.35);
+  color: var(--accent) !important;
+}
+.community-diff-above b { color: var(--gold) !important; }
+.community-diff-below b { color: var(--accent) !important; }
+.benchmark-values span.community-diff-above,
+.benchmark-values span.community-diff-below {
+  border-radius: 6px;
+  padding: 5px 6px;
+}
 
 /* ---- Tables ---- */
 table { width: 100%; border-collapse: collapse; font-size: 13px; }
