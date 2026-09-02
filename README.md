@@ -35,6 +35,13 @@ The app stays fully local unless Supabase is configured. To enable self-hosted s
 
 Only parsed stats from the user's own accounts are synced—never replay files. See [`supabase/AUTH_BRANDING.md`](supabase/AUTH_BRANDING.md) for production OAuth setup.
 
+Projects upgrading from the legacy row-per-game mirror should run
+[`supabase/pack-migration.sql`](supabase/pack-migration.sql) repeatedly until no
+users remain, deploy the packed
+client, confirm [`supabase/pack-verify.sql`](supabase/pack-verify.sql) reports no
+missing games, verify a restore, and only then run the destructive
+[`supabase/pack-cleanup.sql`](supabase/pack-cleanup.sql) to reclaim the old table.
+
 ## Credits
 
 Built with React, TypeScript, [`@slippi/slippi-js`](https://github.com/project-slippi/slippi-js), Dexie, Recharts, and optional Supabase.

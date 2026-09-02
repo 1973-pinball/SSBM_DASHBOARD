@@ -4,7 +4,9 @@
 -- path when the schema gains something. Policies are dropped and recreated rather
 -- than guarded, because Postgres has no `create policy if not exists`.
 -- Stores only the flattened per-game metadata the app already keeps in IndexedDB —
--- never raw .slp replay files.
+-- never raw .slp replay files. Current clients store those records in compressed
+-- JSONB packs. The legacy row-per-game table remains temporarily so an existing
+-- project can copy and verify its data before reclaiming that storage.
 
 create table if not exists public.game_records (
   user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
@@ -41,12 +43,264 @@ create trigger game_records_touch_updated_at
 before update on public.game_records
 for each row execute function public.touch_game_record_updated_at();
 
-create index if not exists game_records_played_at_idx
-  on public.game_records (user_id, played_at desc);
-create index if not exists game_records_game_key_idx
-  on public.game_records (user_id, game_key);
-create index if not exists game_records_updated_at_idx
-  on public.game_records (user_id, updated_at, id);
+-- Older schemas created played_at, game_key, and updated_at indexes here.
+-- Packed sync needs none of them; keep existing copies through verification and
+-- let pack-cleanup.sql drop them with the legacy data instead of recreating
+-- ~85 MB of indexes on a cleaned project.
+
+-- Cloud records are content-keyed and spread deterministically across 256
+-- buckets per user. PostgreSQL can TOAST-compress the repeated GameRecord field
+-- names across a whole bucket, while the primary-key/index overhead is paid once
+-- per pack instead of once per replay. `versions` is a compact metadata mirror:
+-- normal sync can diff keys without downloading every full record.
+create table if not exists public.game_record_packs (
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  bucket smallint not null check (bucket between 0 and 255),
+  records jsonb not null default '{}'::jsonb check (jsonb_typeof(records) = 'object'),
+  versions jsonb not null default '{}'::jsonb check (jsonb_typeof(versions) = 'object'),
+  updated_at timestamptz not null default now(),
+  primary key (user_id, bucket)
+);
+
+-- Resumable one-time migration bookkeeping. This table is never exposed to the
+-- browser; it records which users completed a bounded legacy-copy statement so
+-- a full 767 MB source is never sorted into one pgsql_tmp file.
+create table if not exists public.game_record_pack_migration_state (
+  user_id uuid primary key references auth.users (id) on delete cascade,
+  completed_at timestamptz not null default now()
+);
+
+-- FNV-1a's low byte. The browser uses the identical byte loop so an initial
+-- upload can keep every bucket in one request and avoid repeatedly rewriting a
+-- growing compressed pack. UTF-8 bytes make the function exact for any future
+-- non-ASCII content key too.
+create or replace function public.game_record_bucket(game_key text)
+returns smallint
+language plpgsql
+immutable
+strict
+set search_path = public, pg_temp
+as $$
+declare
+  bytes bytea := convert_to(game_key, 'UTF8');
+  hash_byte integer := 197; -- 2166136261 mod 256
+  i integer;
+begin
+  if length(bytes) = 0 then return hash_byte::smallint; end if;
+  for i in 0 .. length(bytes) - 1 loop
+    hash_byte := ((hash_byte # get_byte(bytes, i)) * 147) % 256; -- 16777619 mod 256
+  end loop;
+  return hash_byte::smallint;
+end;
+$$;
+
+-- Atomic, version-aware merge used by the browser. Direct writes to packs are
+-- intentionally not exposed: two devices can update one bucket concurrently,
+-- and a client-side read/modify/write would let the last writer erase the
+-- other's games. Lower-version payloads can never overwrite current stats.
+create or replace function public.merge_game_record_entries(entries jsonb)
+returns integer
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  owner_id uuid := auth.uid();
+  merged_count integer := 0;
+  locked_bucket smallint;
+begin
+  if owner_id is null then
+    raise exception 'authentication required';
+  end if;
+  if jsonb_typeof(entries) is distinct from 'array' then
+    raise exception 'entries must be a JSON array';
+  end if;
+
+  -- Serialize only calls touching the same user's same buckets. Sorting the
+  -- lock order prevents two multi-bucket requests from deadlocking; taking the
+  -- locks before the merge also closes the stale-version ON CONFLICT race.
+  for locked_bucket in
+    select distinct public.game_record_bucket(item->>'game_key')
+    from jsonb_array_elements(entries) incoming(item)
+    where length(item->>'game_key') > 0
+    order by 1
+  loop
+    perform pg_advisory_xact_lock(hashtext(owner_id::text), locked_bucket);
+  end loop;
+
+  with raw as (
+    select item, ord
+    from jsonb_array_elements(entries) with ordinality incoming(item, ord)
+  ),
+  parsed as (
+    select
+      item->>'game_key' as game_key,
+      item->'data' as data,
+      case
+        when (item->>'stats_version') ~ '^[0-9]+$' then (item->>'stats_version')::integer
+        else 0
+      end as stats_version,
+      ord
+    from raw
+    where length(item->>'game_key') > 0
+      and jsonb_typeof(item->'data') = 'object'
+  ),
+  incoming as (
+    select distinct on (game_key)
+      game_key,
+      data,
+      stats_version,
+      public.game_record_bucket(game_key) as bucket
+    from parsed
+    order by game_key, stats_version desc, ord desc
+  ),
+  eligible as (
+    select incoming.*
+    from incoming
+    left join public.game_record_packs stored
+      on stored.user_id = owner_id and stored.bucket = incoming.bucket
+    where stored.user_id is null
+       or not (stored.versions ? incoming.game_key)
+       or incoming.stats_version > (stored.versions->>incoming.game_key)::integer
+  ),
+  grouped as (
+    select
+      bucket,
+      jsonb_object_agg(game_key, data) as records,
+      jsonb_object_agg(game_key, to_jsonb(stats_version)) as versions
+    from eligible
+    group by bucket
+  ),
+  upserted as (
+    insert into public.game_record_packs as stored (user_id, bucket, records, versions, updated_at)
+    select owner_id, bucket, records, versions, clock_timestamp()
+    from grouped
+    on conflict (user_id, bucket) do update set
+      records = stored.records || excluded.records,
+      versions = stored.versions || excluded.versions,
+      updated_at = clock_timestamp()
+    returning 1
+  )
+  select count(*) into merged_count from eligible;
+
+  return merged_count;
+end;
+$$;
+
+-- Admin-only copier used before rollout and once more under an exclusive lock
+-- during cleanup. It is deliberately non-destructive and skips keys already
+-- packed at the same/newer payload version, so reruns do not rewrite hundreds
+-- of megabytes or generate needless WAL.
+drop function if exists public.migrate_legacy_game_records_to_packs();
+create or replace function public.migrate_legacy_game_records_to_packs(target_user uuid)
+returns bigint
+language sql
+security definer
+set search_path = public, pg_temp
+as $$
+with source_rows as (
+  select
+    g.user_id,
+    coalesce(g.game_key, g.id) as game_key,
+    g.data,
+    case
+      when (g.data->>'statsVersion') ~ '^[0-9]+$' then (g.data->>'statsVersion')::integer
+      when jsonb_typeof(g.data->'players') = 'array'
+        and jsonb_array_length(g.data->'players') > 0
+        and not (g.data ? 'statsLevel')
+        and not (g.data ? 'parseError')
+        and not exists (
+          select 1
+          from jsonb_array_elements(g.data->'players') player
+          where not (player ? 'techs')
+        ) then 1
+      else 0
+    end as stats_version,
+    public.game_record_bucket(coalesce(g.game_key, g.id)) as bucket,
+    g.updated_at,
+    g.id
+  from public.game_records g
+  where g.user_id = target_user
+),
+eligible as (
+  select source.*
+  from source_rows source
+  left join public.game_record_packs packed
+    on packed.user_id = source.user_id and packed.bucket = source.bucket
+  where packed.user_id is null
+     or not (packed.versions ? source.game_key)
+     or source.stats_version > (packed.versions->>source.game_key)::integer
+),
+grouped as (
+  select
+    user_id,
+    bucket,
+    -- Duplicate legacy keys collapse here. Highest payload version/latest
+    -- update wins; lowest file id wins the final deterministic tie, matching
+    -- the client deduper without paying for a second full-table sort.
+    jsonb_object_agg(game_key, data order by stats_version, updated_at, id desc) as records,
+    jsonb_object_agg(game_key, to_jsonb(stats_version) order by stats_version, updated_at, id desc) as versions
+  from eligible
+  group by user_id, bucket
+),
+upserted as (
+  insert into public.game_record_packs as packed (user_id, bucket, records, versions, updated_at)
+  select user_id, bucket, records, versions, clock_timestamp()
+  from grouped
+  on conflict (user_id, bucket) do update set
+    records = packed.records || excluded.records,
+    versions = packed.versions || excluded.versions,
+    updated_at = clock_timestamp()
+  returning 1
+)
+select count(*)::bigint from eligible;
+$$;
+
+-- Process only a handful of users per statement. Each inner migration releases
+-- its aggregate/sort workspace before the next user begins, while the state row
+-- makes rerunning pack-migration.sql resume rather than start over.
+create or replace function public.migrate_legacy_game_record_batch(max_users integer default 1)
+returns table (users_migrated integer, games_copied_or_upgraded bigint, users_remaining bigint)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  candidate_user uuid;
+  copied bigint;
+begin
+  if max_users < 1 or max_users > 20 then
+    raise exception 'max_users must be between 1 and 20';
+  end if;
+
+  users_migrated := 0;
+  games_copied_or_upgraded := 0;
+  for candidate_user in
+    select distinct legacy.user_id
+    from public.game_records legacy
+    left join public.game_record_pack_migration_state state using (user_id)
+    where state.user_id is null
+    order by legacy.user_id
+    limit max_users
+  loop
+    copied := public.migrate_legacy_game_records_to_packs(candidate_user);
+    insert into public.game_record_pack_migration_state (user_id, completed_at)
+    values (candidate_user, clock_timestamp())
+    on conflict (user_id) do update set completed_at = excluded.completed_at;
+    users_migrated := users_migrated + 1;
+    games_copied_or_upgraded := games_copied_or_upgraded + copied;
+  end loop;
+
+  select count(*) into users_remaining
+  from (
+    select distinct legacy.user_id
+    from public.game_records legacy
+    left join public.game_record_pack_migration_state state using (user_id)
+    where state.user_id is null
+  ) pending;
+  return next;
+end;
+$$;
 
 -- One row per Slippi account the user plays on. sort_order fixes the display
 -- order (the first account is the primary shown on the player card); label is
@@ -86,20 +340,29 @@ end $$;
 
 -- Row-level security: every user sees exactly their own rows.
 alter table public.game_records enable row level security;
+alter table public.game_record_packs enable row level security;
+alter table public.game_record_pack_migration_state enable row level security;
 alter table public.user_codes enable row level security;
 
 drop policy if exists "own records select" on public.game_records;
 create policy "own records select" on public.game_records
   for select using (auth.uid() = user_id);
-drop policy if exists "own records insert" on public.game_records;
-create policy "own records insert" on public.game_records
-  for insert with check (auth.uid() = user_id);
-drop policy if exists "own records update" on public.game_records;
-create policy "own records update" on public.game_records
-  for update using (auth.uid() = user_id);
-drop policy if exists "own records delete" on public.game_records;
-create policy "own records delete" on public.game_records
-  for delete using (auth.uid() = user_id);
+-- Do not recreate legacy write policies here. Existing projects retain them
+-- until pack-cleanup.sql runs, so the currently deployed row-sync client keeps
+-- working during migration. Fresh projects need only the packed RPC, and a
+-- cleaned project must not let a stale service worker refill this table.
+
+drop policy if exists "own record packs select" on public.game_record_packs;
+create policy "own record packs select" on public.game_record_packs
+  for select using (auth.uid() = user_id);
+
+revoke all on function public.game_record_bucket(text) from public, anon, authenticated;
+revoke all on function public.merge_game_record_entries(jsonb) from public, anon;
+revoke all on function public.migrate_legacy_game_records_to_packs(uuid) from public, anon, authenticated;
+revoke all on function public.migrate_legacy_game_record_batch(integer) from public, anon, authenticated;
+revoke all on public.game_record_pack_migration_state from public, anon, authenticated;
+grant execute on function public.merge_game_record_entries(jsonb) to authenticated;
+grant select on public.game_record_packs to authenticated;
 
 drop policy if exists "own codes select" on public.user_codes;
 create policy "own codes select" on public.user_codes

@@ -1,7 +1,7 @@
 -- Privacy-preserving Community Lab schema.
 --
--- Run after schema.sql. Raw game_records stay behind their existing per-user
--- RLS policies. The browser can read only community_snapshot, a precomputed
+-- Run after schema.sql. Private packed GameRecords stay behind their per-user
+-- RLS policy. The browser can read only community_snapshot, a precomputed
 -- aggregate with no user ids, connect codes, display names, paths, file ids, or
 -- exact timestamps. Community contribution is a separate, default-off consent.
 
@@ -107,7 +107,11 @@ eligible as (
     own.side as own_side,
     own.ord - 1 as own_index,
     opp.side as opp_side
-  from public.game_records g
+  from (
+    select packs.user_id, entry.key as game_key, entry.value as data
+    from public.game_record_packs packs
+    cross join lateral jsonb_each(packs.records) entry
+  ) g
   cross join params
   join public.community_consent consent
     on consent.user_id = g.user_id
@@ -530,10 +534,9 @@ begin
 end;
 $$;
 
--- game_records arrive in 500-row upserts. A row trigger used to rewrite the
--- same dirty-user row 500 times per request (20,000 times for a large first
--- sync), generating avoidable WAL and compute. Transition tables reduce that
--- to one upsert per affected user per SQL statement.
+-- A packed merge can touch many buckets in one statement. Transition tables
+-- reduce that to one dirty-user upsert per affected account rather than one
+-- write per changed pack.
 create or replace function public.mark_community_changed_game_users_dirty()
 returns trigger
 language plpgsql
@@ -566,16 +569,19 @@ drop trigger if exists community_dirty_game_records on public.game_records;
 drop trigger if exists community_dirty_game_records_insert on public.game_records;
 drop trigger if exists community_dirty_game_records_update on public.game_records;
 drop trigger if exists community_dirty_game_records_delete on public.game_records;
-create trigger community_dirty_game_records_insert
-after insert on public.game_records
+drop trigger if exists community_dirty_game_record_packs_insert on public.game_record_packs;
+drop trigger if exists community_dirty_game_record_packs_update on public.game_record_packs;
+drop trigger if exists community_dirty_game_record_packs_delete on public.game_record_packs;
+create trigger community_dirty_game_record_packs_insert
+after insert on public.game_record_packs
 referencing new table as changed_game_rows
 for each statement execute function public.mark_community_changed_game_users_dirty();
-create trigger community_dirty_game_records_update
-after update on public.game_records
+create trigger community_dirty_game_record_packs_update
+after update on public.game_record_packs
 referencing new table as changed_game_rows
 for each statement execute function public.mark_community_changed_game_users_dirty();
-create trigger community_dirty_game_records_delete
-after delete on public.game_records
+create trigger community_dirty_game_record_packs_delete
+after delete on public.game_record_packs
 referencing old table as deleted_game_rows
 for each statement execute function public.mark_community_deleted_game_users_dirty();
 
@@ -619,7 +625,11 @@ eligible as (
     own.side as own_side,
     own.ord - 1 as own_index,
     opp.side as opp_side
-  from public.game_records g
+  from (
+    select packs.user_id, entry.key as game_key, entry.value as data
+    from public.game_record_packs packs
+    cross join lateral jsonb_each(packs.records) entry
+  ) g
   cross join params
   join public.community_consent consent
     on consent.user_id = g.user_id

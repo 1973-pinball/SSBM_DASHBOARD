@@ -3,7 +3,8 @@ import type { Account, GameRecord } from "../lib/types";
 import { CURRENT_STATS_VERSION } from "../lib/types";
 import { cloudEnabled, currentSession, onAuthChange, signInWithGoogle, signOut, type Session } from "../lib/supabase";
 import { isSyncable, pushMyAccounts, syncRecords, type CloudSyncKnowledge } from "../lib/cloudSync";
-import { getCloudSyncState, setCloudSyncState } from "../lib/db";
+import { CLOUD_SYNC_FORMAT_VERSION, getCloudSyncState, setCloudSyncState } from "../lib/db";
+import { gameKey } from "../lib/dedupe";
 import { GoogleG } from "./GoogleG";
 
 interface Props {
@@ -28,11 +29,10 @@ type SyncState = { kind: "idle" } | { kind: "busy" } | { kind: "done"; pushed: n
 export function CloudSync({ records, accounts, isDemo, isParsing, generation, onPulled }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [sync, setSync] = useState<SyncState>({ kind: "idle" });
-  // Ids acknowledged by the cloud as of the last successful sync. That includes
-  // local aliases for games already stored under a moved folder's file id, so
-  // anything absent was parsed since — those are the "unsynced" games the gold
-  // button calls out. Null until this user's knowledge is restored or synced.
-  const [syncedIds, setSyncedIds] = useState<Set<string> | null>(null);
+  // Content keys acknowledged by the cloud as of the last successful sync.
+  // Unlike file ids they survive a folder move, so copied local paths never
+  // look like thousands of new games. Null until knowledge is restored/synced.
+  const [syncedKeys, setSyncedKeys] = useState<Set<string> | null>(null);
   const autoSynced = useRef(false);
   const knowledge = useRef<CloudSyncKnowledge | null>(null);
   const knowledgeOwner = useRef<string | null>(null);
@@ -53,13 +53,13 @@ export function CloudSync({ records, accounts, isDemo, isParsing, generation, on
   }, []);
 
   // A successful sync leaves enough browser-local knowledge to query only
-  // rows changed since its server cursor. Scope it by auth user: two people
-  // sharing a browser must never reuse one another's private remote id set.
+  // packs changed since its server cursor. Scope it by auth user: two people
+  // sharing a browser must never reuse one another's private content-key set.
   useEffect(() => {
     autoSynced.current = false;
     knowledge.current = null;
     knowledgeOwner.current = null;
-    setSyncedIds(null);
+    setSyncedKeys(null);
     setKnowledgeReady(false);
     const userId = session?.user.id;
     if (!userId) {
@@ -70,10 +70,10 @@ export function CloudSync({ records, accounts, isDemo, isParsing, generation, on
     void getCloudSyncState(userId)
       .then((stored) => {
         if (!active) return;
-        if (stored?.statsVersion === CURRENT_STATS_VERSION) {
-          const restored = { ids: new Set(stored.ids), cursor: stored.cursor };
+        if (stored?.cloudFormatVersion === CLOUD_SYNC_FORMAT_VERSION && stored.statsVersion === CURRENT_STATS_VERSION) {
+          const restored = { keys: new Set(stored.keys), cursor: stored.cursor };
           knowledge.current = restored;
-          setSyncedIds(new Set(restored.ids));
+          setSyncedKeys(new Set(restored.keys));
         }
       })
       .catch(console.error)
@@ -102,14 +102,15 @@ export function CloudSync({ records, accounts, isDemo, isParsing, generation, on
       const result = await syncRecords(recs, codes, knowledge.current ?? undefined);
       if (result.pulled.length) onPulled(result.pulled, gen);
       knowledge.current = result.knowledge;
-      setSyncedIds(new Set(result.knowledge.ids));
+      setSyncedKeys(new Set(result.knowledge.keys));
       if (userId) {
         // Losing this optimization state is safe: the next visit performs one
         // metadata bootstrap. It must not turn an otherwise successful cloud
         // backup into a visible sync failure when local storage is tight.
         await setCloudSyncState(userId, {
+          cloudFormatVersion: CLOUD_SYNC_FORMAT_VERSION,
           statsVersion: CURRENT_STATS_VERSION,
-          ids: [...result.knowledge.ids],
+          keys: [...result.knowledge.keys],
           cursor: result.knowledge.cursor,
         }).catch(console.error);
       }
@@ -144,12 +145,20 @@ export function CloudSync({ records, accounts, isDemo, isParsing, generation, on
   // mid-session). Adding an account makes its games newly syncable, so they
   // show up here and the auto-push picks them up without a rescan.
   const pending = useMemo(() => {
-    if (!syncedIds) return 0;
+    if (!syncedKeys) return 0;
     const codes = new Set(accounts.map((a) => a.code));
     let n = 0;
-    for (const r of records) if (isSyncable(r, codes) && !syncedIds.has(r.id)) n++;
+    const counted = new Set<string>();
+    for (const r of records) {
+      if (!isSyncable(r, codes)) continue;
+      const key = gameKey(r);
+      if (!syncedKeys.has(key) && !counted.has(key)) {
+        counted.add(key);
+        n++;
+      }
+    }
     return n;
-  }, [records, syncedIds, accounts]);
+  }, [records, syncedKeys, accounts]);
 
   // Auto-push: newly parsed games sync on their own once the parse stream goes
   // quiet (record appends arrive ~1/s, so 2.5s of quiet ≈ done). One attempt
@@ -233,7 +242,7 @@ export function CloudSync({ records, accounts, isDemo, isParsing, generation, on
         onClick={() =>
           void signOut().then(() => {
             setSync({ kind: "idle" });
-            setSyncedIds(null);
+            setSyncedKeys(null);
             knowledge.current = null;
             knowledgeOwner.current = null;
           })

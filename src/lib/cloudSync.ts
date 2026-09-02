@@ -1,29 +1,29 @@
 import type { Account, GameRecord } from "./types";
-import { CURRENT_STATS_VERSION, hasCurrentStats, hasFullStats, needsStatsRepair } from "./types";
+import { CURRENT_STATS_VERSION, hasCurrentStats, hasFullStats } from "./types";
 import { pruneDuplicates, putRecords } from "./db";
 import { dedupeRecords, gameKey } from "./dedupe";
 import { supabase } from "./supabase";
 
 /**
- * Sync strategy: the cloud holds the same flattened GameRecords the local cache
- * does, keyed (user_id, id) where id is path|size|mtime — identical on every
- * machine that parses the same file, so upsert is naturally idempotent. The
- * first sync bootstraps a remote id index; later syncs persist that index
- * locally and pull only rows past an updated_at cursor. Local candidates are
- * checked by file/content id before push. Raw replay files (.slp and .slpz)
- * never leave the machine.
+ * Sync strategy: the cloud holds the same flattened GameRecords as IndexedDB,
+ * but content-keyed inside compressed JSONB packs. One PostgreSQL row per game
+ * made a 264k-game project exceed its storage quota mostly through row/index
+ * overhead; 256 deterministic buckets per user let TOAST compress the repeated
+ * record shape while keeping concurrent writes atomic through an RPC.
+ *
+ * The first sync bootstraps a compact key/version index. Later syncs persist
+ * those keys locally and inspect only packs past an updated_at cursor. Raw
+ * replay files (.slp and .slpz) never leave the machine.
  */
 
-/** Rows per upsert request — ~500 × ~4 KB ≈ 2 MB, safely under request limits. */
-const PUSH_CHUNK = 500;
-/** Ids per .in() filter — they ride in the query string, so keep it modest. */
-const PULL_CHUNK = 150;
-/** Ids per page when listing what the cloud already has. */
-const ID_PAGE = 1000;
-/** Rows per request on a fresh-device restore. Unlike the normal id diff, an
- *  empty device can stream full rows directly instead of listing every id and
- *  then fetching them again in much smaller query-string batches. */
-const RESTORE_PAGE = 1000;
+/** Keep requests around 2–3 MB without splitting an ordinary hash bucket. */
+const PUSH_MAX_RECORDS = 500;
+/** Buckets fit in a short .in() query and bound each decompressed response. */
+const DATA_PACK_PAGE = 12;
+/** A user owns at most 256 rows, so one metadata request is complete. */
+const METADATA_PACK_PAGE = 256;
+const EMPTY_REMOTE_CURSOR = "1970-01-01T00:00:00.000Z";
+const UTF8_ENCODER = new TextEncoder();
 
 const stampCurrentVersion = (rec: GameRecord): GameRecord =>
   rec.statsVersion === CURRENT_STATS_VERSION ? rec : { ...rec, statsVersion: CURRENT_STATS_VERSION };
@@ -36,17 +36,31 @@ export interface SyncResult {
 
 /** Persisted by the caller so repeat syncs can ask only for remote deltas. */
 export interface CloudSyncKnowledge {
-  /** Current remote ids plus local file-id aliases satisfied by game_key. */
-  ids: Set<string>;
-  /** Greatest server-side updated_at observed; null means bootstrap once. */
+  /** Current content-derived game keys acknowledged by the cloud. */
+  keys: Set<string>;
+  /** Greatest server-side pack updated_at observed; null means bootstrap once. */
   cursor: string | null;
+}
+
+/** FNV-1a's low byte; mirrors public.game_record_bucket(text) in schema.sql. */
+export function gameRecordBucket(key: string): number {
+  let hashByte = 197;
+  for (const byte of UTF8_ENCODER.encode(key)) hashByte = Math.imul(hashByte ^ byte, 147) & 0xff;
+  return hashByte;
+}
+
+interface CloudPack {
+  bucket: number;
+  records: Record<string, GameRecord>;
+  versions: Record<string, number | string>;
+  updated_at: string;
 }
 
 /**
  * Fast path for an empty local cache (new browser/device/custom domain).
- * Fetch full records once in stable id order, report progress per page, then
- * persist the deterministic content-deduped result. The normal two-way sync
- * deliberately keeps its id diff; it is still cheaper when local is populated.
+ * Fetch packed records in stable bucket order, report progress per response,
+ * then persist current payloads. Stale rows remain in memory so headline stats
+ * do not vanish while a connected replay folder repairs their execution data.
  */
 export async function restoreCloudRecords(
   onProgress?: (loaded: number) => void,
@@ -54,28 +68,32 @@ export async function restoreCloudRecords(
 ): Promise<GameRecord[]> {
   if (!supabase) return [];
   const records: GameRecord[] = [];
-  for (let from = 0; ; from += RESTORE_PAGE) {
+  for (let from = 0; ; from += DATA_PACK_PAGE) {
     let query = supabase
-      .from("game_records")
-      .select("data")
-      .order("id", { ascending: true })
-      .range(from, from + RESTORE_PAGE - 1);
+      .from("game_record_packs")
+      .select("bucket, records, versions, updated_at")
+      .order("bucket", { ascending: true })
+      .range(from, from + DATA_PACK_PAGE - 1);
     if (signal) query = query.abortSignal(signal);
     const { data, error } = await query;
     if (error) throw error;
     const rows = data ?? [];
     const currentPage: GameRecord[] = [];
-    for (const row of rows) {
-      const rec = row.data as GameRecord;
-      records.push(rec);
-      if (hasCurrentStats(rec)) currentPage.push(stampCurrentVersion(rec));
+    for (const raw of rows) {
+      const pack = raw as CloudPack;
+      for (const [key, rec] of Object.entries(pack.records ?? {})) {
+        records.push(rec);
+        if (Number(pack.versions?.[key]) === CURRENT_STATS_VERSION && hasCurrentStats(rec)) {
+          currentPage.push(stampCurrentVersion(rec));
+        }
+      }
     }
-    // Persist one response page at a time. Handing a 20k-record array to one
+    // Persist one response at a time. Handing a 20k-record array to one
     // IndexedDB transaction makes the browser structured-clone the whole
     // library while the network and React copies are still live.
     if (currentPage.length) await putRecords(currentPage);
     onProgress?.(records.length);
-    if (rows.length < RESTORE_PAGE) break;
+    if (rows.length < DATA_PACK_PAGE) break;
   }
   const restored = dedupeRecords(records);
   if (restored.length !== records.length) {
@@ -110,9 +128,9 @@ export async function restoreCloudRecords(
 export function isSyncable(rec: GameRecord, myCodes: Set<string>): boolean {
   if (rec.parseError) return false;
   // Header previews are transient and carry zeroed execution metrics. A push
-  // would upsert one over the full record another device already holds, since
-  // both share the (user_id, id) key — and because the preview is never written
-  // to the local cache, nothing here would ever correct it back.
+  // would replace the full value another device already holds under the same
+  // content key — and because the preview is never written to the local cache,
+  // nothing here would ever correct it back.
   if (!hasFullStats(rec)) return false;
   // A pre-tech cloud row must never overwrite the current copy on another
   // device. It becomes syncable only after that device reparses the replay.
@@ -121,184 +139,149 @@ export function isSyncable(rec: GameRecord, myCodes: Set<string>): boolean {
 }
 
 interface RemoteIndex {
-  ids: Set<string>;
-  staleIds: Set<string>;
-  /** One existing row per content key. Current rows win over stale duplicates. */
-  idByKey: Map<string, string>;
+  currentKeys: Set<string>;
+  observedKeys: Set<string>;
+  bucketByKey: Map<string, number>;
   latestUpdatedAt: string | null;
 }
 
-interface RemoteIndexRow {
-  id: string;
-  game_key: string | null;
-  stats_version: string | number | null;
+interface RemotePackIndexRow {
+  bucket: number;
+  versions: Record<string, number | string>;
   updated_at: string;
 }
 
-const emptyRemoteIndex = (ids: Iterable<string> = []): RemoteIndex => ({
-  ids: new Set(ids),
-  staleIds: new Set(),
-  idByKey: new Map(),
+const emptyRemoteIndex = (keys: Iterable<string> = []): RemoteIndex => ({
+  currentKeys: new Set(keys),
+  observedKeys: new Set(),
+  bucketByKey: new Map(),
   latestUpdatedAt: null,
 });
 
-const addRemoteRow = (index: RemoteIndex, row: RemoteIndexRow): void => {
-  index.ids.add(row.id);
-  const stale = Number(row.stats_version) !== CURRENT_STATS_VERSION;
-  if (stale) index.staleIds.add(row.id);
-  else index.staleIds.delete(row.id);
-  if (row.game_key) {
-    const existing = index.idByKey.get(row.game_key);
-    if (!existing || (index.staleIds.has(existing) && !stale)) index.idByKey.set(row.game_key, row.id);
+const addRemotePack = (index: RemoteIndex, row: RemotePackIndexRow): void => {
+  for (const [key, version] of Object.entries(row.versions ?? {})) {
+    index.observedKeys.add(key);
+    index.bucketByKey.set(key, row.bucket);
+    if (Number(version) === CURRENT_STATS_VERSION) index.currentKeys.add(key);
+    else index.currentKeys.delete(key);
   }
   if (!index.latestUpdatedAt || row.updated_at > index.latestUpdatedAt) index.latestUpdatedAt = row.updated_at;
 };
 
-const currentRemoteIds = (index: RemoteIndex): Set<string> =>
-  new Set([...index.ids].filter((id) => !index.staleIds.has(id)));
-
 async function remoteIndex(): Promise<RemoteIndex> {
   const index = emptyRemoteIndex();
   if (!supabase) return index;
-  for (let from = 0; ; from += ID_PAGE) {
-    const { data, error } = await supabase
-      .from("game_records")
-      // JSON projection returns one scalar instead of downloading every ~5 KB
-      // record merely to decide whether its payload predates tech stats.
-      .select("id, game_key, stats_version:data->>statsVersion, updated_at")
-      .order("id", { ascending: true })
-      .range(from, from + ID_PAGE - 1);
-    if (error) throw error;
-    for (const raw of data) addRemoteRow(index, raw as RemoteIndexRow);
-    if (data.length < ID_PAGE) return index;
-  }
+  const { data, error } = await supabase
+    .from("game_record_packs")
+    .select("bucket, versions, updated_at")
+    .order("bucket", { ascending: true })
+    .range(0, METADATA_PACK_PAGE - 1);
+  if (error) throw error;
+  for (const raw of data) addRemotePack(index, raw as RemotePackIndexRow);
+  return index;
 }
 
 /** Fetch only metadata changed after the last observed server timestamp. */
 async function remoteChangesSince(cursor: string): Promise<RemoteIndex> {
   const index = emptyRemoteIndex();
   if (!supabase) return index;
-  for (let from = 0; ; from += ID_PAGE) {
-    const { data, error } = await supabase
-      .from("game_records")
-      // Keep the delta cheap even after this device itself pushed a large
-      // batch. Full JSON is fetched below only for ids absent locally.
-      .select("id, game_key, stats_version:data->>statsVersion, updated_at")
-      .gt("updated_at", cursor)
-      .order("updated_at", { ascending: true })
-      .order("id", { ascending: true })
-      .range(from, from + ID_PAGE - 1);
-    if (error) throw error;
-    for (const raw of data) addRemoteRow(index, raw as RemoteIndexRow);
-    if (data.length < ID_PAGE) return index;
-  }
+  const { data, error } = await supabase
+    .from("game_record_packs")
+    .select("bucket, versions, updated_at")
+    .gt("updated_at", cursor)
+    .order("updated_at", { ascending: true })
+    .order("bucket", { ascending: true })
+    .range(0, METADATA_PACK_PAGE - 1);
+  if (error) throw error;
+  for (const raw of data) addRemotePack(index, raw as RemotePackIndexRow);
+  return index;
 }
 
 const mergeRemoteIndex = (target: RemoteIndex, source: RemoteIndex): void => {
-  for (const id of source.ids) target.ids.add(id);
-  for (const id of source.staleIds) target.staleIds.add(id);
-  for (const [key, id] of source.idByKey) target.idByKey.set(key, id);
+  for (const key of source.observedKeys) {
+    if (!source.currentKeys.has(key)) target.currentKeys.delete(key);
+  }
+  for (const key of source.currentKeys) target.currentKeys.add(key);
+  for (const [key, bucket] of source.bucketByKey) target.bucketByKey.set(key, bucket);
+  if (source.latestUpdatedAt) target.latestUpdatedAt = source.latestUpdatedAt;
 };
 
-/** Populate just the remote metadata relevant to locally new file/content ids. */
-async function addCandidateMatches(index: RemoteIndex, candidates: GameRecord[]): Promise<void> {
-  if (!supabase || candidates.length === 0) return;
-  const ids = [...new Set(candidates.map((rec) => rec.id).filter((id) => !index.ids.has(id)))];
-  for (let i = 0; i < ids.length; i += PULL_CHUNK) {
-    const { data, error } = await supabase
-      .from("game_records")
-      .select("id, game_key, stats_version:data->>statsVersion, updated_at")
-      .in("id", ids.slice(i, i + PULL_CHUNK));
-    if (error) throw error;
-    for (const raw of data) addRemoteRow(index, raw as RemoteIndexRow);
-  }
-
-  // A copied/moved folder changes the file id, so look up candidate content
-  // keys too. This query is proportional to new local work, never cloud size.
-  const keys = [...new Set(candidates.map(gameKey).filter((key) => !index.idByKey.has(key)))];
-  for (let i = 0; i < keys.length; i += PULL_CHUNK) {
-    const { data, error } = await supabase
-      .from("game_records")
-      .select("id, game_key, stats_version:data->>statsVersion, updated_at")
-      .in("game_key", keys.slice(i, i + PULL_CHUNK));
-    if (error) throw error;
-    for (const raw of data) addRemoteRow(index, raw as RemoteIndexRow);
-  }
+interface PushEntry {
+  game_key: string;
+  data: GameRecord;
+  stats_version: number;
 }
 
 async function pushMissing(local: GameRecord[], remote: RemoteIndex, myCodes: Set<string>): Promise<number> {
   if (!supabase) return 0;
-  // isSyncable drops tombstones and anyone else's games (see above).
-  // A record whose *game* is already up there under a different file key is a
-  // folder copy rather than a new game: pushing it would double the library in
-  // the cloud every time the folder moves.
-  const toPush: { rec: GameRecord; key: string; targetId: string }[] = [];
+  const byBucket = new Map<number, PushEntry[]>();
+  const queuedKeys = new Set(remote.currentKeys);
   for (const rec of local) {
     if (!isSyncable(rec, myCodes)) continue;
     const key = gameKey(rec);
-    const sameIdExists = remote.ids.has(rec.id);
-    if (sameIdExists && !remote.staleIds.has(rec.id)) continue;
+    if (queuedKeys.has(key)) continue;
+    queuedKeys.add(key);
+    const bucket = gameRecordBucket(key);
+    const entries = byBucket.get(bucket) ?? [];
+    entries.push({ game_key: key, data: stampCurrentVersion(rec), stats_version: CURRENT_STATS_VERSION });
+    byBucket.set(bucket, entries);
+  }
 
-    let targetId = rec.id;
-    if (!sameIdExists) {
-      const existing = remote.idByKey.get(key);
-      if (existing) {
-        if (!remote.staleIds.has(existing)) {
-          // The same game is already remote under a copied folder's id. Mark
-          // this local file id acknowledged so it does not stay pending or get
-          // looked up again on every visit.
-          remote.ids.add(rec.id);
-          continue;
-        }
-        // Same game under a moved/copied file id: update the stale row in place
-        // instead of appending a second cloud record.
-        targetId = existing;
-      }
+  // Keep a bucket intact wherever possible. Splitting random records into 500s
+  // would touch most buckets in every request and repeatedly rewrite each
+  // growing TOAST value during a large first sync.
+  const batches: PushEntry[][] = [];
+  let batch: PushEntry[] = [];
+  for (const [, entries] of [...byBucket].sort(([a], [b]) => a - b)) {
+    if (batch.length > 0 && batch.length + entries.length > PUSH_MAX_RECORDS) {
+      batches.push(batch);
+      batch = [];
     }
-    toPush.push({ rec, key, targetId });
-    remote.ids.add(rec.id);
-    remote.ids.add(targetId);
-    remote.staleIds.delete(targetId);
-    remote.idByKey.set(key, targetId);
+    if (entries.length > PUSH_MAX_RECORDS) {
+      if (batch.length > 0) batches.push(batch);
+      batch = [];
+      for (let i = 0; i < entries.length; i += PUSH_MAX_RECORDS) batches.push(entries.slice(i, i + PUSH_MAX_RECORDS));
+    } else {
+      batch.push(...entries);
+    }
   }
-  for (let i = 0; i < toPush.length; i += PUSH_CHUNK) {
-    const chunk = toPush.slice(i, i + PUSH_CHUNK).map(({ rec, key, targetId }) => ({
-      id: targetId,
-      data: { ...stampCurrentVersion(rec), id: targetId },
-      played_at: rec.playedAt,
-      game_key: key,
-    }));
-    const { error } = await supabase.from("game_records").upsert(chunk, { onConflict: "user_id,id" });
+  if (batch.length > 0) batches.push(batch);
+
+  let pushed = 0;
+  for (const entries of batches) {
+    const { error } = await supabase.rpc("merge_game_record_entries", { entries });
     if (error) throw error;
+    for (const entry of entries) {
+      remote.currentKeys.add(entry.game_key);
+      remote.bucketByKey.set(entry.game_key, gameRecordBucket(entry.game_key));
+    }
+    pushed += entries.length;
   }
-  return toPush.length;
+  return pushed;
 }
 
 async function pullMissing(local: GameRecord[], remote: RemoteIndex): Promise<GameRecord[]> {
   if (!supabase) return [];
-  const haveIds = new Set(local.map((r) => r.id));
-  // Content keys, not just ids: a device that parsed the same replays from its
-  // own copy of the folder holds every game already, under different ids.
-  // Pulling those would plant duplicates straight into the local cache.
   const haveKeys = new Set(local.map(gameKey));
-  // Stale remote rows stay available through the fresh-device restore path,
-  // but normal sync must not persist them locally and mark the replay parsed.
-  const missing = [...remote.ids].filter((id) => !haveIds.has(id) && !remote.staleIds.has(id));
+  const missing = new Set([...remote.currentKeys].filter((key) => !haveKeys.has(key)));
+  const buckets = [...new Set([...missing].map((key) => remote.bucketByKey.get(key)).filter((v): v is number => v !== undefined))];
   const pulled: GameRecord[] = [];
-  for (let i = 0; i < missing.length; i += PULL_CHUNK) {
+  for (let i = 0; i < buckets.length; i += DATA_PACK_PAGE) {
     const { data, error } = await supabase
-      .from("game_records")
-      .select("data")
-      .in("id", missing.slice(i, i + PULL_CHUNK));
+      .from("game_record_packs")
+      .select("bucket, records, versions, updated_at")
+      .in("bucket", buckets.slice(i, i + DATA_PACK_PAGE));
     if (error) throw error;
     const accepted: GameRecord[] = [];
-    for (const row of data) {
-      const rec = row.data as GameRecord;
-      const key = gameKey(rec);
-      if (haveKeys.has(key)) continue;
-      haveKeys.add(key);
-      pulled.push(rec);
-      accepted.push(rec);
+    for (const raw of data) {
+      const pack = raw as CloudPack;
+      for (const [key, rec] of Object.entries(pack.records ?? {})) {
+        if (!missing.has(key) || haveKeys.has(key) || Number(pack.versions?.[key]) !== CURRENT_STATS_VERSION) continue;
+        haveKeys.add(key);
+        missing.delete(key);
+        pulled.push(rec);
+        accepted.push(rec);
+      }
     }
     if (accepted.length) await putRecords(accepted);
   }
@@ -315,11 +298,10 @@ export async function syncRecords(
   myCodes: Set<string>,
   known?: CloudSyncKnowledge,
 ): Promise<SyncResult> {
-  if (!supabase) return { pushed: 0, pulled: [], knowledge: { ids: new Set(), cursor: null } };
+  if (!supabase) return { pushed: 0, pulled: [], knowledge: { keys: new Set(), cursor: null } };
 
-  // First run on a browser (and the one run after deploying updated_at) pays
-  // for the complete metadata index. Every successful run after that starts
-  // from browser-local knowledge and asks only for the timestamp delta.
+  // First run on this packed format pays for the complete key/version index.
+  // Every successful run after that asks only for changed pack metadata.
   if (!known?.cursor) {
     const remote = await remoteIndex();
     const pushed = await pushMissing(local, remote, myCodes);
@@ -331,31 +313,24 @@ export async function syncRecords(
     return {
       pushed,
       pulled,
-      knowledge: { ids: currentRemoteIds(remote), cursor: remote.latestUpdatedAt },
+      // An empty remote has no timestamp yet. Keep an epoch cursor rather than
+      // bootstrapping again; the next delta observes our pushes and closes the
+      // query-then-push race with another device.
+      knowledge: { keys: new Set(remote.currentKeys), cursor: remote.latestUpdatedAt ?? EMPTY_REMOTE_CURSOR },
     };
   }
 
-  // Saved knowledge is an optimization, never authority. If the local copy of
-  // an id is visibly stale, do not let a historical acknowledgement claim its
-  // remote payload is current. Removing it makes a successfully reparsed copy
-  // a candidate on the next sync, even if an older client polluted the cache.
-  const staleLocalIds = new Set(local.filter(needsStatsRepair).map((rec) => rec.id));
-  const trustedKnownIds = [...known.ids].filter((id) => !staleLocalIds.has(id));
-  const remote = emptyRemoteIndex(trustedKnownIds);
+  const remote = emptyRemoteIndex(known.keys);
   const changes = await remoteChangesSince(known.cursor);
   mergeRemoteIndex(remote, changes);
   const pulled = await pullMissing(local, changes);
-
-  const candidates = local.filter((rec) => isSyncable(rec, myCodes) && !remote.ids.has(rec.id));
-  await addCandidateMatches(remote, candidates);
   const pushed = await pushMissing(local, remote, myCodes);
   return {
     pushed,
     pulled,
-    // Deliberately do not advance the cursor from candidate lookups or our own
-    // pushes. The next delta observes those rows and any concurrent device
-    // write in one ordered pass, closing the query-then-push race.
-    knowledge: { ids: currentRemoteIds(remote), cursor: changes.latestUpdatedAt ?? known.cursor },
+    // Deliberately do not advance the cursor from our own pushes. The next
+    // delta observes those packs and any concurrent device write together.
+    knowledge: { keys: new Set(remote.currentKeys), cursor: changes.latestUpdatedAt ?? known.cursor },
   };
 }
 
@@ -367,7 +342,7 @@ export async function syncRecords(
 export async function pushMyAccounts(accounts: Account[]): Promise<void> {
   if (!supabase) return;
   if (accounts.length) {
-    // user_id comes from the column default (auth.uid()), same as game_records.
+    // user_id comes from the column default (auth.uid()), same as record packs.
     const rows = accounts.map((a, i) => ({ code: a.code, label: a.label, sort_order: i }));
     const { error } = await supabase.from("user_codes").upsert(rows, { onConflict: "user_id,code" });
     if (error) throw error;

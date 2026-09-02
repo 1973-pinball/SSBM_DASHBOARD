@@ -16,12 +16,15 @@ export interface RecordPack {
 
 /** Browser-local knowledge used to make cloud sync incremental after bootstrap. */
 export interface StoredCloudSyncState {
+  cloudFormatVersion: 2;
   statsVersion: number;
-  /** Remote ids plus local file-id aliases acknowledged by content identity. */
-  ids: string[];
-  /** Greatest server-side game_records.updated_at observed by this device. */
+  /** Content-derived game keys acknowledged by the packed cloud mirror. */
+  keys: string[];
+  /** Greatest server-side game_record_packs.updated_at observed by this device. */
   cursor: string | null;
 }
+
+export const CLOUD_SYNC_FORMAT_VERSION = 2;
 
 const PACK_SIZE = 250;
 
@@ -383,9 +386,10 @@ export async function getCloudSyncState(userId: string): Promise<StoredCloudSync
   const row = await db.kv.get(cloudSyncStateKey(userId));
   const value = row?.value as Partial<StoredCloudSyncState> | undefined;
   if (
+    value?.cloudFormatVersion !== CLOUD_SYNC_FORMAT_VERSION ||
     typeof value?.statsVersion !== "number" ||
-    !Array.isArray(value.ids) ||
-    !value.ids.every((id) => typeof id === "string") ||
+    !Array.isArray(value.keys) ||
+    !value.keys.every((key) => typeof key === "string") ||
     (value.cursor !== null && typeof value.cursor !== "string")
   ) return null;
   return value as StoredCloudSyncState;
