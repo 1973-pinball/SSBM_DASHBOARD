@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
-import { DEFAULT_FILTERS, hasCurrentStats, hasFullStats } from "./lib/types";
+import { DEFAULT_FILTERS, hasFullStats, needsStatsRepair } from "./lib/types";
 import {
   discoverFromHandle,
   discoverFromFileList,
@@ -794,9 +794,7 @@ export default function App() {
         if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
         setFolderPermission(perm);
         if (perm === "granted") {
-          const repairIds = records
-            .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
-            .map((rec) => rec.id);
+          const repairIds = records.filter(needsStatsRepair).map((rec) => rec.id);
           await syncFolder(dirHandle, repairIds);
         }
       } catch (err) {
@@ -871,9 +869,7 @@ export default function App() {
         setFolderPermission("granted");
         await setDirHandle(dir);
         autoSyncDone.current = true;
-        const repairIds = records
-          .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
-          .map((rec) => rec.id);
+        const repairIds = records.filter(needsStatsRepair).map((rec) => rec.id);
         await syncFolder(dir, repairIds);
       } catch (err) {
         // AbortError is the user closing the picker — not a failure.
@@ -974,10 +970,7 @@ export default function App() {
   // running" flag to keep in step. An incremental refresh never sets it: below
   // HEADER_PASS_MIN the pipeline skips the preview pass entirely.
   const hasPreviews = useMemo(() => deduped.some((r) => !hasFullStats(r)), [deduped]);
-  const needsStatsRefresh = useMemo(
-    () => deduped.some((r) => hasFullStats(r) && !hasCurrentStats(r)),
-    [deduped],
-  );
+  const needsStatsRefresh = useMemo(() => deduped.some(needsStatsRepair), [deduped]);
   const isTabPending = (id: Tab) => hasPreviews && NEEDS_FULL_STATS.has(id);
 
   // Never strand the user in a teams view they have no games for.

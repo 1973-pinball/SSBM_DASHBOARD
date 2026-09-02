@@ -1,5 +1,5 @@
 import type { Account, GameRecord } from "./types";
-import { CURRENT_STATS_VERSION, hasCurrentStats, hasFullStats } from "./types";
+import { CURRENT_STATS_VERSION, hasCurrentStats, hasFullStats, needsStatsRepair } from "./types";
 import { pruneDuplicates, putRecords } from "./db";
 import { dedupeRecords, gameKey } from "./dedupe";
 import { supabase } from "./supabase";
@@ -339,11 +339,7 @@ export async function syncRecords(
   // an id is visibly stale, do not let a historical acknowledgement claim its
   // remote payload is current. Removing it makes a successfully reparsed copy
   // a candidate on the next sync, even if an older client polluted the cache.
-  const staleLocalIds = new Set(
-    local
-      .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
-      .map((rec) => rec.id),
-  );
+  const staleLocalIds = new Set(local.filter(needsStatsRepair).map((rec) => rec.id));
   const trustedKnownIds = [...known.ids].filter((id) => !staleLocalIds.has(id));
   const remote = emptyRemoteIndex(trustedKnownIds);
   const changes = await remoteChangesSince(known.cursor);

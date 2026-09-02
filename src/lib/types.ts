@@ -143,6 +143,19 @@ export function hasCurrentStats(rec: GameRecord): boolean {
 }
 
 /**
+ * Whether a successfully parsed record needs the current execution payload.
+ *
+ * Parse-failure tombstones deliberately have no players or execution fields,
+ * so `hasCurrentStats()` is false for them too. They are not repairable schema
+ * rows, though: retrying one only recreates the same tombstone and leaves the
+ * refresh warning pinned forever. Keep that distinction explicit anywhere a
+ * caller decides to forget a cached id and re-parse its file.
+ */
+export function needsStatsRepair(rec: GameRecord): boolean {
+  return rec.parseError === undefined && hasFullStats(rec) && !hasCurrentStats(rec);
+}
+
+/**
  * One Slippi account belonging to the user. Several are normal — the same
  * person routinely keeps a main and an alt, and both sets of replays land in
  * the same folder. Identity stays a query-time concept (see decision 1 in
