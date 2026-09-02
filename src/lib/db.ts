@@ -14,6 +14,15 @@ export interface RecordPack {
   records: GameRecord[];
 }
 
+/** Browser-local knowledge used to make cloud sync incremental after bootstrap. */
+export interface StoredCloudSyncState {
+  statsVersion: number;
+  /** Remote ids plus local file-id aliases acknowledged by content identity. */
+  ids: string[];
+  /** Greatest server-side game_records.updated_at observed by this device. */
+  cursor: string | null;
+}
+
 const PACK_SIZE = 250;
 
 /**
@@ -353,6 +362,24 @@ export async function getMyAccounts(): Promise<Account[]> {
 
 export async function setMyAccounts(accounts: Account[]): Promise<void> {
   await db.kv.put({ key: "myAccounts", value: accounts });
+}
+
+const cloudSyncStateKey = (userId: string) => `cloudSyncState:${userId}`;
+
+export async function getCloudSyncState(userId: string): Promise<StoredCloudSyncState | null> {
+  const row = await db.kv.get(cloudSyncStateKey(userId));
+  const value = row?.value as Partial<StoredCloudSyncState> | undefined;
+  if (
+    typeof value?.statsVersion !== "number" ||
+    !Array.isArray(value.ids) ||
+    !value.ids.every((id) => typeof id === "string") ||
+    (value.cursor !== null && typeof value.cursor !== "string")
+  ) return null;
+  return value as StoredCloudSyncState;
+}
+
+export async function setCloudSyncState(userId: string, state: StoredCloudSyncState): Promise<void> {
+  await db.kv.put({ key: cloudSyncStateKey(userId), value: state });
 }
 
 /**

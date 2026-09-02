@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Account, GameRecord } from "../lib/types";
+import { CURRENT_STATS_VERSION } from "../lib/types";
 import { cloudEnabled, currentSession, onAuthChange, signInWithGoogle, signOut, type Session } from "../lib/supabase";
-import { isSyncable, pushMyAccounts, syncRecords } from "../lib/cloudSync";
+import { isSyncable, pushMyAccounts, syncRecords, type CloudSyncKnowledge } from "../lib/cloudSync";
+import { getCloudSyncState, setCloudSyncState } from "../lib/db";
 import { GoogleG } from "./GoogleG";
 
 interface Props {
@@ -24,12 +26,17 @@ type SyncState = { kind: "idle" } | { kind: "busy" } | { kind: "done"; pushed: n
 export function CloudSync({ records, accounts, isDemo, generation, onPulled }: Props) {
   const [session, setSession] = useState<Session | null>(null);
   const [sync, setSync] = useState<SyncState>({ kind: "idle" });
-  // Ids known to be in the cloud as of the last successful sync. After a sync
-  // every then-current record is in the cloud by definition, so anything local
-  // that isn't in this set was parsed since — those are the "unsynced" games
-  // the gold button state calls out. Null until the first sync of this visit.
+  // Ids acknowledged by the cloud as of the last successful sync. That includes
+  // local aliases for games already stored under a moved folder's file id, so
+  // anything absent was parsed since — those are the "unsynced" games the gold
+  // button calls out. Null until this user's knowledge is restored or synced.
   const [syncedIds, setSyncedIds] = useState<Set<string> | null>(null);
   const autoSynced = useRef(false);
+  const knowledge = useRef<CloudSyncKnowledge | null>(null);
+  const knowledgeOwner = useRef<string | null>(null);
+  const [knowledgeReady, setKnowledgeReady] = useState(false);
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
 
   // Latest props for the auto-sync effect without re-triggering it per change.
   const latest = useRef({ records, accounts, generation });
@@ -41,6 +48,42 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
     return onAuthChange(setSession);
   }, []);
 
+  // A successful sync leaves enough browser-local knowledge to query only
+  // rows changed since its server cursor. Scope it by auth user: two people
+  // sharing a browser must never reuse one another's private remote id set.
+  useEffect(() => {
+    autoSynced.current = false;
+    knowledge.current = null;
+    knowledgeOwner.current = null;
+    setSyncedIds(null);
+    setKnowledgeReady(false);
+    const userId = session?.user.id;
+    if (!userId) {
+      setKnowledgeReady(true);
+      return;
+    }
+    let active = true;
+    void getCloudSyncState(userId)
+      .then((stored) => {
+        if (!active) return;
+        if (stored?.statsVersion === CURRENT_STATS_VERSION) {
+          const restored = { ids: new Set(stored.ids), cursor: stored.cursor };
+          knowledge.current = restored;
+          setSyncedIds(new Set(restored.ids));
+        }
+      })
+      .catch(console.error)
+      .finally(() => {
+        if (active) {
+          knowledgeOwner.current = userId;
+          setKnowledgeReady(true);
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [session?.user.id]);
+
   const busyRef = useRef(false);
   const lastSyncAt = useRef(0);
 
@@ -51,17 +94,24 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
     try {
       const { records: recs, accounts: accts, generation: gen } = latest.current;
       const codes = new Set(accts.map((a) => a.code));
-      const result = await syncRecords(recs, codes);
+      const userId = sessionRef.current?.user.id;
+      const result = await syncRecords(recs, codes, knowledge.current ?? undefined);
       if (result.pulled.length) onPulled(result.pulled, gen);
+      knowledge.current = result.knowledge;
+      setSyncedIds(new Set(result.knowledge.ids));
+      if (userId) {
+        // Losing this optimization state is safe: the next visit performs one
+        // metadata bootstrap. It must not turn an otherwise successful cloud
+        // backup into a visible sync failure when local storage is tight.
+        await setCloudSyncState(userId, {
+          statsVersion: CURRENT_STATS_VERSION,
+          ids: [...result.knowledge.ids],
+          cursor: result.knowledge.cursor,
+        }).catch(console.error);
+      }
       // The dashboard always has accounts (identity is confirmed before entry);
       // fresh-device adoption of cloud accounts happens in App's landing restore.
       if (accts.length) await pushMyAccounts(accts);
-      // Only syncable records can ever reach the cloud, so only they can be
-      // pending. Counting the rest would leave the button permanently gold.
-      const ids = new Set<string>();
-      for (const r of recs) if (isSyncable(r, codes)) ids.add(r.id);
-      for (const r of result.pulled) ids.add(r.id);
-      setSyncedIds(ids);
       setSync({ kind: "done", pushed: result.pushed, pulled: result.pulled.length });
     } catch (err) {
       console.error(err);
@@ -74,10 +124,16 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
 
   // One automatic reconcile per visit once signed in — manual after that.
   useEffect(() => {
-    if (!session || isDemo || autoSynced.current) return;
+    if (
+      !session ||
+      !knowledgeReady ||
+      knowledgeOwner.current !== session.user.id ||
+      isDemo ||
+      autoSynced.current
+    ) return;
     autoSynced.current = true;
     void runSync();
-  }, [session, isDemo, runSync]);
+  }, [session, knowledgeReady, isDemo, runSync]);
 
   // Games of the user's own parsed since the last sync (e.g. a folder Refresh
   // mid-session). Adding an account makes its games newly syncable, so they
@@ -108,13 +164,15 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
     return () => window.clearTimeout(t);
   }, [pending, session, sync.kind, runSync]);
 
-  // Auto-pull: returning to the tab re-syncs (≥60s apart) so games pushed from
-  // another device appear without a manual sync or reload.
+  // Auto-pull: returning to the tab periodically re-syncs so games pushed from
+  // another device appear without a manual sync or reload. Fifteen minutes
+  // keeps convergence automatic without turning normal tab switching into a
+  // database request; the old one-minute interval repeatedly listed 20k ids.
   useEffect(() => {
     if (!session || isDemo) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (Date.now() - lastSyncAt.current < 60_000) return;
+      if (Date.now() - lastSyncAt.current < 15 * 60_000) return;
       void runSync();
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -169,6 +227,8 @@ export function CloudSync({ records, accounts, isDemo, generation, onPulled }: P
           void signOut().then(() => {
             setSync({ kind: "idle" });
             setSyncedIds(null);
+            knowledge.current = null;
+            knowledgeOwner.current = null;
           })
         }
       >

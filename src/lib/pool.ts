@@ -116,6 +116,16 @@ const BATCH_FLUSH = 250;
 const UI_RECORDS_MS = 1000;
 const UI_PROGRESS_MS = 250;
 
+/**
+ * Above this size, replacing header previews with full ~5 KB records while the
+ * parse is still running creates more pressure than useful feedback: every
+ * delivery makes React rebuild the full id map, content dedup, resolution, and
+ * sorted game arrays. The header pass already keeps the dashboard useful. Full
+ * records still commit continuously to IndexedDB and every caller reconciles
+ * from storage once the run finishes.
+ */
+const LARGE_IMPORT_MIN = 10_000;
+
 /** Parsed records that could not be written to IndexedDB (quota, private browsing). */
 export class RecordSaveError extends Error {
   constructor(unsaved: number, cause: Error) {
@@ -176,6 +186,7 @@ export async function runParsePipeline(
   // (see HEADER_PASS_MIN), and an incremental rescan of a handful of new files
   // should just parse them.
   const willPreview = queue.length >= HEADER_PASS_MIN;
+  const largeImport = queue.length >= LARGE_IMPORT_MIN;
   const progress: ParseProgress = {
     pass: willPreview ? "header" : "full",
     total: willPreview ? queue.length : files.length,
@@ -199,12 +210,14 @@ export async function runParsePipeline(
   // two-round, 240-game local benchmark of the final bounded parser measured
   // 44.7/52.5/54.8 games/s at 4/6/8 workers respectively, so eight is the
   // measured ceiling rather than a guess at "all cores". Four remains the
-  // low-memory baseline; browsers that withhold `deviceMemory` may use the
-  // measured 6/8 tiers now that completed frame batches are released in-stream.
+  // low-memory baseline. A very large run stays at four even on a high-memory
+  // machine: its sustained heap/GC behavior matters more than the modest 6/8
+  // worker throughput gain. Browsers that withhold `deviceMemory` also stay on
+  // the conservative tier rather than being assumed to have 8+ GB.
   const cores = navigator.hardwareConcurrency || 4;
   const memoryGb = navigator.deviceMemory ?? 0;
-  const hasMemory = memoryGb === 0 || memoryGb >= 8;
-  const workerCap = hasMemory && cores >= 8 ? 8 : hasMemory && cores >= 6 ? 6 : 4;
+  const hasMemory = memoryGb >= 8;
+  const workerCap = largeImport ? 4 : hasMemory && cores >= 8 ? 8 : hasMemory && cores >= 6 ? 6 : 4;
   const workerCount = Math.max(1, Math.min(cores, workerCap));
   interface Slot {
     worker: Worker;
@@ -343,7 +356,11 @@ export async function runParsePipeline(
           const res = e.data as WorkerResult;
           if (res.ok && res.record) {
             if (persist) pendingDb.push(res.record);
-            pendingUi.push(res.record);
+            // Header rows are compact and are the useful live preview. On a
+            // large full pass, keep the authoritative records out of React's
+            // whole-library recompute loop; the final storage reconciliation
+            // installs them all at once.
+            if (!persist || !largeImport) pendingUi.push(res.record);
           } else if (res.readFailed) {
             // The read is the worker's job now, so its failures arrive here
             // rather than as a rejected promise on the feed path. Counted, but
@@ -377,7 +394,7 @@ export async function runParsePipeline(
                 parseError: res.error ?? "parse failed",
               };
               pendingDb.push(tombstone);
-              pendingUi.push(tombstone);
+              if (!largeImport) pendingUi.push(tombstone);
             }
           }
           if (pendingDb.length >= BATCH_FLUSH) flush();
@@ -439,8 +456,9 @@ export async function runParsePipeline(
   flush();
   await flushChain;
   if (signal?.aborted) return;
-  // Trailing delivery: syncFolder builds its record state solely from these
-  // callbacks, so every remaining record must go out, exactly once.
+  // Trailing delivery for ordinary runs. Large runs intentionally withheld
+  // full rows from React; all three callers reconcile those from IndexedDB once
+  // this promise resolves.
   drainUi();
   if (flushError) throw new RecordSaveError(unsaved, flushError);
 }

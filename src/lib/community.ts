@@ -6,8 +6,16 @@ import { supabase } from "./supabase";
 export const COMMUNITY_CONSENT_VERSION = "2026-08-24";
 export const COMMUNITY_MIN_CONTRIBUTORS = 25;
 export const COMMUNITY_MIN_GAMES = 100;
+export const COMMUNITY_LOOKBACK_DAYS = [30, 90, 180, 365, null] as const;
 
-export interface CommunityMatchupRow {
+export type CommunityLookbackDays = (typeof COMMUNITY_LOOKBACK_DAYS)[number];
+
+interface CommunityLookbackRow {
+  /** null is the unbounded, all-history ("Max") cohort. */
+  lookbackDays: CommunityLookbackDays;
+}
+
+export interface CommunityMatchupRow extends CommunityLookbackRow {
   characterId: number;
   opponentCharacterId: number;
   stageId: number; // 0 = every legal stage
@@ -34,7 +42,7 @@ export interface Quartiles {
   p75: number;
 }
 
-export interface CommunityMoveRow {
+export interface CommunityMoveRow extends CommunityLookbackRow {
   characterId: number;
   moveKey: string;
   characterGames: number;
@@ -51,7 +59,7 @@ export interface CommunityMoveRow {
   lCancelFail: number;
 }
 
-export interface CommunityExecutionRow {
+export interface CommunityExecutionRow extends CommunityLookbackRow {
   characterId: number; // -1 = every character
   games: number;
   contributors: number;
@@ -115,6 +123,15 @@ interface SnapshotPayload {
   stages?: CommunityStageRow[];
 }
 
+const normalizeLookbackDays = (value: unknown): CommunityLookbackDays =>
+  value === 30 || value === 90 || value === 180 || value === 365 ? value : null;
+
+const withLookback = <T extends { lookbackDays?: unknown }>(row: T): T & CommunityLookbackRow => ({
+  ...row,
+  // Snapshots published before lookback cohorts existed are the Max cohort.
+  lookbackDays: normalizeLookbackDays(row.lookbackDays),
+});
+
 export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -138,10 +155,10 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     playerGameCount: Number(data.player_game_count ?? 0),
     minContributors: Number(data.min_contributors ?? COMMUNITY_MIN_CONTRIBUTORS),
     minGames: Number(data.min_games ?? COMMUNITY_MIN_GAMES),
-    matchups: (payload.matchups ?? []).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
+    matchups: (payload.matchups ?? []).map(withLookback).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
     benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
-    moves: (payload.moves ?? []).filter((r) => playable(r.characterId)),
-    execution: (payload.execution ?? []).filter((r) => playable(r.characterId)),
+    moves: (payload.moves ?? []).map(withLookback).filter((r) => playable(r.characterId)),
+    execution: (payload.execution ?? []).map(withLookback).filter((r) => playable(r.characterId)),
     months: payload.months ?? [],
     characters: (payload.characters ?? []).filter((r) => playable(r.characterId)),
     stages: payload.stages ?? [],
@@ -201,6 +218,10 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
   const chars = new Map<number, { playerGames: number; wins: number; decided: number }>();
   const stages = new Map<number, { playerGames: number; seconds: number }>();
 
+  const refreshedAtMs = Date.now();
+  const inLookback = (game: ResolvedGame, lookbackDays: CommunityLookbackDays): boolean =>
+    lookbackDays === null || (game.date !== null && game.date.getTime() >= refreshedAtMs - lookbackDays * 86_400_000);
+
   for (const g of games) {
     const seconds = g.rec.durationFrames / 60;
     const char = chars.get(g.me.characterId) ?? { playerGames: 0, wins: 0, decided: 0 };
@@ -217,10 +238,13 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
       months.set(month, m);
     }
     if (g.isWin === null) continue;
-    for (const stageId of [0, g.rec.stageId]) for (const gameType of ["all", g.rec.gameType]) {
-      const key = `${g.me.characterId}:${g.opp.characterId}:${stageId}:${gameType}`;
-      const row = matchups.get(key) ?? { characterId: g.me.characterId, opponentCharacterId: g.opp.characterId, stageId, gameType, games: 0, wins: 0 };
-      row.games++; if (g.isWin) row.wins++; matchups.set(key, row);
+    for (const lookbackDays of COMMUNITY_LOOKBACK_DAYS) {
+      if (!inLookback(g, lookbackDays)) continue;
+      for (const stageId of [0, g.rec.stageId]) for (const gameType of ["all", g.rec.gameType]) {
+        const key = `${lookbackDays ?? "max"}:${g.me.characterId}:${g.opp.characterId}:${stageId}:${gameType}`;
+        const row = matchups.get(key) ?? { lookbackDays, characterId: g.me.characterId, opponentCharacterId: g.opp.characterId, stageId, gameType, games: 0, wins: 0 };
+        row.games++; if (g.isWin) row.wins++; matchups.set(key, row);
+      }
     }
   }
 
@@ -240,41 +264,48 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
   });
 
   const moves: CommunityMoveRow[] = [];
-  for (const characterId of chars.keys()) {
-    const selected = games.filter((g) => g.me.characterId === characterId);
-    const table = moveTable(selected);
-    for (const row of table.rows) moves.push({
-      characterId,
-      moveKey: row.key,
-      characterGames: table.covered,
-      contributors: 48,
-      attempts: row.attempts,
-      attemptGames: row.attempts === null ? 0 : table.covered,
-      landed: row.landed,
-      damage: row.damage,
-      kills: row.kills,
-      killPctSum: (row.avgKillPct ?? 0) * row.kills,
-      openings: row.openings,
-      openingDamage: (row.dmgPerOpening ?? 0) * row.openings,
-      lCancelSuccess: (row.lCancelPct ?? 0) * row.lCancelAttempts,
-      lCancelFail: row.lCancelAttempts - (row.lCancelPct ?? 0) * row.lCancelAttempts,
-    });
+  for (const lookbackDays of COMMUNITY_LOOKBACK_DAYS) {
+    for (const characterId of chars.keys()) {
+      const selected = games.filter((g) => g.me.characterId === characterId && inLookback(g, lookbackDays));
+      const table = moveTable(selected);
+      for (const row of table.rows) moves.push({
+        lookbackDays,
+        characterId,
+        moveKey: row.key,
+        characterGames: table.covered,
+        contributors: 48,
+        attempts: row.attempts,
+        attemptGames: row.attempts === null ? 0 : table.covered,
+        landed: row.landed,
+        damage: row.damage,
+        kills: row.kills,
+        killPctSum: (row.avgKillPct ?? 0) * row.kills,
+        openings: row.openings,
+        openingDamage: (row.dmgPerOpening ?? 0) * row.openings,
+        lCancelSuccess: (row.lCancelPct ?? 0) * row.lCancelAttempts,
+        lCancelFail: row.lCancelAttempts - (row.lCancelPct ?? 0) * row.lCancelAttempts,
+      });
+    }
   }
 
-  const execution = benchmarkChars.map((characterId): CommunityExecutionRow => {
-    const selected = characterId === -1 ? games : games.filter((g) => g.me.characterId === characterId);
-    const summary = executionSummary(selected, Number.MAX_SAFE_INTEGER);
-    return {
-      characterId,
-      games: selected.length,
-      contributors: 64,
-      lCancelSuccess: summary.lCancel,
-      groundTechSuccess: summary.groundTechSuccess,
-      groundTechInPlace: summary.groundTechInPlace,
-      groundTechIn: summary.groundTechIn,
-      groundTechAway: summary.groundTechAway,
-    };
-  });
+  const execution = COMMUNITY_LOOKBACK_DAYS.flatMap((lookbackDays) =>
+    benchmarkChars.map((characterId): CommunityExecutionRow => {
+      const selected = games.filter((g) =>
+        (characterId === -1 || g.me.characterId === characterId) && inLookback(g, lookbackDays));
+      const summary = executionSummary(selected, Number.MAX_SAFE_INTEGER);
+      return {
+        lookbackDays,
+        characterId,
+        games: selected.length,
+        contributors: 64,
+        lCancelSuccess: summary.lCancel,
+        groundTechSuccess: summary.groundTechSuccess,
+        groundTechInPlace: summary.groundTechInPlace,
+        groundTechIn: summary.groundTechIn,
+        groundTechAway: summary.groundTechAway,
+      };
+    }),
+  );
 
   const refreshedAt = games.at(-1)?.date?.toISOString() ?? new Date().toISOString();
   return {

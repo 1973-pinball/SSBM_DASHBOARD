@@ -8,6 +8,7 @@ import {
   fetchCommunitySnapshot,
   type CommunityBenchmarkRow,
   type CommunityExecutionRow,
+  type CommunityLookbackDays,
   type CommunityMoveRow,
   type CommunitySnapshot,
   type Quartiles,
@@ -31,6 +32,14 @@ const VIEWS: { id: CommunityView; label: string }[] = [
 ];
 
 const gameTypes = ["all", "ranked", "unranked", "direct", "offline"];
+
+const LOOKBACK_OPTIONS: { value: CommunityLookbackDays; label: string }[] = [
+  { value: 30, label: "1 month" },
+  { value: 90, label: "3 months" },
+  { value: 180, label: "6 months" },
+  { value: 365, label: "1 year" },
+  { value: null, label: "Max" },
+];
 
 const EMPTY_COMMUNITY_SNAPSHOT: CommunitySnapshot = {
   refreshedAt: "",
@@ -58,6 +67,7 @@ const selectCharacters = (snapshot: CommunitySnapshot): number[] =>
 
 export function Community({ games, isDemo, onOpenAccount }: Props) {
   const [view, setView] = useState<CommunityView>("matchups");
+  const [lookbackDays, setLookbackDays] = useState<CommunityLookbackDays>(null);
   const [snapshot, setSnapshot] = useState<CommunitySnapshot | null>(null);
   const [loading, setLoading] = useState(!isDemo);
   const [error, setError] = useState<string | null>(null);
@@ -130,34 +140,65 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
         ))}
       </div>
 
-      {view === "matchups" && <MatchupAtlas snapshot={displaySnapshot} />}
+      {view === "matchups" && <MatchupAtlas snapshot={displaySnapshot} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />}
       {view === "benchmarks" && <CommunityBenchmarks snapshot={displaySnapshot} games={games} />}
-      {view === "moves" && <MoveAtlas snapshot={displaySnapshot} />}
-      {view === "stages" && <StageLab snapshot={displaySnapshot} />}
+      {view === "moves" && <MoveAtlas snapshot={displaySnapshot} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />}
+      {view === "stages" && <StageLab snapshot={displaySnapshot} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />}
       {view === "pulse" && <CommunityPulse snapshot={displaySnapshot} />}
     </>
   );
 }
 
-function MatchupAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
-  const chars = selectCharacters(snapshot);
+interface LookbackProps {
+  lookbackDays: CommunityLookbackDays;
+  onLookbackChange: (days: CommunityLookbackDays) => void;
+}
+
+function LookbackSelect({ lookbackDays, onLookbackChange }: LookbackProps) {
+  return (
+    <label>
+      Days lookback
+      <select
+        value={lookbackDays ?? "max"}
+        onChange={(event) => {
+          const value = event.target.value;
+          onLookbackChange(value === "max" ? null : Number(value) as CommunityLookbackDays);
+        }}
+      >
+        {LOOKBACK_OPTIONS.map((option) => (
+          <option key={option.value ?? "max"} value={option.value ?? "max"}>{option.label}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+const hasLookback = (row: { lookbackDays: CommunityLookbackDays }, lookbackDays: CommunityLookbackDays): boolean =>
+  row.lookbackDays === lookbackDays;
+
+function MatchupAtlas({ snapshot, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot } & LookbackProps) {
+  const lookbackRows = snapshot.matchups.filter((row) => hasLookback(row, lookbackDays));
+  const chars = [...new Set(lookbackRows.map((row) => row.characterId))]
+    .sort((a, b) => charName(a).localeCompare(charName(b)));
   const [characterId, setCharacterId] = useState(chars[0] ?? -1);
+  const selectedCharacterId = chars.includes(characterId) ? characterId : chars[0] ?? -1;
   const [stageId, setStageId] = useState(0);
   const [gameType, setGameType] = useState("all");
-  const rows = snapshot.matchups
-    .filter((r) => r.characterId === characterId && r.stageId === stageId && r.gameType === gameType)
+  const rows = lookbackRows
+    .filter((r) => r.characterId === selectedCharacterId && r.stageId === stageId && r.gameType === gameType)
     .sort((a, b) => b.games - a.games);
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
         <div>
           <div className="eyebrow">Matchup Atlas</div>
-          <h2>{characterId === -1 ? "Character matchups across the qualifying field" : `${charName(characterId)} across the qualifying field`}</h2>
+          <h2>{selectedCharacterId === -1 ? "Character matchups across the qualifying field" : `${charName(selectedCharacterId)} across the qualifying field`}</h2>
         </div>
         <div className="community-controls">
-          <label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
+          <label>Character<select value={selectedCharacterId} onChange={(e) => setCharacterId(Number(e.target.value))}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
           <label>Stage<select value={stageId} onChange={(e) => setStageId(Number(e.target.value))}><option value={0}>All legal stages</option>{INCLUDED_STAGE_IDS.map((id) => <option key={id} value={id}>{stageName(id)}</option>)}</select></label>
           <label>Mode<select value={gameType} onChange={(e) => setGameType(e.target.value)}>{gameTypes.map((mode) => <option key={mode} value={mode}>{mode === "all" ? "All modes" : mode}</option>)}</select></label>
+          <LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} />
         </div>
       </div>
       {rows.length ? (
@@ -239,8 +280,10 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
     ? Math.max(25, Math.round(parsedLookback))
     : 100;
   const row = snapshot.benchmarks.find((b) => b.characterId === characterId);
-  const communityExecution = snapshot.execution.find((item) => item.characterId === characterId);
-  const communityMoves = characterId === -1 ? [] : snapshot.moves.filter((move) => move.characterId === characterId);
+  const communityExecution = snapshot.execution.find((item) => item.lookbackDays === null && item.characterId === characterId);
+  const communityMoves = characterId === -1
+    ? []
+    : snapshot.moves.filter((move) => move.lookbackDays === null && move.characterId === characterId);
   const selected = useMemo(
     () => {
       const matching = characterId === -1 ? games : games.filter((game) => game.me.characterId === characterId);
@@ -382,25 +425,28 @@ function CommunityMoveComparison({ community, own }: { community: CommunityMoveR
   );
 }
 
-function MoveAtlas({ snapshot }: { snapshot: CommunitySnapshot }) {
+function MoveAtlas({ snapshot, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot } & LookbackProps) {
+  const lookbackMoves = snapshot.moves.filter((row) => hasLookback(row, lookbackDays));
+  const lookbackExecution = snapshot.execution.filter((row) => hasLookback(row, lookbackDays));
   const chars = [...new Set([
-    ...snapshot.moves.map((m) => m.characterId),
-    ...snapshot.execution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
+    ...lookbackMoves.map((m) => m.characterId),
+    ...lookbackExecution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
   ])].sort((a, b) => charName(a).localeCompare(charName(b)));
   const [characterId, setCharacterId] = useState(chars[0] ?? -1);
-  const rows = snapshot.moves.filter((m) => m.characterId === characterId).sort((a, b) => b.damage - a.damage);
-  const execution = snapshot.execution.find((r) => r.characterId === characterId);
+  const selectedCharacterId = characterId === -1 || chars.includes(characterId) ? characterId : chars[0] ?? -1;
+  const rows = lookbackMoves.filter((m) => m.characterId === selectedCharacterId).sort((a, b) => b.damage - a.damage);
+  const execution = lookbackExecution.find((r) => r.characterId === selectedCharacterId);
   const totalDamage = rows.reduce((sum, r) => sum + r.damage, 0);
-  const cohort = characterId === -1 ? "the qualifying field" : `qualifying ${charName(characterId)} players`;
+  const cohort = selectedCharacterId === -1 ? "the qualifying field" : `qualifying ${charName(selectedCharacterId)} players`;
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">Move Atlas</div><h2>How {cohort} execute and create openings</h2></div>
-        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => setCharacterId(Number(e.target.value))}><option value={-1}>All characters</option>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label></div>
+        <div className="community-controls"><label>Character<select value={selectedCharacterId} onChange={(e) => setCharacterId(Number(e.target.value))}><option value={-1}>All characters</option>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} /></div>
       </div>
 
       <h3 className="table-subhead community-table-subhead">Execution profile</h3>
-      <CommunityExecutionTable row={execution} characterId={characterId} />
+      <CommunityExecutionTable row={execution} characterId={selectedCharacterId} />
 
       <h3 className="table-subhead community-table-subhead">Move effectiveness</h3>
       <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">Attempted / game</th><th className="data">Landed / game</th><th className="data">Damage share</th><th className="data">Avg dmg / hit</th><th className="data">Kills</th><th className="data">Avg kill %</th><th className="data">Contributors</th></tr></thead><tbody>
@@ -452,19 +498,24 @@ function MoveRowView({ row, totalDamage }: { row: CommunityMoveRow; totalDamage:
   return <tr><td>{moveGroupLabel(row.moveKey)}</td><td className="data">{row.attempts === null || row.attemptGames === 0 ? "—" : num(row.attempts / row.characterGames, 1)}</td><td className="data">{num(row.landed / row.characterGames, 1)}</td><td className="data">{pct(totalDamage ? row.damage / totalDamage : null, 0)}</td><td className="data">{row.landed ? num(row.damage / row.landed, 1) : "—"}</td><td className="data">{int(row.kills)}</td><td className="data">{row.kills ? `${num(row.killPctSum / row.kills, 0)}%` : "—"}</td><td className="data">{row.contributors}</td></tr>;
 }
 
-function StageLab({ snapshot }: { snapshot: CommunitySnapshot }) {
-  const overall = snapshot.matchups.filter((r) => r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
+function StageLab({ snapshot, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot } & LookbackProps) {
+  const overall = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays) && r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
   const first = overall[0];
   const [characterId, setCharacterId] = useState(first?.characterId ?? -1);
-  const opponents = overall.filter((r) => r.characterId === characterId);
+  const chars = [...new Set(overall.map((row) => row.characterId))]
+    .sort((a, b) => charName(a).localeCompare(charName(b)));
+  const selectedCharacterId = chars.includes(characterId) ? characterId : first?.characterId ?? -1;
+  const opponents = overall.filter((r) => r.characterId === selectedCharacterId);
   const [opponentId, setOpponentId] = useState(first?.opponentCharacterId ?? -1);
-  const rows = snapshot.matchups.filter((r) => r.characterId === characterId && r.opponentCharacterId === opponentId && r.stageId !== 0 && r.gameType === "all").sort((a, b) => b.winRate - a.winRate);
-  const chars = selectCharacters(snapshot);
+  const selectedOpponentId = opponents.some((row) => row.opponentCharacterId === opponentId)
+    ? opponentId
+    : opponents[0]?.opponentCharacterId ?? -1;
+  const rows = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays) && r.characterId === selectedCharacterId && r.opponentCharacterId === selectedOpponentId && r.stageId !== 0 && r.gameType === "all").sort((a, b) => b.winRate - a.winRate);
   return (
     <div className="panel">
       <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">Stage Lab</div><h2>Where a community matchup bends</h2></div>
-        <div className="community-controls"><label>Character<select value={characterId} onChange={(e) => { const id = Number(e.target.value); setCharacterId(id); const next = overall.find((r) => r.characterId === id); if (next) setOpponentId(next.opponentCharacterId); }}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><label>Opponent<select value={opponentId} onChange={(e) => setOpponentId(Number(e.target.value))}>{opponents.length === 0 && <option value={-1}>—</option>}{opponents.map((r) => <option key={r.opponentCharacterId} value={r.opponentCharacterId}>{charName(r.opponentCharacterId)}</option>)}</select></label></div>
+        <div className="community-controls"><label>Character<select value={selectedCharacterId} onChange={(e) => { const id = Number(e.target.value); setCharacterId(id); const next = overall.find((r) => r.characterId === id); if (next) setOpponentId(next.opponentCharacterId); }}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label><label>Opponent<select value={selectedOpponentId} onChange={(e) => setOpponentId(Number(e.target.value))}>{opponents.length === 0 && <option value={-1}>—</option>}{opponents.map((r) => <option key={r.opponentCharacterId} value={r.opponentCharacterId}>{charName(r.opponentCharacterId)}</option>)}</select></label><LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} /></div>
       </div>
       <div className="stage-lab-list">{rows.length ? rows.map((row) => <article key={row.stageId}><div><b>{stageName(row.stageId)}</b><span>{row.games.toLocaleString()} games · {row.contributors} contributors</span></div><div className="stage-rate"><span style={{ width: `${row.winRate * 100}%`, background: winRateColor(row.winRate) }} /><b>{pct(row.winRate)}</b></div></article>) : INCLUDED_STAGE_IDS.map((stageId) => <article key={stageId} className="community-placeholder"><div><b>{stageName(stageId)}</b><span>— games · — contributors</span></div><div className="stage-rate community-stage-placeholder"><b>—</b></div></article>)}</div>
       <div className="hint">Use this as a field-level counterpick signal, not a ruleset verdict. Player strength and stage-selection habits are not controlled here.</div>

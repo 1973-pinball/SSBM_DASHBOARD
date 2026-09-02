@@ -798,6 +798,10 @@ export default function App() {
   }, [dirHandle, syncFolder]);
 
   const onPickDirectory = useCallback(() => {
+    // Best-effort durability for libraries whose parsed cache is hundreds of
+    // megabytes. Browsers may decline silently; parsing and quota errors retain
+    // their existing behavior either way.
+    void navigator.storage?.persist?.().catch(() => false);
     void startPipeline(async () => {
       // startIn only applies the first time; afterwards the id remembers the last-picked folder.
       const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
@@ -813,6 +817,7 @@ export default function App() {
 
   const onPickFiles = useCallback(
     (list: FileList) => {
+      void navigator.storage?.persist?.().catch(() => false);
       // Materialize before the input value is reset. FileList is live in some
       // browsers, so deferring discovery can otherwise turn a real selection
       // into an empty one.
@@ -843,6 +848,7 @@ export default function App() {
    * on it and streams into the same progress button Refresh uses.
    */
   const onConnectFolder = useCallback(() => {
+    void navigator.storage?.persist?.().catch(() => false);
     if (!supportsFsAccess) {
       topbarFolderPickRef.current?.click();
       return;

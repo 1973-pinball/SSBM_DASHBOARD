@@ -2,7 +2,7 @@
   "name": "ssbm-stats",
   "private": true,
   "license": "MIT",
-  "version": "0.3.9",
+  "version": "0.4.0",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build && node scripts/render-seo-pages.mjs",
     "bench:parse": "node --experimental-strip-types scripts/benchmark-parse-workers.mjs",
+    "verify:large": "node scripts/verify-large-library.mjs",
     "verify:slpz": "node --experimental-strip-types scripts/verify-slpz.mjs",
     "lint": "oxlint",
     "preview": "vite preview",

@@ -351,7 +351,10 @@ function installStreamingFrameSummary(game: SlippiGame): StreamingFrameControlle
     return null;
 
   const summary = new StreamingFrameSummary();
-  const FRAME_BATCH = 8192;
+  // Four thousand frames is about a minute of play. Keeping the batch modest
+  // materially lowers each worker's live frame-object peak on long imports;
+  // the one-frame lookback below preserves identical results across flushes.
+  const FRAME_BATCH = 4096;
   let pendingFrames = 0;
   let latestFinalized = Frames.FIRST - 1;
   let summaryNextFrame = Frames.FIRST;

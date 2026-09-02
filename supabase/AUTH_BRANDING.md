@@ -52,7 +52,9 @@ an available vanity subdomain.
 
 ## Community setup
 
-Run `schema.sql`, then `community.sql`. Create a Supabase Cron job that runs:
+Run `schema.sql` before deploying the `0.4.0` client (incremental sync requires
+the new `game_records.updated_at` column), then run `community.sql`. Create a
+Supabase Cron job that runs:
 
 ```sql
 set statement_timeout = '10min';

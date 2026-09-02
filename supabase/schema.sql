@@ -20,11 +20,33 @@ create table if not exists public.game_records (
 -- replay folder yields a second row for a game already here. Pushes skip a
 -- record whose game_key is already present, which keeps those copies out.
 alter table public.game_records add column if not exists game_key text;
+alter table public.game_records add column if not exists updated_at timestamptz not null default now();
+
+-- Incremental clients use this server timestamp as their pull cursor. An
+-- upsert that refreshes a stale stats payload must move the row past every
+-- device's prior cursor; inserts receive the column default above.
+create or replace function public.touch_game_record_updated_at()
+returns trigger
+language plpgsql
+set search_path = public, pg_temp
+as $$
+begin
+  new.updated_at := now();
+  return new;
+end;
+$$;
+
+drop trigger if exists game_records_touch_updated_at on public.game_records;
+create trigger game_records_touch_updated_at
+before update on public.game_records
+for each row execute function public.touch_game_record_updated_at();
 
 create index if not exists game_records_played_at_idx
   on public.game_records (user_id, played_at desc);
 create index if not exists game_records_game_key_idx
   on public.game_records (user_id, game_key);
+create index if not exists game_records_updated_at_idx
+  on public.game_records (user_id, updated_at, id);
 
 -- One row per Slippi account the user plays on. sort_order fixes the display
 -- order (the first account is the primary shown on the player card); label is

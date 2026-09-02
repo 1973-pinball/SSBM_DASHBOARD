@@ -530,10 +530,54 @@ begin
 end;
 $$;
 
+-- game_records arrive in 500-row upserts. A row trigger used to rewrite the
+-- same dirty-user row 500 times per request (20,000 times for a large first
+-- sync), generating avoidable WAL and compute. Transition tables reduce that
+-- to one upsert per affected user per SQL statement.
+create or replace function public.mark_community_changed_game_users_dirty()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  insert into public.community_dirty_users (user_id, queued_at)
+  select distinct user_id, now() from changed_game_rows
+  on conflict (user_id) do update set queued_at = excluded.queued_at;
+  return null;
+end;
+$$;
+
+create or replace function public.mark_community_deleted_game_users_dirty()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+begin
+  insert into public.community_dirty_users (user_id, queued_at)
+  select distinct user_id, now() from deleted_game_rows
+  on conflict (user_id) do update set queued_at = excluded.queued_at;
+  return null;
+end;
+$$;
+
 drop trigger if exists community_dirty_game_records on public.game_records;
-create trigger community_dirty_game_records
-after insert or update or delete on public.game_records
-for each row execute function public.mark_community_user_dirty();
+drop trigger if exists community_dirty_game_records_insert on public.game_records;
+drop trigger if exists community_dirty_game_records_update on public.game_records;
+drop trigger if exists community_dirty_game_records_delete on public.game_records;
+create trigger community_dirty_game_records_insert
+after insert on public.game_records
+referencing new table as changed_game_rows
+for each statement execute function public.mark_community_changed_game_users_dirty();
+create trigger community_dirty_game_records_update
+after update on public.game_records
+referencing new table as changed_game_rows
+for each statement execute function public.mark_community_changed_game_users_dirty();
+create trigger community_dirty_game_records_delete
+after delete on public.game_records
+referencing old table as deleted_game_rows
+for each statement execute function public.mark_community_deleted_game_users_dirty();
 
 drop trigger if exists community_dirty_user_codes on public.user_codes;
 create trigger community_dirty_user_codes
@@ -546,6 +590,8 @@ after insert or update or delete on public.community_consent
 for each row execute function public.mark_community_user_dirty();
 
 revoke all on function public.mark_community_user_dirty() from public, anon, authenticated;
+revoke all on function public.mark_community_changed_game_users_dirty() from public, anon, authenticated;
+revoke all on function public.mark_community_deleted_game_users_dirty() from public, anon, authenticated;
 
 create or replace function public.refresh_community_user_rollup(target_user uuid)
 returns void
@@ -614,6 +660,7 @@ base as materialized (
   select
     user_id,
     private_game_key,
+    (data->>'playedAt')::timestamptz as played_at,
     date_trunc('month', (data->>'playedAt')::timestamptz)::date as month,
     (data->>'durationFrames')::numeric / 60.0 as duration_seconds,
     (data->>'stageId')::int as stage_id,
@@ -638,20 +685,33 @@ base as materialized (
     coalesce(own_side->'moveStats', '{}'::jsonb) as move_stats
   from deduped
 ),
+periods(lookback_days) as (
+  values (30::int), (90::int), (180::int), (365::int), (null::int)
+),
+windowed as materialized (
+  select b.*, p.lookback_days
+  from base b
+  cross join periods p
+  where p.lookback_days is null
+     or b.played_at >= (
+       ((now() at time zone 'UTC')::date - p.lookback_days)::timestamp at time zone 'UTC'
+     )
+),
 active as (
   select count(*)::bigint as games from base
 ),
 matchup_rollup as (
   select
+    lookback_days,
     character_id,
     opponent_character_id,
     coalesce(stage_id, 0)::int as stage_id,
     coalesce(game_type, 'all') as game_type,
     count(*)::bigint as games,
     sum(win)::bigint as wins
-  from base
+  from windowed
   where win is not null
-  group by grouping sets (
+  group by lookback_days, grouping sets (
     (character_id, opponent_character_id),
     (character_id, opponent_character_id, stage_id),
     (character_id, opponent_character_id, game_type),
@@ -674,6 +734,7 @@ benchmark_rollup as (
 ),
 execution_rollup as (
   select
+    lookback_days,
     (case when grouping(character_id) = 1 then -1 else character_id end)::int as character_id,
     count(*)::bigint as games,
     sum(l_cancel_success) as l_cancel_success,
@@ -682,17 +743,18 @@ execution_rollup as (
     sum(tech_in) as tech_in,
     sum(tech_away) as tech_away,
     sum(tech_missed) as tech_missed
-  from base
+  from windowed
   where has_techs and character_id between 0 and 25
-  group by grouping sets ((character_id), ())
+  group by lookback_days, grouping sets ((character_id), ())
 ),
 character_totals as (
-  select character_id, count(*)::bigint as games
-  from base
-  group by character_id
+  select lookback_days, character_id, count(*)::bigint as games
+  from windowed
+  group by lookback_days, character_id
 ),
 move_per_game as (
   select
+    b.lookback_days,
     b.private_game_key,
     b.character_id,
     case
@@ -732,12 +794,13 @@ move_per_game as (
     sum(coalesce((m.value->>'lcFail')::numeric, 0)) as l_cancel_fail,
     sum((m.value->>'attempts')::numeric) filter (where m.value ? 'attempts') as attempts,
     bool_or(m.value ? 'attempts') as has_attempts
-  from base b
+  from windowed b
   cross join lateral jsonb_each(b.move_stats) m
-  group by b.private_game_key, b.character_id, move_key
+  group by b.lookback_days, b.private_game_key, b.character_id, move_key
 ),
 move_rollup as (
   select
+    m.lookback_days,
     m.character_id,
     m.move_key,
     c.games as character_games,
@@ -753,8 +816,10 @@ move_rollup as (
     sum(m.l_cancel_success) as l_cancel_success,
     sum(m.l_cancel_fail) as l_cancel_fail
   from move_per_game m
-  join character_totals c on c.character_id = m.character_id
-  group by m.character_id, m.move_key, c.games
+  join character_totals c
+    on c.character_id = m.character_id
+   and c.lookback_days is not distinct from m.lookback_days
+  group by m.lookback_days, m.character_id, m.move_key, c.games
 ),
 month_rollup as (
   select
@@ -770,12 +835,13 @@ month_rollup as (
 ),
 character_rollup as (
   select
+    lookback_days,
     character_id,
     count(*)::bigint as games,
     sum(win) filter (where win is not null)::bigint as wins,
     count(win)::bigint as decided
-  from base
-  group by character_id
+  from windowed
+  group by lookback_days, character_id
 ),
 stage_rollup as (
   select stage_id, count(*)::bigint as games, sum(duration_seconds) as duration_seconds
@@ -785,6 +851,7 @@ stage_rollup as (
 assembled as (
   select jsonb_build_object(
     'matchups', coalesce((select jsonb_agg(jsonb_build_object(
+      'lookbackDays', lookback_days,
       'characterId', character_id, 'opponentCharacterId', opponent_character_id,
       'stageId', stage_id, 'gameType', game_type, 'games', games, 'wins', wins
     )) from matchup_rollup), '[]'::jsonb),
@@ -794,12 +861,14 @@ assembled as (
       'inputsPerMinute', inputs_per_minute
     )) from benchmark_rollup), '[]'::jsonb),
     'execution', coalesce((select jsonb_agg(jsonb_build_object(
+      'lookbackDays', lookback_days,
       'characterId', character_id, 'games', games,
       'lCancelSuccess', l_cancel_success, 'lCancelFail', l_cancel_fail,
       'techInPlace', tech_in_place, 'techIn', tech_in,
       'techAway', tech_away, 'techMissed', tech_missed
     )) from execution_rollup), '[]'::jsonb),
     'moves', coalesce((select jsonb_agg(jsonb_build_object(
+      'lookbackDays', lookback_days,
       'characterId', character_id, 'moveKey', move_key,
       'characterGames', character_games, 'moveGames', move_games,
       'attempts', attempts, 'attemptGames', attempt_games,
@@ -813,6 +882,7 @@ assembled as (
       'ranked', ranked, 'unranked', unranked, 'direct', direct, 'offline', offline
     )) from month_rollup), '[]'::jsonb),
     'characters', coalesce((select jsonb_agg(jsonb_build_object(
+      'lookbackDays', lookback_days,
       'characterId', character_id, 'games', games,
       'wins', coalesce(wins, 0), 'decided', decided
     )) from character_rollup), '[]'::jsonb),
@@ -845,6 +915,20 @@ declare
   dirty_user uuid;
   changed boolean := false;
 begin
+  -- Rolling cohorts age even when nobody uploads or edits a game. Queue one
+  -- refresh per contributor on the first cron run of each UTC day so a game
+  -- that crosses a lookback boundary leaves the private cache on schedule.
+  if exists (
+    select 1
+    from public.community_snapshot
+    where snapshot_id = 'current'
+      and (refreshed_at at time zone 'UTC')::date < (now() at time zone 'UTC')::date
+  ) then
+    insert into public.community_dirty_users (user_id, queued_at)
+    select user_id, now() from public.community_consent
+    on conflict (user_id) do update set queued_at = excluded.queued_at;
+  end if;
+
   for dirty_user in
     select d.user_id
     from public.community_dirty_users d
@@ -873,6 +957,7 @@ begin
   matchup_user as (
     select
       r.user_id,
+      (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'opponentCharacterId')::int as opponent_character_id,
       (j->>'stageId')::int as stage_id,
@@ -883,11 +968,11 @@ begin
     cross join lateral jsonb_array_elements(coalesce(r.payload->'matchups', '[]'::jsonb)) j
   ),
   matchup_rollup as (
-    select character_id, opponent_character_id, stage_id, game_type,
+    select lookback_days, character_id, opponent_character_id, stage_id, game_type,
            sum(games)::bigint as games, count(*)::int as contributors,
            sum(wins)::bigint as wins
     from matchup_user, params
-    group by character_id, opponent_character_id, stage_id, game_type,
+    group by lookback_days, character_id, opponent_character_id, stage_id, game_type,
              params.min_contributors, params.min_games
     having sum(games) >= params.min_games and count(*) >= params.min_contributors
   ),
@@ -927,6 +1012,7 @@ begin
   execution_user as (
     select
       r.user_id,
+      (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'games')::bigint as games,
       (j->>'lCancelSuccess')::numeric as l_cancel_success,
@@ -940,6 +1026,7 @@ begin
   ),
   execution_rollup as (
     select
+      lookback_days,
       character_id,
       sum(games)::bigint as games,
       count(*)::int as contributors,
@@ -960,12 +1047,13 @@ begin
         then 100.0 * sum(tech_away) / sum(tech_in_place + tech_in + tech_away)
       end as ground_tech_away
     from execution_user, params
-    group by character_id, params.min_contributors, params.min_games
+    group by lookback_days, character_id, params.min_contributors, params.min_games
     having sum(games) >= params.min_games and count(*) >= params.min_contributors
   ),
   character_user as (
     select
       r.user_id,
+      (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'games')::bigint as games,
       (j->>'wins')::bigint as wins,
@@ -974,13 +1062,14 @@ begin
     cross join lateral jsonb_array_elements(coalesce(r.payload->'characters', '[]'::jsonb)) j
   ),
   character_totals as (
-    select character_id, sum(games)::bigint as games
+    select lookback_days, character_id, sum(games)::bigint as games
     from character_user
-    group by character_id
+    group by lookback_days, character_id
   ),
   move_user as (
     select
       r.user_id,
+      (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       j->>'moveKey' as move_key,
       (j->>'moveGames')::bigint as move_games,
@@ -999,6 +1088,7 @@ begin
   ),
   move_rollup as (
     select
+      m.lookback_days,
       m.character_id,
       m.move_key,
       c.games as character_games,
@@ -1015,9 +1105,11 @@ begin
       sum(m.l_cancel_fail) as l_cancel_fail,
       sum(m.move_games)::bigint as move_games
     from move_user m
-    join character_totals c on c.character_id = m.character_id
+    join character_totals c
+      on c.character_id = m.character_id
+     and c.lookback_days is not distinct from m.lookback_days
     cross join params
-    group by m.character_id, m.move_key, c.games, params.min_contributors, params.min_games
+    group by m.lookback_days, m.character_id, m.move_key, c.games, params.min_contributors, params.min_games
     having count(*) >= params.min_contributors
        and sum(m.move_games) >= params.min_games
        and c.games >= params.min_games
@@ -1057,6 +1149,7 @@ begin
       sum(wins)::bigint as wins,
       sum(decided)::bigint as decided
     from character_user, params
+    where lookback_days is null
     group by character_id, params.min_contributors, params.min_games
     having sum(games) >= params.min_games and count(*) >= params.min_contributors
   ),
@@ -1082,6 +1175,7 @@ begin
   assembled as (
     select jsonb_build_object(
       'matchups', coalesce((select jsonb_agg(jsonb_build_object(
+        'lookbackDays', lookback_days,
         'characterId', character_id, 'opponentCharacterId', opponent_character_id,
         'stageId', stage_id, 'gameType', game_type,
         'games', public.pub_bucket(games, 25),
@@ -1098,6 +1192,7 @@ begin
         'inputsPerMinute', case when ipm_q is null then null else jsonb_build_object('p25', round(ipm_q[1], 1), 'p50', round(ipm_q[2], 1), 'p75', round(ipm_q[3], 1)) end
       ) order by character_id) from benchmark_rollup), '[]'::jsonb),
       'execution', coalesce((select jsonb_agg(jsonb_build_object(
+        'lookbackDays', lookback_days,
         'characterId', character_id, 'games', public.pub_bucket(games, 25),
         'contributors', public.pub_bucket(contributors, 5),
         'lCancelSuccess', round(l_cancel_success, 1),
@@ -1107,6 +1202,7 @@ begin
         'groundTechAway', round(ground_tech_away, 1)
       ) order by character_id) from execution_rollup), '[]'::jsonb),
       'moves', coalesce((select jsonb_agg(jsonb_build_object(
+        'lookbackDays', lookback_days,
         'characterId', character_id, 'moveKey', move_key,
         'characterGames', public.pub_bucket(character_games, 25),
         'contributors', public.pub_bucket(contributors, 5),
@@ -1159,11 +1255,12 @@ $$;
 revoke all on function public.refresh_community_snapshot() from public, anon, authenticated;
 grant execute on function public.refresh_community_snapshot() to service_role;
 
--- Seed the one-time cache backfill. Re-running this file intentionally queues
--- one per-user refresh, not one monolithic all-game rebuild.
-insert into public.community_dirty_users (user_id)
-select user_id from public.community_consent
-on conflict (user_id) do nothing;
+-- Seed the cache backfill. Re-running this file deliberately requeues every
+-- user so changes to the private rollup shape (such as lookback cohorts) are
+-- populated before the next public snapshot is assembled.
+insert into public.community_dirty_users (user_id, queued_at)
+select user_id, now() from public.community_consent
+on conflict (user_id) do update set queued_at = excluded.queued_at;
 
 -- First run / manual refresh:
 --   set statement_timeout = '10min';
