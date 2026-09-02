@@ -28,6 +28,7 @@ begin
     select packs.user_id, entry.key as game_key, entry.value as data
     from public.game_record_packs packs
     cross join lateral jsonb_each(packs.records) entry
+    where packs.user_id = target_user
   ) g'
     );
     execute rollup_definition;

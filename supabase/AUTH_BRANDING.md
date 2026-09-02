@@ -69,3 +69,9 @@ function itself is too late to extend the caller's timer. Later refreshes return
 immediately when nothing changed and replace only the private rollup for a user
 whose games, account codes, or consent changed. The refresh remains deliberately
 not callable by the PWA.
+
+An existing project whose Community refresh fails while writing `pgsql_tmp`
+should apply `community-rollup-temp-upgrade.sql` before retrying. That upgrade
+removes the wide five-cohort materialization from the installed per-user
+function without modifying games, cached rollups, or the pending queue. Fresh
+installs already receive the optimized definition from `community.sql`.

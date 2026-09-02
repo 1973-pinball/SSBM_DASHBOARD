@@ -620,7 +620,10 @@ with
 params as (
   select '2026-08-24'::text as consent_version
 ),
-eligible as (
+-- This source is used once for scalar stats and once for moves. Inlining makes
+-- PostgreSQL project only the fields each path needs instead of spooling the
+-- full GameRecord JSON between them.
+eligible as not materialized (
   select
     g.user_id,
     coalesce(
@@ -638,6 +641,7 @@ eligible as (
     select packs.user_id, entry.key as game_key, entry.value as data
     from public.game_record_packs packs
     cross join lateral jsonb_each(packs.records) entry
+    where packs.user_id = target_user
   ) g
   cross join params
   join public.community_consent consent
@@ -670,11 +674,10 @@ eligible as (
       join public.user_codes c on c.user_id = g.user_id and c.code = p->>'connectCode'
     )
 ),
-deduped as (
-  select distinct on (user_id, private_game_key, own_side->>'connectCode') *
-  from eligible
-  order by user_id, private_game_key, own_side->>'connectCode'
-),
+-- All writers place a content-derived game key in its deterministic bucket.
+-- A JSON object has unique keys, so normal packed data has no duplicate row to
+-- remove here; sorting the full payload through DISTINCT only creates a large
+-- temporary file left over from the legacy row-table plan.
 base as materialized (
   select
     user_id,
@@ -700,15 +703,31 @@ base as materialized (
     coalesce((own_side->'techs'->>'missed')::numeric, 0) as tech_missed,
     nullif(own_side->>'openingsPerKill', '')::numeric as openings_per_kill,
     nullif(own_side->>'damagePerOpening', '')::numeric as damage_per_opening,
-    nullif(own_side->>'inputsPerMinute', '')::numeric as inputs_per_minute,
-    coalesce(own_side->'moveStats', '{}'::jsonb) as move_stats
-  from deduped
+    nullif(own_side->>'inputsPerMinute', '')::numeric as inputs_per_minute
+  from eligible
 ),
 periods(lookback_days) as (
   values (30::int), (90::int), (180::int), (365::int), (null::int)
 ),
+-- Keep this materialized because five downstream aggregates reuse it, but do
+-- not carry move_stats through it. That JSON is by far the widest value in a
+-- game row; copying it into every lookback cohort can fill pgsql_tmp for a
+-- large library before any aggregate is produced.
 windowed as materialized (
-  select b.*, p.lookback_days
+  select
+    p.lookback_days,
+    b.character_id,
+    b.opponent_character_id,
+    b.stage_id,
+    b.game_type,
+    b.win,
+    b.l_cancel_success,
+    b.l_cancel_fail,
+    b.has_techs,
+    b.tech_in_place,
+    b.tech_in,
+    b.tech_away,
+    b.tech_missed
   from base b
   cross join periods p
   where p.lookback_days is null
@@ -771,11 +790,15 @@ character_totals as (
   from windowed
   group by lookback_days, character_id
 ),
-move_per_game as (
+-- Collapse raw action ids into the public move categories once per game. The
+-- old plan crossed games with all five periods before jsonb_each(), expanding
+-- and grouping the same move table up to five times. Only these narrow rows
+-- need to be copied into the lookback cohorts.
+move_per_game_base as (
   select
-    b.lookback_days,
+    (b.data->>'playedAt')::timestamptz as played_at,
     b.private_game_key,
-    b.character_id,
+    (b.own_side->>'characterId')::int as character_id,
     case
       when m.key::int in (2,3,4,5) then 'jab'
       when m.key::int = 6 then 'dash'
@@ -813,9 +836,33 @@ move_per_game as (
     sum(coalesce((m.value->>'lcFail')::numeric, 0)) as l_cancel_fail,
     sum((m.value->>'attempts')::numeric) filter (where m.value ? 'attempts') as attempts,
     bool_or(m.value ? 'attempts') as has_attempts
-  from windowed b
-  cross join lateral jsonb_each(b.move_stats) m
-  group by b.lookback_days, b.private_game_key, b.character_id, move_key
+  from eligible b
+  cross join lateral jsonb_each(coalesce(b.own_side->'moveStats', '{}'::jsonb)) m
+  group by (b.data->>'playedAt')::timestamptz, b.private_game_key,
+           (b.own_side->>'characterId')::int, move_key
+),
+move_per_game as (
+  select
+    p.lookback_days,
+    m.private_game_key,
+    m.character_id,
+    m.move_key,
+    m.landed,
+    m.damage,
+    m.kills,
+    m.kill_pct_sum,
+    m.openings,
+    m.opening_damage,
+    m.l_cancel_success,
+    m.l_cancel_fail,
+    m.attempts,
+    m.has_attempts
+  from move_per_game_base m
+  cross join periods p
+  where p.lookback_days is null
+     or m.played_at >= (
+       ((now() at time zone 'UTC')::date - p.lookback_days)::timestamp at time zone 'UTC'
+     )
 ),
 move_rollup as (
   select
