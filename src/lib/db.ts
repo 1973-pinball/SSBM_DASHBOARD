@@ -284,6 +284,19 @@ export async function cachedIds(): Promise<Set<string>> {
   return new Set(keys);
 }
 
+/**
+ * Make specific cached file versions eligible for one explicit repair pass.
+ *
+ * Only the id-only `seen` marker is removed here. Keeping the old packed row
+ * visible avoids making the dashboard lose historical headline stats while
+ * the replay is being reparsed; the current replacement wins dedup immediately
+ * and the next startup's prune repacks the duplicate away.
+ */
+export async function forgetCachedRecordIds(ids: Iterable<string>): Promise<void> {
+  const unique = [...new Set(ids)];
+  if (unique.length > 0) await db.seen.bulkDelete(unique);
+}
+
 export async function putRecords(records: GameRecord[]): Promise<void> {
   if (!records.length) return;
   await db.transaction("rw", db.packs, db.seen, async () => {

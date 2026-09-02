@@ -117,14 +117,13 @@ const UI_RECORDS_MS = 1000;
 const UI_PROGRESS_MS = 250;
 
 /**
- * Above this size, replacing header previews with full ~5 KB records while the
- * parse is still running creates more pressure than useful feedback: every
- * delivery makes React rebuild the full id map, content dedup, resolution, and
- * sorted game arrays. The header pass already keeps the dashboard useful. Full
- * records still commit continuously to IndexedDB and every caller reconciles
- * from storage once the run finishes.
+ * Above this size, either preview or full-record delivery creates more pressure
+ * than useful feedback: every delivery makes React rebuild the full id map,
+ * content dedup, resolution, and sorted game arrays. These runs skip the
+ * preview entirely, commit full records continuously to IndexedDB, and let
+ * every caller reconcile from storage once the run finishes.
  */
-const LARGE_IMPORT_MIN = 10_000;
+const LARGE_IMPORT_MIN = 5_000;
 
 /** Parsed records that could not be written to IndexedDB (quota, private browsing). */
 export class RecordSaveError extends Error {
@@ -147,7 +146,7 @@ const HEADER_PASS_MIN = 250;
 /**
  * Parse all not-yet-cached files across a pool of web workers.
  *
- * A large import runs two passes over the same queue. The first reads only each
+ * A medium import runs two passes over the same queue. The first reads only each
  * replay's settings, metadata and game-end blocks — never a frame, which is
  * where nearly all of the cost of a parse lives — and streams the results to
  * the dashboard as a preview without caching them, filling in game counts, win
@@ -182,11 +181,12 @@ export async function runParsePipeline(
   const queue = files
     .filter((f) => !cached.has(f.id))
     .sort((a, b) => b.file.lastModified - a.file.lastModified);
-  // Large imports get the preview pass; below the threshold it is pure overhead
-  // (see HEADER_PASS_MIN), and an incremental rescan of a handful of new files
-  // should just parse them.
-  const willPreview = queue.length >= HEADER_PASS_MIN;
   const largeImport = queue.length >= LARGE_IMPORT_MIN;
+  // A preview makes medium imports feel instant, but at several thousand
+  // pending files it becomes a second in-memory library and a second full walk
+  // of the folder. Memory-safe runs show progress and perform only the
+  // authoritative pass.
+  const willPreview = queue.length >= HEADER_PASS_MIN && !largeImport;
   const progress: ParseProgress = {
     pass: willPreview ? "header" : "full",
     total: willPreview ? queue.length : files.length,
@@ -209,15 +209,14 @@ export async function runParsePipeline(
   // memory bandwidth still flattens before every logical core is busy. A
   // two-round, 240-game local benchmark of the final bounded parser measured
   // 44.7/52.5/54.8 games/s at 4/6/8 workers respectively, so eight is the
-  // measured ceiling rather than a guess at "all cores". Four remains the
-  // low-memory baseline. A very large run stays at four even on a high-memory
-  // machine: its sustained heap/GC behavior matters more than the modest 6/8
-  // worker throughput gain. Browsers that withhold `deviceMemory` also stay on
-  // the conservative tier rather than being assumed to have 8+ GB.
+  // measured ceiling rather than a guess at "all cores". A memory-safe import
+  // stays at three workers; removing the preview pass recovers far more time
+  // than the fourth worker was worth while keeping another parser heap out of
+  // the tab. Browsers that withhold `deviceMemory` remain conservative too.
   const cores = navigator.hardwareConcurrency || 4;
   const memoryGb = navigator.deviceMemory ?? 0;
   const hasMemory = memoryGb >= 8;
-  const workerCap = largeImport ? 4 : hasMemory && cores >= 8 ? 8 : hasMemory && cores >= 6 ? 6 : 4;
+  const workerCap = largeImport ? 3 : hasMemory && cores >= 8 ? 8 : hasMemory && cores >= 6 ? 6 : 4;
   const workerCount = Math.max(1, Math.min(cores, workerCap));
   interface Slot {
     worker: Worker;
@@ -356,10 +355,10 @@ export async function runParsePipeline(
           const res = e.data as WorkerResult;
           if (res.ok && res.record) {
             if (persist) pendingDb.push(res.record);
-            // Header rows are compact and are the useful live preview. On a
-            // large full pass, keep the authoritative records out of React's
-            // whole-library recompute loop; the final storage reconciliation
-            // installs them all at once.
+            // Medium runs stream their useful header preview and full records.
+            // A memory-safe run has no header pass and keeps authoritative rows
+            // out of React's whole-library recompute loop; the final storage
+            // reconciliation installs them all at once.
             if (!persist || !largeImport) pendingUi.push(res.record);
           } else if (res.readFailed) {
             // The read is the worker's job now, so its failures arrive here
@@ -428,7 +427,7 @@ export async function runParsePipeline(
   };
 
   try {
-    // Preview pass — large imports only, see HEADER_PASS_MIN. Its counters were
+    // Preview pass — medium imports only, see HEADER_PASS_MIN. Its counters were
     // set above so the very first frame the user sees is already correct.
     if (willPreview) {
       await runPass("header");

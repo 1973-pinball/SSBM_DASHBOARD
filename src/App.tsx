@@ -8,7 +8,7 @@ import {
   RecordSaveError,
   type DiscoveredFile,
 } from "./lib/pool";
-import { allRecords, clearAll, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
+import { allRecords, clearAll, forgetCachedRecordIds, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
 import { dedupeRecords } from "./lib/dedupe";
 import { generateDemoRecords, DEMO_ACCOUNTS } from "./lib/demo";
@@ -593,7 +593,7 @@ export default function App() {
    * added since the last scan actually parse.
    */
   const syncFolder = useCallback(
-    async (handle: FileSystemDirectoryHandle) => {
+    async (handle: FileSystemDirectoryHandle, repairIds: readonly string[] = []) => {
       if (scanBusy.current) return;
       scanBusy.current = true;
       lastFolderSyncAt.current = Date.now();
@@ -607,6 +607,12 @@ export default function App() {
       // final tally through the callback, and we need it after the await.
       const tally: { last: ParseProgress | null } = { last: null };
       try {
+        // "Refresh execution stats" is a forced schema repair, not an ordinary
+        // new-file scan. A stale row can still have an id in `seen` (for
+        // example when a cloud restore raced an earlier migration); forgetting
+        // that marker first prevents the scanner from instantly skipping the
+        // very replay the button promised to update.
+        if (repairIds.length > 0) await forgetCachedRecordIds(repairIds);
         const files = await discoverFromHandle(handle);
         await runParsePipeline(
           files,
@@ -787,7 +793,12 @@ export default function App() {
         let perm = await dirHandle.queryPermission({ mode: "read" });
         if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
         setFolderPermission(perm);
-        if (perm === "granted") await syncFolder(dirHandle);
+        if (perm === "granted") {
+          const repairIds = records
+            .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
+            .map((rec) => rec.id);
+          await syncFolder(dirHandle, repairIds);
+        }
       } catch (err) {
         console.error(err);
         if (!(err instanceof DOMException && err.name === "AbortError")) {
@@ -795,7 +806,7 @@ export default function App() {
         }
       }
     })();
-  }, [dirHandle, syncFolder]);
+  }, [dirHandle, records, syncFolder]);
 
   const onPickDirectory = useCallback(() => {
     // Best-effort durability for libraries whose parsed cache is hundreds of
@@ -860,7 +871,10 @@ export default function App() {
         setFolderPermission("granted");
         await setDirHandle(dir);
         autoSyncDone.current = true;
-        await syncFolder(dir);
+        const repairIds = records
+          .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
+          .map((rec) => rec.id);
+        await syncFolder(dir, repairIds);
       } catch (err) {
         // AbortError is the user closing the picker — not a failure.
         if (err instanceof DOMException && err.name === "AbortError") return;
@@ -868,7 +882,7 @@ export default function App() {
         setPipelineError("Couldn't open that replay folder — try again, or use \"Change folder\" to start over.");
       }
     })();
-  }, [supportsFsAccess, syncFolder]);
+  }, [supportsFsAccess, records, syncFolder]);
 
   const onDemo = useCallback(() => {
     setIsDemo(true);

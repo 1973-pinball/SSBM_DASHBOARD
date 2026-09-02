@@ -335,7 +335,17 @@ export async function syncRecords(
     };
   }
 
-  const remote = emptyRemoteIndex(known.ids);
+  // Saved knowledge is an optimization, never authority. If the local copy of
+  // an id is visibly stale, do not let a historical acknowledgement claim its
+  // remote payload is current. Removing it makes a successfully reparsed copy
+  // a candidate on the next sync, even if an older client polluted the cache.
+  const staleLocalIds = new Set(
+    local
+      .filter((rec) => hasFullStats(rec) && !hasCurrentStats(rec))
+      .map((rec) => rec.id),
+  );
+  const trustedKnownIds = [...known.ids].filter((id) => !staleLocalIds.has(id));
+  const remote = emptyRemoteIndex(trustedKnownIds);
   const changes = await remoteChangesSince(known.cursor);
   mergeRemoteIndex(remote, changes);
   const pulled = await pullMissing(local, changes);
