@@ -2,7 +2,7 @@
 --
 -- Do NOT run this with the initial migration. Run it only after:
 --   1. schema.sql and pack-migration.sql completed;
---   2. both verification counts in pack-migration.sql matched;
+--   2. both verification counts in pack-verify.sql matched;
 --   3. the packed-storage client was deployed and a cloud restore was tested;
 --   4. you explicitly intend to remove the legacy row-per-game copy.
 --
@@ -12,6 +12,7 @@
 
 begin;
 set local statement_timeout = '15min';
+set local lock_timeout = '2min';
 
 -- Prevent an old service-worker bundle from refilling the legacy table after
 -- it has been emptied. SELECT remains for a clear empty response; writes fail
