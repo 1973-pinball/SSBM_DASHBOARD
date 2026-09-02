@@ -284,8 +284,11 @@ export type ParsePassMode = "header" | "full";
 export interface ParseProgress {
   /** Counts restart between passes, so read them against `pass`. */
   pass: ParsePassMode;
+  /** Files this pass must actually process; cached files are excluded. */
   total: number;
+  /** Files attempted in this pass, including failures and retryable skips. */
   done: number;
+  /** Files omitted before this pass because their exact version is cached. */
   skippedCached: number;
   /**
    * Parsed and failed. A tombstone was cached and its id is in `seen`, so these

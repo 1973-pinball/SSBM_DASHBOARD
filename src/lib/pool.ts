@@ -189,8 +189,11 @@ export async function runParsePipeline(
   const willPreview = queue.length >= HEADER_PASS_MIN && !largeImport;
   const progress: ParseProgress = {
     pass: willPreview ? "header" : "full",
-    total: willPreview ? queue.length : files.length,
-    done: willPreview ? 0 : files.length - queue.length,
+    // Progress describes work in this run only. Cached files have their own
+    // counter; seeding `done` with them made a repair appear frozen at exactly
+    // the user's old game count while its first real replay was still parsing.
+    total: queue.length,
+    done: 0,
     skippedCached: files.length - queue.length,
     failed: 0,
     unreadable: 0,
@@ -443,8 +446,8 @@ export async function runParsePipeline(
     }
 
     progress.pass = "full";
-    progress.total = files.length;
-    progress.done = files.length - queue.length;
+    progress.total = queue.length;
+    progress.done = 0;
     await runPass("full");
   } finally {
     // Terminate on rejection too — a failed pipeline must not leak the pool.

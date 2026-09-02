@@ -639,7 +639,7 @@ export default function App() {
           // only when this run actually parsed something — the auto-sync on
           // every page load normally finds nothing and shouldn't pay for a
           // full re-read plus the resolve+sort it invalidates.
-          if (done && done.done > done.skippedCached) appendRecords(await allRecords());
+          if (done && done.done > 0) appendRecords(await allRecords());
         }
       } catch (err) {
         console.error(err);
@@ -690,7 +690,7 @@ export default function App() {
               ? { failed: done.failed, unreadable: done.unreadable, deferred: done.deferred }
               : null,
           );
-          if (done && done.done > done.skippedCached) setRecords(await allRecords());
+          if (done && done.done > 0) setRecords(await allRecords());
         }
       } catch (err) {
         console.error(err);
