@@ -80,7 +80,7 @@ button.ghost.attn {
   border-color: var(--gold);
   color: var(--gold);
 }
-button.ghost.attn:hover { border-color: var(--gold); filter: brightness(1.15); }
+button.ghost.attn:hover:not(:disabled) { border-color: var(--gold); filter: brightness(1.15); }
 
 select {
   background: var(--panel-2);

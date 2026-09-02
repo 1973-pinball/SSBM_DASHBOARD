@@ -1097,6 +1097,7 @@ export default function App() {
                 records={records}
                 accounts={accounts}
                 isDemo={isDemo}
+                isParsing={busy}
                 generation={generation.current}
                 onPulled={onCloudPulled}
               />
