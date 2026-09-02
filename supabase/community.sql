@@ -5,6 +5,15 @@
 -- aggregate with no user ids, connect codes, display names, paths, file ids, or
 -- exact timestamps. Community contribution is a separate, default-off consent.
 
+-- Install/update atomically, and acquire the source-table locks before touching
+-- the Community queue tables. A packed sync writes game_record_packs and then
+-- queues its user; taking these locks later would invert that order and can
+-- deadlock with a live sync while the triggers below are being replaced.
+begin;
+set local statement_timeout = '15min';
+set local lock_timeout = '2min';
+lock table public.game_records, public.game_record_packs in access exclusive mode;
+
 create table if not exists public.community_consent (
   user_id uuid primary key default auth.uid() references auth.users (id) on delete cascade,
   enabled boolean not null default false,
@@ -1271,6 +1280,8 @@ grant execute on function public.refresh_community_snapshot() to service_role;
 insert into public.community_dirty_users (user_id, queued_at)
 select user_id, now() from public.community_consent
 on conflict (user_id) do update set queued_at = excluded.queued_at;
+
+commit;
 
 -- First run / manual refresh:
 --   set statement_timeout = '10min';
