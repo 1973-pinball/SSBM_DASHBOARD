@@ -1201,8 +1201,8 @@ function MovesSection({
   recent: { rows: MoveRow[]; covered: number };
 }) {
   const [minMoveUsageInput, setMinMoveUsageInput] = useState("3");
-  const [minOpeningShareInput, setMinOpeningShareInput] = useState("0.7");
-  const [minAttemptsPerGameInput, setMinAttemptsPerGameInput] = useState("0.5");
+  const [minOpeningShareInput, setMinOpeningShareInput] = useState("3");
+  const [minDamageShareInput, setMinDamageShareInput] = useState("2");
   // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
   const impact = useMemo(
     () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
@@ -1212,20 +1212,20 @@ function MovesSection({
   const openingShareValue = Number(minOpeningShareInput);
   const minOpeningShare = minOpeningShareInput.trim() !== "" && Number.isFinite(openingShareValue)
     ? Math.min(100, Math.max(0, Math.round(openingShareValue * 10) / 10))
-    : 0.7;
+    : 3;
   const visibleOpeningRows = useMemo(
     () => recent.rows
       .filter((row) => row.openings > 0 && (row.openingShare ?? 0) * 100 >= minOpeningShare)
       .sort((a, b) => b.openings - a.openings),
     [recent.rows, minOpeningShare],
   );
-  const attemptsPerGameValue = Number(minAttemptsPerGameInput);
-  const minAttemptsPerGame = minAttemptsPerGameInput.trim() !== "" && Number.isFinite(attemptsPerGameValue)
-    ? Math.max(0, Math.round(attemptsPerGameValue * 10) / 10)
-    : 0.5;
+  const damageShareValue = Number(minDamageShareInput);
+  const minDamageShare = minDamageShareInput.trim() !== "" && Number.isFinite(damageShareValue)
+    ? Math.min(100, Math.max(0, Math.round(damageShareValue * 10) / 10))
+    : 2;
   const visibleEffectivenessRows = useMemo(
-    () => recent.rows.filter((row) => row.attemptsPerGame === null || row.attemptsPerGame >= minAttemptsPerGame),
-    [recent.rows, minAttemptsPerGame],
+    () => recent.rows.filter((row) => (row.dmgShare ?? 0) * 100 >= minDamageShare),
+    [recent.rows, minDamageShare],
   );
   // The percentage threshold applies only to move share. Action usage is a
   // different unit (/min), so it stays visible at every threshold.
@@ -1252,17 +1252,19 @@ function MovesSection({
           <h2 className="panel-title">Move effectiveness (past {recent.covered.toLocaleString()} games)</h2>
           <div className="panel-controls">
             <label>
-              Minimum attempted / game
-              <span className="number-suffix unitless">
+              Minimum damage share
+              <span className="number-suffix">
                 <input
                   type="number"
                   min="0"
-                  step="0.1"
+                  max="100"
+                  step="1"
                   inputMode="decimal"
-                  value={minAttemptsPerGameInput}
-                  onChange={(e) => setMinAttemptsPerGameInput(e.target.value)}
-                  onBlur={() => setMinAttemptsPerGameInput(String(minAttemptsPerGame))}
+                  value={minDamageShareInput}
+                  onChange={(e) => setMinDamageShareInput(e.target.value)}
+                  onBlur={() => setMinDamageShareInput(String(minDamageShare))}
                 />
+                <span aria-hidden="true">%</span>
               </span>
             </label>
           </div>
@@ -1308,8 +1310,8 @@ function MovesSection({
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
           headline rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a
-          stock — a high number on a kill move means you're fishing with it stale. Tracked moves below {minAttemptsPerGame}
-          attempted per game are hidden; specials and throws stay visible because attempts are not tracked for them.
+          stock — a high number on a kill move means you're fishing with it stale. Moves below {minDamageShare}% of
+          your damage are hidden.
         </div>
       </div>
 
@@ -1324,7 +1326,7 @@ function MovesSection({
                   type="number"
                   min="0"
                   max="100"
-                  step="0.1"
+                  step="1"
                   inputMode="decimal"
                   value={minOpeningShareInput}
                   onChange={(e) => setMinOpeningShareInput(e.target.value)}
