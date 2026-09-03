@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { hoursLabel, int, num, pct, shortDate, winRateColor } from "../lib/format";
 import { charName, moveGroup, moveGroupLabel, stageName } from "../lib/melee";
 import {
   fetchArchiveCatalog,
-  fetchArchiveProOptions,
+  fetchArchiveCommunityProOptions,
+  fetchArchivePlayerEventAvailability,
   fetchArchiveRollups,
   fetchPublishedForecasts,
   type ArchiveCatalog,
@@ -13,6 +14,7 @@ import {
   type ArchiveMetrics,
   type ArchiveMoveMetrics,
   type ArchivePopulation,
+  type ArchivePlayerEventAvailability,
   type ArchiveProOption,
   type ArchiveRollup,
   type ArchiveTarget,
@@ -99,6 +101,7 @@ export function TournamentArchive() {
   const [playerId, setPlayerId] = useState<string | null>(null);
   const [rollups, setRollups] = useState<ArchiveRollup[]>([]);
   const [pros, setPros] = useState<ArchiveProOption[]>([]);
+  const [playerAvailability, setPlayerAvailability] = useState<{ playerId: string; rows: ArchivePlayerEventAvailability[] } | null>(null);
   const [dataLoading, setDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [forecasts, setForecasts] = useState<ArchiveForecast[]>([]);
@@ -149,16 +152,26 @@ export function TournamentArchive() {
   }, [editionId, eventId, mode, seriesId]);
 
   useEffect(() => {
-    if (!catalog.dataset || !target) {
+    if (!catalog.dataset) {
       setPros([]);
       return;
     }
     let alive = true;
-    void fetchArchiveProOptions(catalog.dataset.id, target, format)
+    void fetchArchiveCommunityProOptions(catalog.dataset.id, format)
       .then((next) => { if (alive) setPros(next); })
       .catch(() => { if (alive) setPros([]); });
     return () => { alive = false; };
-  }, [catalog.dataset, format, target]);
+  }, [catalog.dataset, format]);
+
+  useEffect(() => {
+    setPlayerAvailability(null);
+    if (!catalog.dataset || !playerId) return;
+    let alive = true;
+    void fetchArchivePlayerEventAvailability(catalog.dataset.id, playerId, format)
+      .then((rows) => { if (alive) setPlayerAvailability({ playerId, rows }); })
+      .catch(() => { if (alive) setPlayerAvailability({ playerId, rows: [] }); });
+    return () => { alive = false; };
+  }, [catalog.dataset, format, playerId]);
 
   useEffect(() => {
     if (!catalog.dataset || !target) {
@@ -191,21 +204,45 @@ export function TournamentArchive() {
     .map((row) => row.character_id!), [rollups]);
 
   useEffect(() => {
-    if (characterId !== null && !availableCharacters.includes(characterId)) {
+    if (!playerId && characterId !== null && !availableCharacters.includes(characterId)) {
       setCharacterId(null);
       setOpponentCharacterId(null);
       setStageId(null);
-      setPlayerId(null);
     }
-  }, [availableCharacters, characterId]);
-
-  const filteredPros = useMemo(() => characterId === null
-    ? []
-    : pros.filter((player) => player.observed_character_ids.includes(characterId)), [characterId, pros]);
+  }, [availableCharacters, characterId, playerId]);
 
   useEffect(() => {
-    if (playerId && !filteredPros.some((player) => player.id === playerId)) setPlayerId(null);
-  }, [filteredPros, playerId]);
+    if (playerId && !pros.some((player) => player.id === playerId)) setPlayerId(null);
+  }, [playerId, pros]);
+
+  const availableEvents = useMemo(() => {
+    if (playerId && playerAvailability?.playerId !== playerId) return [];
+    const rows = playerId ? playerAvailability?.rows ?? [] : null;
+    const ids = rows ? new Set(rows.map((row) => row.tournament_id)) : null;
+    return catalog.tournaments
+      .filter((tournament) => ids === null || ids.has(tournament.id))
+      .sort((a, b) => tournamentLabel(a).localeCompare(tournamentLabel(b)));
+  }, [catalog.tournaments, playerAvailability, playerId]);
+
+  const primaryCharacterForEvent = useCallback((tournamentId: string): number | null => {
+    if (!playerId || playerAvailability?.playerId !== playerId) return null;
+    const counts = new Map<number, number>();
+    for (const row of playerAvailability.rows) {
+      if (row.tournament_id !== tournamentId) continue;
+      counts.set(row.character_id, (counts.get(row.character_id) ?? 0) + row.game_count);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0]?.[0] ?? null;
+  }, [playerAvailability, playerId]);
+
+  useEffect(() => {
+    if (!playerId || playerAvailability?.playerId !== playerId || eventId) return;
+    const first = availableEvents[0];
+    if (!first) return;
+    setEventId(first.id);
+    setCharacterId(primaryCharacterForEvent(first.id));
+    setOpponentCharacterId(null);
+    setStageId(null);
+  }, [availableEvents, eventId, playerAvailability, playerId, primaryCharacterForEvent]);
 
   useEffect(() => {
     if (format === "doubles") setOpponentCharacterId(null);
@@ -259,20 +296,20 @@ export function TournamentArchive() {
             <label>Edition<select value={editionId} onChange={(event) => { setEditionId(event.target.value); setPlayerId(null); }}><option value="">All editions</option>{seriesEditions.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournamentLabel(tournament)}</option>)}</select></label>
           </>
         ) : (
-          <label>Tournament<select value={eventId} onChange={(event) => { setEventId(event.target.value); setPlayerId(null); }}>{catalog.tournaments.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournamentLabel(tournament)}</option>)}</select></label>
+          <label>Event<select value={eventId} disabled={playerId !== null && playerAvailability?.playerId !== playerId} onChange={(event) => { const nextEvent = event.target.value; setEventId(nextEvent); if (playerId) setCharacterId(primaryCharacterForEvent(nextEvent)); setOpponentCharacterId(null); setStageId(null); }}>{availableEvents.map((tournament) => <option key={tournament.id} value={tournament.id}>{tournamentLabel(tournament)}</option>)}</select></label>
         )}
         <label>Sample<select value={population} disabled={playerId !== null} onChange={(event) => setPopulation(event.target.value as ArchivePopulation)}><option value="conservative">Tournament benchmark</option><option value="broad">Venue benchmark</option></select></label>
         <label>Format<select value={format} onChange={(event) => { setFormat(event.target.value as ArchiveFormat); setPlayerId(null); }}><option value="singles">Singles</option><option value="doubles">Doubles</option></select></label>
-        <label>Character<select value={characterId ?? "all"} onChange={(event) => { const value = event.target.value; setCharacterId(value === "all" ? null : Number(value)); setOpponentCharacterId(null); setStageId(null); setPlayerId(null); }}><option value="all">All characters</option>{availableCharacters.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
+        <label>Character<select value={characterId ?? "all"} onChange={(event) => { const value = event.target.value; setCharacterId(value === "all" ? null : Number(value)); setOpponentCharacterId(null); setStageId(null); }}><option value="all">All characters</option>{availableCharacters.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
         <label>Opponent<select value={opponentCharacterId ?? "all"} disabled={characterId === null || format === "doubles"} onChange={(event) => { setOpponentCharacterId(event.target.value === "all" ? null : Number(event.target.value)); setStageId(null); }}><option value="all">All opponents</option>{availableOpponents.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
         <label>Stage<select value={stageId ?? "all"} disabled={characterId === null} onChange={(event) => setStageId(event.target.value === "all" ? null : Number(event.target.value))}><option value="all">All legal stages</option>{INCLUDED_STAGE_IDS.map((id) => <option key={id} value={id}>{stageName(id)}</option>)}</select></label>
-        <label>Top 100 player<select value={playerId ?? "field"} disabled={characterId === null || filteredPros.length === 0} onChange={(event) => { const next = event.target.value === "field" ? null : event.target.value; setPlayerId(next); if (next) setPopulation("conservative"); }}><option value="field">Tournament field</option>{filteredPros.map((player) => <option key={player.id} value={player.id}>{player.display_name} · #{player.latest_ranking.rank} {player.latest_ranking.edition_year}</option>)}</select></label>
+        <label>Top 100 player<select value={playerId ?? "field"} disabled={pros.length === 0} onChange={(event) => { const next = event.target.value === "field" ? null : event.target.value; setPlayerId(next); setOpponentCharacterId(null); setStageId(null); if (next) { const player = pros.find((option) => option.id === next); setMode("event"); setEventId(""); setCharacterId(player?.primary_character_id ?? null); setPopulation("conservative"); } }}><option value="field">Tournament field</option>{pros.map((player) => <option key={player.id} value={player.id}>{player.display_name} · {charName(player.primary_character_id)} · #{player.latest_ranking.rank} {player.latest_ranking.edition_year}</option>)}</select></label>
         <div className="ta-filter-note">
           {playerId
-            ? "Named-player views use only conservatively curated games."
+            ? "Named-player views use conservatively curated games. Event lists show only events with verified mappings for that pro; choosing an event selects their most-played character there."
             : population === "broad"
               ? "Venue benchmark includes technically usable event-associated games, including games not tied to a bracket set."
-              : "Tournament benchmark includes only verified or probable tournament-set games."}
+              : "Tournament benchmark includes only verified or probable tournament-set games. Choose a named pro to narrow Events and Character automatically."}
         </div>
       </section>
 

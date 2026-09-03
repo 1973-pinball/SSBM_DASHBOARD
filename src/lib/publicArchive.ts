@@ -145,8 +145,16 @@ export interface ArchivePlayerRanking {
 export interface ArchiveProOption extends ArchivePlayer {
   observed_character_ids: number[];
   observed_game_count: number;
+  primary_character_id: number;
   latest_ranking: ArchivePlayerRanking;
   best_rank: number;
+}
+
+export interface ArchivePlayerEventAvailability {
+  tournament_id: string;
+  series_id: string | null;
+  character_id: number;
+  game_count: number;
 }
 
 export interface ArchiveForecastEvent {
@@ -351,15 +359,46 @@ function proOptions(
     playerRankings.sort((a, b) => b.edition_year - a.edition_year || a.rank - b.rank);
     const latestRanking = playerRankings[0];
     if (!latestRanking) continue;
+    const characterEntries = [...characters.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+    const primaryCharacter = characterEntries[0];
+    if (!primaryCharacter) continue;
     options.push({
       ...player,
-      observed_character_ids: [...characters.keys()].sort((a, b) => a - b),
-      observed_game_count: [...characters.values()].reduce((sum, count) => sum + count, 0),
+      observed_character_ids: characterEntries.map(([characterId]) => characterId),
+      observed_game_count: characterEntries.reduce((sum, [, count]) => sum + count, 0),
+      primary_character_id: primaryCharacter[0],
       latest_ranking: latestRanking,
       best_rank: Math.min(...playerRankings.map((ranking) => ranking.rank)),
     });
   }
   return options.sort((a, b) => a.display_name.localeCompare(b.display_name));
+}
+
+export async function fetchArchivePlayerEventAvailability(
+  datasetId: string,
+  playerId: string,
+  format: ArchiveFormat,
+): Promise<ArchivePlayerEventAvailability[]> {
+  const client = requireArchiveClient();
+  return readAll<ArchivePlayerEventAvailability>(async (from, to) => {
+    const response = await client
+      .from("archive_rollups")
+      .select("tournament_id,series_id,character_id,game_count")
+      .eq("published", true)
+      .eq("dataset_id", datasetId)
+      .eq("scope", "player")
+      .eq("population", "conservative")
+      .eq("format", format)
+      .eq("player_id", playerId)
+      .not("tournament_id", "is", null)
+      .is("set_id", null)
+      .not("character_id", "is", null)
+      .is("opponent_character_id", null)
+      .is("stage_id", null)
+      .order("tournament_id")
+      .range(from, to);
+    return response as unknown as PageResponse;
+  });
 }
 
 export async function fetchArchiveProOptions(
