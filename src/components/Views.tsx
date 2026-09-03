@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
-import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
+import type { Account, ActionCounts, GameRecord, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort, hasCurrentStats } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, ExecutionSummary, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
@@ -1978,12 +1978,19 @@ const techDirectionLabel = (p: PlayerSide): string => {
     : `${pct(t.inPlace / groundSuccess, 0)} / ${pct(t.toward / groundSuccess, 0)} / ${pct(t.away / groundSuccess, 0)}`;
 };
 
-const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide) => string }[] = [
+const moveAttemptsLabel = (p: PlayerSide, rec: GameRecord, moveIds: number[]): string =>
+  hasCurrentStats(rec)
+    ? moveIds.map((moveId) => p.moveStats?.[moveId]?.attempts ?? 0).join("/")
+    : "—";
+
+const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, rec: GameRecord) => string }[] = [
   { label: "Kills", value: (p) => int(p.kills) },
   { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
   { label: "Damage done", value: (p) => int(p.totalDamage) },
   { label: "Damage / opening", value: (p) => num(p.damagePerOpening, 1) },
   { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
+  { label: "Airs (F/U/N/D/B)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [14, 16, 13, 17, 15]) },
+  { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
   { label: "Neutral wins", value: (p, o) => withShare(p.neutralWins, o.neutralWins) },
   { label: "Counter hits", value: (p, o) => withShare(p.counterHits, o.counterHits) },
   { label: "Beneficial trades", value: (p, o) => withShare(p.beneficialTrades, o.beneficialTrades) },
@@ -2025,8 +2032,8 @@ function GameDetailTable({ g }: { g: ResolvedGame }) {
           {DETAIL_STATS.map((s) => (
             <tr key={s.label}>
               <td>{s.label}</td>
-              <td className="data">{s.value(g.me, g.opp)}</td>
-              <td className="data">{s.value(g.opp, g.me)}</td>
+              <td className="data">{s.value(g.me, g.opp, g.rec)}</td>
+              <td className="data">{s.value(g.opp, g.me, g.rec)}</td>
             </tr>
           ))}
         </tbody>
