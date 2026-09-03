@@ -161,7 +161,7 @@ export function applyFilters(games: ResolvedGame[], f: Filters): ResolvedGame[] 
     if (f.oppCharacter !== null && g.opp.characterId !== f.oppCharacter) return false;
     if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
     if (f.opponentCode !== null && g.opp.connectCode !== f.opponentCode) return false;
-    if (f.gameType !== null && g.rec.gameType !== f.gameType) return false;
+    if (f.gameTypes !== null && !f.gameTypes.includes(g.rec.gameType)) return false;
     return true;
   });
 }
@@ -179,7 +179,7 @@ export function applyTeamFilters(games: ResolvedTeamGame[], f: Filters): Resolve
     if (f.stageId !== null && g.rec.stageId !== f.stageId) return false;
     if (f.opponentCode !== null && !g.opps.some((o) => o.connectCode === f.opponentCode)) return false;
     if (f.teammateCode !== null && g.teammate.connectCode !== f.teammateCode) return false;
-    if (f.gameType !== null && g.rec.gameType !== f.gameType) return false;
+    if (f.gameTypes !== null && !f.gameTypes.includes(g.rec.gameType)) return false;
     return true;
   });
 }

@@ -244,7 +244,7 @@ export interface Filters {
   stageId: number | null;
   opponentCode: string | null;
   teammateCode: string | null; // teams only
-  gameType: GameType | null;
+  gameTypes: GameType[] | null; // null = all modes
 }
 
 export const DEFAULT_FILTERS: Filters = {
@@ -257,7 +257,7 @@ export const DEFAULT_FILTERS: Filters = {
   stageId: null,
   opponentCode: null,
   teammateCode: null,
-  gameType: null,
+  gameTypes: null,
 };
 
 /** A singles game resolved against the chosen identity. */

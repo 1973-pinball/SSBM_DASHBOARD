@@ -14,7 +14,17 @@ interface Props {
   accounts: Account[];
 }
 
-const GAME_TYPES: GameType[] = ["ranked", "unranked", "direct", "offline"];
+const GAME_TYPES: readonly GameType[] = ["ranked", "unranked", "direct", "offline", "unknown"];
+
+const modeLabel = (mode: GameType) => `${mode.charAt(0).toUpperCase()}${mode.slice(1)}`;
+
+function modeSummary(modes: GameType[] | null): string {
+  if (modes === null) return "All modes";
+  const excluded = GAME_TYPES.filter((mode) => !modes.includes(mode));
+  if (excluded.length === 1) return `All except ${modeLabel(excluded[0]!)}`;
+  if (modes.length === 1) return modeLabel(modes[0]!);
+  return `${modes.length} modes`;
+}
 
 export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames, accounts }: Props) {
   const isTeams = filters.format === "teams";
@@ -87,6 +97,16 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
 
   const set = (patch: Partial<Filters>) => setFilters({ ...filters, ...patch });
   const numOrNull = (v: string) => (v === "" ? null : Number(v));
+  const selectedModes = filters.gameTypes ?? GAME_TYPES;
+  const selectedModeSummary = modeSummary(filters.gameTypes);
+  const toggleMode = (mode: GameType) => {
+    const next = filters.gameTypes === null ? [...GAME_TYPES] : [...filters.gameTypes];
+    const index = next.indexOf(mode);
+    if (index >= 0) next.splice(index, 1);
+    else next.push(mode);
+    if (next.length === 0) return;
+    set({ gameTypes: next.length === GAME_TYPES.length ? null : next });
+  };
 
   const isDefault =
     filters.range === "all" &&
@@ -97,7 +117,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
     filters.stageId === null &&
     filters.opponentCode === null &&
     filters.teammateCode === null &&
-    filters.gameType === null;
+    filters.gameTypes === null;
 
   const rangeLabels: Record<Filters["range"], string> = {
     all: "All time",
@@ -119,7 +139,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
   if (filters.stageId !== null) activeFilters.push({ key: "stage", label: stageName(filters.stageId), clear: () => set({ stageId: null }) });
   if (filters.teammateCode) activeFilters.push({ key: "teammate", label: `With: ${filters.teammateCode}`, clear: () => set({ teammateCode: null }) });
   if (filters.opponentCode) activeFilters.push({ key: "opponent", label: `Opponent: ${filters.opponentCode}`, clear: () => set({ opponentCode: null }) });
-  if (filters.gameType) activeFilters.push({ key: "mode", label: filters.gameType, clear: () => set({ gameType: null }) });
+  if (filters.gameTypes !== null) activeFilters.push({ key: "mode", label: selectedModeSummary, clear: () => set({ gameTypes: null }) });
 
   return (
     <div className={`filters ${mobileOpen ? "open" : ""}`}>
@@ -252,17 +272,39 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
           ))}
         </select>
       </label>
-      <label>
-        Mode
-        <select value={filters.gameType ?? ""} onChange={(e) => set({ gameType: (e.target.value || null) as GameType | null })}>
-          <option value="">All modes</option>
-          {GAME_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="filter-control">
+        <span>Mode</span>
+        <details className="mode-picker">
+          <summary aria-label={`Modes: ${selectedModeSummary}`}>
+            <span>{selectedModeSummary}</span>
+            <span className="mode-picker-chevron" aria-hidden="true">▾</span>
+          </summary>
+          <div className="mode-picker-menu" role="group" aria-label="Game modes">
+            <label className="mode-picker-option mode-picker-all">
+              <input
+                type="checkbox"
+                checked={filters.gameTypes === null}
+                onChange={() => set({ gameTypes: null })}
+              />
+              <span>All modes</span>
+            </label>
+            {GAME_TYPES.map((mode) => {
+              const checked = selectedModes.includes(mode);
+              return (
+                <label className="mode-picker-option" key={mode}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={checked && selectedModes.length === 1}
+                    onChange={() => toggleMode(mode)}
+                  />
+                  <span>{modeLabel(mode)}</span>
+                </label>
+              );
+            })}
+          </div>
+        </details>
+      </div>
       </div>
       {!isDefault && (
         <div className="active-filter-row" aria-label="Active filters">

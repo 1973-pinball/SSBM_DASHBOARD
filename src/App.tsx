@@ -1233,7 +1233,7 @@ export default function App() {
               filters={filters}
               accounts={accounts}
               onSelectMyCharacter={(id) => setFilters({ ...filters, myCharacter: id })}
-              onSelectMode={(mode) => setFilters({ ...filters, gameType: mode })}
+              onSelectMode={(modes) => setFilters({ ...filters, gameTypes: modes })}
               onSelectAccount={(code) => setFilters({ ...filters, accountCode: code })}
             />
           )}

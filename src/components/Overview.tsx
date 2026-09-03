@@ -20,7 +20,7 @@ interface Props {
   filters: Filters;
   accounts: Account[];
   onSelectMyCharacter: (id: number) => void;
-  onSelectMode: (mode: GameType | null) => void;
+  onSelectMode: (modes: GameType[] | null) => void;
   onSelectAccount: (code: string | null) => void;
 }
 
@@ -33,7 +33,7 @@ export function Overview({
   const weeks = useMemo(() => gamesPerWeek(games), [games]);
   // Mode breakdown ignores the mode filter itself so all sections stay visible.
   const modes = useMemo(
-    () => byMode(applyFilters(allGames, { ...filters, gameType: null })),
+    () => byMode(applyFilters(allGames, { ...filters, gameTypes: null })),
     [allGames, filters],
   );
   // Same reasoning for accounts: the point of the panel is comparing them, so
@@ -153,8 +153,10 @@ export function Overview({
           </thead>
           <tbody>
             {modes.map((row) => {
-              const active =
-                (row.mode === "overall" && filters.gameType === null) || row.mode === filters.gameType;
+              const active = row.mode === "overall"
+                ? filters.gameTypes === null
+                : filters.gameTypes?.includes(row.mode) ?? false;
+              const modeSelection: GameType[] | null = row.mode === "overall" ? null : [row.mode];
               return (
                 <tr
                   key={row.mode}
@@ -163,8 +165,8 @@ export function Overview({
                   tabIndex={0}
                   aria-label={row.mode === "overall" ? "Clear mode filter" : `Filter to ${row.mode}`}
                   style={active ? { background: "var(--panel-2)" } : undefined}
-                  onClick={() => onSelectMode(row.mode === "overall" ? null : row.mode)}
-                  onKeyDown={(e) => activateOnKey(e, () => onSelectMode(row.mode === "overall" ? null : row.mode))}
+                  onClick={() => onSelectMode(modeSelection)}
+                  onKeyDown={(e) => activateOnKey(e, () => onSelectMode(modeSelection))}
                 >
                   <td style={{ fontWeight: row.mode === "overall" ? 600 : 400, textTransform: "capitalize" }}>
                     {row.mode}
