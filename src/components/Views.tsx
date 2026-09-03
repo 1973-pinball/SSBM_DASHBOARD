@@ -1989,7 +1989,7 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Damage done", value: (p) => int(p.totalDamage) },
   { label: "Damage / opening", value: (p) => num(p.damagePerOpening, 1) },
   { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
-  { label: "Airs (F/U/N/D/B)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [14, 16, 13, 17, 15]) },
+  { label: "Airs (F/U/D/N/B)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [14, 16, 17, 13, 15]) },
   { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
   { label: "Neutral wins", value: (p, o) => withShare(p.neutralWins, o.neutralWins) },
   { label: "Counter hits", value: (p, o) => withShare(p.counterHits, o.counterHits) },
