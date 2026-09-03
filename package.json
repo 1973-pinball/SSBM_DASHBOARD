@@ -2,7 +2,7 @@
   "name": "ssbm-stats",
   "private": true,
   "license": "MIT",
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "engines": {
     "node": "22.x"
@@ -13,6 +13,8 @@
     "bench:parse": "node --experimental-strip-types scripts/benchmark-parse-workers.mjs",
     "verify:large": "node scripts/verify-large-library.mjs",
     "verify:slpz": "node --experimental-strip-types scripts/verify-slpz.mjs",
+    "archive:build": "node scripts/build-nikki-public-archive.mjs",
+    "archive:load": "node scripts/load-public-archive.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "assets": "node scripts/render-liquipedia-assets.mjs",
@@ -30,7 +32,8 @@
     "html-to-image": "^1.11.13",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "recharts": "^3.9.2"
+    "recharts": "^3.9.2",
+    "ws": "^8.21.1"
   },
   "devDependencies": {
     "@napi-rs/canvas": "^1.0.6",

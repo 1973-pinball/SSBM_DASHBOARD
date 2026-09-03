@@ -1,0 +1,617 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-09-02",
+  "methodology": "Tournament years come from the cited event or series page, never from the replay clock. The sole unverified label remains explicit rather than being silently guessed.",
+  "events": [
+    {
+      "id": "2024-04-06-ct-gamercon-7",
+      "name": "CT Gamercon 7",
+      "year": 2024,
+      "sourceUrl": "https://www.ssbwiki.com/Tournament:CT_Gamercon_7",
+      "sourceLabel": "SmashWiki event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "bobc-5",
+      "name": "Battle of BC 5",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "bobc-6",
+      "name": "Battle of BC 6",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "bobc-7",
+      "name": "Battle of BC 7",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "bobc-8",
+      "name": "Battle of BC 8",
+      "year": 2026,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "bopme-19",
+      "name": "BOPME 19",
+      "year": 2020,
+      "sourceUrl": "https://www.start.gg/tournament/bopme-19/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "ceo-2024",
+      "name": "CEO 2024",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "collision-2023",
+      "name": "Collision 2023",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "collision-2024",
+      "name": "Collision 2024",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "collision-2025",
+      "name": "Collision 2025",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "combo-breaker-2024",
+      "name": "Combo Breaker 2024",
+      "year": 2024,
+      "sourceUrl": "https://www.start.gg/tournament/combo-breaker-2024/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "double-down-2022",
+      "name": "Double Down 2022",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "dpg-2024",
+      "name": "Don't Park on the Grass 2024",
+      "year": 2024,
+      "sourceUrl": "https://www.start.gg/tournament/don-t-park-on-the-grass-2024/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "fall-2019-purdue-weeklies",
+      "name": "Purdue Melee Weeklies — Fall 2019",
+      "year": 2019,
+      "sourceUrl": "https://www.reddit.com/r/Purdue/comments/cr3tn5/2019_club_callout_megathread/",
+      "sourceLabel": "Contemporary Purdue club callout",
+      "sourceConfidence": "verified",
+      "isTournament": true,
+      "notes": "A semester collection of weekly tournaments, not one bracket."
+    },
+    {
+      "id": "fight-pitt-9",
+      "name": "Fight Pitt 9",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/fight-pitt-9-1/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "full-bloom-2024",
+      "name": "Full Bloom 2024",
+      "year": 2024,
+      "sourceUrl": "https://www.start.gg/tournament/full-bloom-2024/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "full-bloom-2025",
+      "name": "Full Bloom 2025",
+      "year": 2025,
+      "sourceUrl": "https://www.start.gg/tournament/full-bloom-2025/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "full-bloom-5",
+      "name": "Full Bloom 5",
+      "year": 2019,
+      "sourceUrl": "https://www.ssbwiki.com/Tournament:Full_Bloom_5",
+      "sourceLabel": "SmashWiki event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "full-house-2025",
+      "name": "Full House 2025",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Full_House/2025",
+      "sourceLabel": "Liquipedia event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "g8",
+      "name": "GENESIS 8",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "g9",
+      "name": "GENESIS 9",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "gang-2",
+      "name": "The Gang Steals the Script",
+      "year": 2019,
+      "sourceUrl": "https://www.ssbwiki.com/Tournament:The_Gang_Steals_The_Script",
+      "sourceLabel": "SmashWiki event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "goml-forever-2025",
+      "name": "Get On My Level: Forever",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "goml-x",
+      "name": "Get On My Level X",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "gx",
+      "name": "GENESIS X",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "gx-2",
+      "name": "GENESIS X2",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "gx3",
+      "name": "GENESIS X3",
+      "year": 2026,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "htl-3",
+      "name": "Hold That L 3",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/hold-that-l-3/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "htl-4",
+      "name": "Hold That L 4",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/hold-that-l-4/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "htl-5",
+      "name": "Hold That L 5",
+      "year": 2020,
+      "sourceUrl": "https://www.start.gg/tournament/hold-that-l-5/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "indiana-summit-2019",
+      "name": "Indiana Summit 2019",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/indiana-summit-2019/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "kill-roy-vol-6",
+      "name": "Kill Roy: Volume 6",
+      "year": 2023,
+      "sourceUrl": "https://www.start.gg/tournament/kill-roy-volume-6-ft-cody-schwab-zamu-mekk-skerzo/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "kill-roy-vol-7",
+      "name": "Kill Roy: Volume 7",
+      "year": 2023,
+      "sourceUrl": "https://www.start.gg/tournament/kill-roy-volume-7/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "kill-roy-vol-8",
+      "name": "Kill Roy: Volume 8",
+      "year": 2024,
+      "sourceUrl": "https://www.start.gg/tournament/kill-roy-volume-8/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "lacs-rivals-melee",
+      "name": "LACS Rivals — Melee",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Ludwig_Ahgren_Championship_Series/Rivals/Melee",
+      "sourceLabel": "Liquipedia event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "lacs5",
+      "name": "Ludwig Ahgren Championship Series 5",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Ludwig_Ahgren_Championship_Series/5",
+      "sourceLabel": "Liquipedia event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "lmmm-2024",
+      "name": "Luminosity Makes Moves Miami 2024",
+      "year": 2024,
+      "sourceUrl": "https://www.start.gg/tournament/luminosity-makes-moves-miami-2024/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "lras-6",
+      "name": "LRAS 6",
+      "year": 2019,
+      "sourceUrl": null,
+      "sourceLabel": "Archive label and replay metadata only",
+      "sourceConfidence": "unverified",
+      "isTournament": true,
+      "notes": "The archive label has not yet been matched to a trustworthy public event page. Keep out of sourced tournament labels until resolved."
+    },
+    {
+      "id": "major-upset-2023",
+      "name": "MAJOR UPSET",
+      "year": 2023,
+      "sourceUrl": "https://www.start.gg/tournament/major-upset/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "mango-bday",
+      "name": "Mang0's Birthday Bash",
+      "year": 2019,
+      "sourceUrl": "https://www.ssbwiki.com/List_of_major_tournaments_(SSBM)#2019",
+      "sourceLabel": "SmashWiki Melee major-tournament list",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "national-melee-arcadian-2",
+      "name": "The Second National Melee Arcadian",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/the-second-national-melee-arcadian/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "nightclub-season-1",
+      "name": "Hax's Nightclub — Season 1",
+      "year": 2020,
+      "sourceUrl": "https://liquipedia.net/smash/Hax%27s_Nightclub",
+      "sourceLabel": "Liquipedia series page",
+      "sourceConfidence": "verified",
+      "isTournament": true,
+      "notes": "A season collection containing multiple weekly brackets."
+    },
+    {
+      "id": "ootb5",
+      "name": "Out of the Blue 5",
+      "year": 2026,
+      "sourceUrl": "https://liquipedia.net/smash/Out_of_the_Blue/5",
+      "sourceLabel": "Liquipedia event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "pats-house-4",
+      "name": "Pat's House 4",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "personal-pre-slippi-online",
+      "name": "Personal pre-Slippi/online collection",
+      "year": null,
+      "sourceUrl": "https://replays.nikki.sh/",
+      "sourceLabel": "Nikki's Slippi Dumps archive label",
+      "sourceConfidence": "verified",
+      "isTournament": false,
+      "notes": "Explicitly excluded from every public tournament and Community benchmark."
+    },
+    {
+      "id": "pound-2019",
+      "name": "Pound 2019",
+      "year": 2019,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "riptide-2022",
+      "name": "Riptide 2022",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true,
+      "notes": "Use the cited event year; some replay clocks report 2021."
+    },
+    {
+      "id": "riptide-2023",
+      "name": "Riptide 2023",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "riptide-2024",
+      "name": "Riptide 2024",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "riptide-2025",
+      "name": "Riptide 2025",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "scuffed-world-tour",
+      "name": "Scuffed World Tour",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "shine-2019",
+      "name": "Shine 2019",
+      "year": 2019,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "shine-2022",
+      "name": "Shine 2022",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "shine-2023",
+      "name": "Shine 2023",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "smash-camp-2022",
+      "name": "Smash Camp 2022",
+      "year": 2022,
+      "sourceUrl": "https://www.start.gg/tournament/smash-camp-2022/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "spring-2020-purdue-weeklies",
+      "name": "Purdue Melee Weeklies — Spring 2020",
+      "year": 2020,
+      "sourceUrl": "https://www.reddit.com/r/Purdue/comments/eoozfn/spring_2020_club_callout_megathread/",
+      "sourceLabel": "Contemporary Purdue club callout",
+      "sourceConfidence": "verified",
+      "isTournament": true,
+      "notes": "A semester collection of weekly tournaments, not one bracket."
+    },
+    {
+      "id": "summit-11",
+      "name": "Smash Summit 11",
+      "year": 2021,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "supernova-2024",
+      "name": "Supernova 2024",
+      "year": 2024,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "supernova-2025",
+      "name": "Supernova 2025",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "tbh-10",
+      "name": "The Big House 10",
+      "year": 2022,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "tbh-11",
+      "name": "The Big House 11",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "tbh-9",
+      "name": "The Big House 9",
+      "year": 2019,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "the-match-zain-vs-cody",
+      "name": "The Match: The Fight for Number 1",
+      "year": 2023,
+      "sourceUrl": "https://liquipedia.net/smash/The_Match:_The_Fight_For_Number_1",
+      "sourceLabel": "Liquipedia event page",
+      "sourceConfidence": "verified",
+      "isTournament": true,
+      "notes": "Offline exhibition/showmatch; Zain vs Cody Schwab was a first-to-10."
+    },
+    {
+      "id": "the-yard-1",
+      "name": "The Yard",
+      "year": 2020,
+      "sourceUrl": "https://www.start.gg/tournament/the-yard-1/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "tipped-off-16",
+      "name": "Tipped Off 16: Safari",
+      "year": 2025,
+      "sourceUrl": "https://liquipedia.net/smash/Major_Tournaments/Melee",
+      "sourceLabel": "Liquipedia Melee major-tournament index",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "unranked-2025",
+      "name": "Unranked",
+      "year": 2025,
+      "sourceUrl": "https://www.start.gg/tournament/unranked/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    },
+    {
+      "id": "wnss-2",
+      "name": "We Need Some Space 2",
+      "year": 2019,
+      "sourceUrl": "https://www.start.gg/tournament/we-need-some-space-2/details",
+      "sourceLabel": "Start.gg event page",
+      "sourceConfidence": "verified",
+      "isTournament": true
+    }
+  ]
+}

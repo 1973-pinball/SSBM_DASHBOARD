@@ -1,0 +1,288 @@
+import { useEffect, useMemo, useState } from "react";
+import { pct, num, shortDate } from "../lib/format";
+import { charName, moveGroup, moveGroupLabel } from "../lib/melee";
+import {
+  fetchArchiveCommunityBenchmarks,
+  fetchArchiveCommunityProBenchmark,
+  fetchArchiveCommunityProOptions,
+  fetchLatestArchiveDataset,
+  type ArchiveCommunityBenchmarks,
+  type ArchiveDataset,
+  type ArchiveMoveMetrics,
+  type ArchiveProOption,
+  type ArchiveRollup,
+} from "../lib/publicArchive";
+import { executionSummary, moveTable } from "../lib/stats";
+import type { ResolvedGame } from "../lib/types";
+import "./ArchiveCommunityBenchmark.css";
+
+interface Props {
+  games: ResolvedGame[];
+  characterId: number | null;
+}
+
+type MoveMetric = "attempts" | "landed" | "damage" | "kills" | "killPct";
+
+interface GroupedArchiveMove extends ArchiveMoveMetrics {
+  key: string;
+  label: string;
+}
+
+interface ExecutionRow {
+  key: string;
+  label: string;
+  sample: number;
+  sampleLabel: string;
+  winRate: number | null;
+  lCancel: number | null;
+  groundTech: number | null;
+  wallTech: number | null;
+  opk: number | null;
+  dpo: number | null;
+  ipm: number | null;
+  balanceNote?: string;
+}
+
+const EMPTY_BENCHMARKS: ArchiveCommunityBenchmarks = { broad: null, conservative: null };
+const ratio = (numerator: number, denominator: number): number | null => denominator > 0 ? numerator / denominator : null;
+
+function groupArchiveMoves(row: ArchiveRollup | null): Map<string, GroupedArchiveMove> {
+  const grouped = new Map<string, GroupedArchiveMove>();
+  for (const [moveId, move] of Object.entries(row?.metrics.moves ?? {})) {
+    const group = moveGroup(Number(moveId));
+    const value = grouped.get(group.key) ?? {
+      key: group.key,
+      label: moveGroupLabel(group.key),
+      attempts: 0,
+      landed: 0,
+      damage: 0,
+      kills: 0,
+      killPctSum: 0,
+      openings: 0,
+      openingDmg: 0,
+      lCancelSuccess: 0,
+      lCancelFail: 0,
+    };
+    value.attempts += move.attempts;
+    value.landed += move.landed;
+    value.damage += move.damage;
+    value.kills += move.kills;
+    value.killPctSum += move.killPctSum;
+    value.openings += move.openings;
+    value.openingDmg += move.openingDmg;
+    value.lCancelSuccess += move.lCancelSuccess;
+    value.lCancelFail += move.lCancelFail;
+    grouped.set(group.key, value);
+  }
+  return grouped;
+}
+
+function archiveExecution(
+  row: ArchiveRollup,
+  label: string,
+  usePlayerBalance: boolean,
+  sampleLabel = "player-games",
+): ExecutionRow {
+  const metrics = row.metrics;
+  const groundSuccess = metrics.techInPlace + metrics.techToward + metrics.techAway;
+  const playerBalanced = usePlayerBalance ? metrics.playerBalanced : null;
+  const lCancel = playerBalanced?.lCancel.equalWeightMean ?? ratio(metrics.lCancelSuccess, metrics.lCancelSuccess + metrics.lCancelFail);
+  const groundTech = playerBalanced?.techSuccess.equalWeightMean ?? ratio(groundSuccess, groundSuccess + metrics.techMissed);
+  const balancedSamples = Math.max(
+    playerBalanced?.lCancel.qualifiedPlayers ?? 0,
+    playerBalanced?.techSuccess.qualifiedPlayers ?? 0,
+  );
+  return {
+    key: `${row.population}:${label}`,
+    label,
+    sample: row.game_count,
+    sampleLabel,
+    winRate: ratio(row.wins, row.win_rate_game_count),
+    lCancel,
+    groundTech,
+    wallTech: ratio(metrics.wallTechSuccess ?? 0, (metrics.wallTechSuccess ?? 0) + (metrics.wallTechMissed ?? 0)),
+    opk: ratio(metrics.openingsPerKillSum, metrics.openingsPerKillSamples),
+    dpo: ratio(metrics.damagePerOpeningSum, metrics.damagePerOpeningSamples),
+    ipm: ratio(metrics.inputsPerMinuteSum, metrics.inputsPerMinuteSamples),
+    balanceNote: balancedSamples > 0 ? `L-cancel and ground tech equally weight ${balancedSamples.toLocaleString()} qualified players` : undefined,
+  };
+}
+
+export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
+  const [dataset, setDataset] = useState<ArchiveDataset | null>(null);
+  const [benchmarks, setBenchmarks] = useState<ArchiveCommunityBenchmarks>(EMPTY_BENCHMARKS);
+  const [pros, setPros] = useState<ArchiveProOption[]>([]);
+  const [playerId, setPlayerId] = useState<string | null>(null);
+  const [proBenchmark, setProBenchmark] = useState<ArchiveRollup | null>(null);
+  const [moveMetric, setMoveMetric] = useState<MoveMetric>("attempts");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    void fetchLatestArchiveDataset()
+      .then(async (nextDataset) => {
+        if (!alive) return;
+        setDataset(nextDataset);
+        if (!nextDataset) {
+          setError("No public tournament archive snapshot has been published yet.");
+          return;
+        }
+        const nextPros = await fetchArchiveCommunityProOptions(nextDataset.id);
+        if (alive) setPros(nextPros);
+      })
+      .catch(() => { if (alive) setError("The public tournament archive is not available right now."); })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, []);
+
+  const characterPros = useMemo(() => characterId === null
+    ? []
+    : pros.filter((player) => player.observed_character_ids.includes(characterId)), [characterId, pros]);
+
+  useEffect(() => {
+    if (playerId && !characterPros.some((player) => player.id === playerId)) setPlayerId(null);
+  }, [characterPros, playerId]);
+
+  useEffect(() => {
+    if (!dataset || characterId === null) {
+      setBenchmarks(EMPTY_BENCHMARKS);
+      return;
+    }
+    let alive = true;
+    setLoading(true);
+    void fetchArchiveCommunityBenchmarks(dataset.id, characterId)
+      .then((next) => { if (alive) { setBenchmarks(next); setError(null); } })
+      .catch(() => { if (alive) { setBenchmarks(EMPTY_BENCHMARKS); setError("Archive benchmarks are temporarily unavailable."); } })
+      .finally(() => { if (alive) setLoading(false); });
+    return () => { alive = false; };
+  }, [characterId, dataset]);
+
+  useEffect(() => {
+    if (!dataset || characterId === null || !playerId) {
+      setProBenchmark(null);
+      return;
+    }
+    let alive = true;
+    void fetchArchiveCommunityProBenchmark(dataset.id, playerId, characterId)
+      .then((next) => { if (alive) setProBenchmark(next); })
+      .catch(() => { if (alive) setProBenchmark(null); });
+    return () => { alive = false; };
+  }, [characterId, dataset, playerId]);
+
+  const ownExecution = useMemo(() => executionSummary(games, Number.MAX_SAFE_INTEGER), [games]);
+  const ownMoves = useMemo(() => moveTable(games), [games]);
+  const selectedPro = characterPros.find((player) => player.id === playerId) ?? null;
+
+  if (characterId === null) return (
+    <section className="panel acb-panel">
+      <div className="eyebrow">Tournament archive comparison</div>
+      <h2>Compare your execution beyond the opt-in cohort</h2>
+      <div className="empty-note">Choose a character above to compare against venue, tournament, and published pro samples.</div>
+    </section>
+  );
+
+  if (loading && !benchmarks.broad && !benchmarks.conservative) return <section className="panel acb-panel"><div className="empty-note">Loading tournament archive benchmarks…</div></section>;
+
+  const ownWins = games.reduce((count, game) => count + (game.isWin === true ? 1 : 0), 0);
+  const ownDecided = games.reduce((count, game) => count + (game.isWin !== null ? 1 : 0), 0);
+  const executionRows: ExecutionRow[] = [{
+    key: "you",
+    label: "You",
+    sample: ownExecution.games,
+    sampleLabel: "games",
+    winRate: ratio(ownWins, ownDecided),
+    lCancel: ownExecution.lCancel === null ? null : ownExecution.lCancel / 100,
+    groundTech: ownExecution.groundTechSuccess === null ? null : ownExecution.groundTechSuccess / 100,
+    wallTech: ownExecution.wallTechSuccess === null ? null : ownExecution.wallTechSuccess / 100,
+    opk: ownExecution.opk,
+    dpo: ownExecution.dpo,
+    ipm: ownExecution.ipm,
+  }];
+  if (benchmarks.broad) executionRows.push(archiveExecution(benchmarks.broad, "Venue archive", false));
+  if (benchmarks.conservative) executionRows.push(archiveExecution(benchmarks.conservative, "Tournament archive", true));
+  if (proBenchmark && selectedPro) executionRows.push(archiveExecution(proBenchmark, selectedPro.display_name, false, "games"));
+
+  const moveSources = {
+    broad: groupArchiveMoves(benchmarks.broad),
+    conservative: groupArchiveMoves(benchmarks.conservative),
+    pro: groupArchiveMoves(proBenchmark),
+  };
+  const ownMoveByKey = new Map(ownMoves.rows.map((move) => [move.key, move]));
+  const moveKeys = [...new Set([
+    ...ownMoveByKey.keys(),
+    ...moveSources.broad.keys(),
+    ...moveSources.conservative.keys(),
+    ...moveSources.pro.keys(),
+  ])].sort((a, b) => {
+    const damage = (key: string) => Math.max(
+      ownMoveByKey.get(key)?.dmgShare ?? 0,
+      ratio(moveSources.broad.get(key)?.damage ?? 0, benchmarks.broad?.metrics.damageTotal ?? 0) ?? 0,
+      ratio(moveSources.conservative.get(key)?.damage ?? 0, benchmarks.conservative?.metrics.damageTotal ?? 0) ?? 0,
+      ratio(moveSources.pro.get(key)?.damage ?? 0, proBenchmark?.metrics.damageTotal ?? 0) ?? 0,
+    );
+    return damage(b) - damage(a);
+  });
+
+  return (
+    <section className="panel acb-panel">
+      <div className="panel-heading-row acb-heading">
+        <div>
+          <div className="eyebrow">Tournament archive comparison</div>
+          <h2>Your {charName(characterId)} vs public event samples</h2>
+        </div>
+        <label>
+          Named Top 100 player
+          <select value={playerId ?? "none"} disabled={characterPros.length === 0} onChange={(event) => setPlayerId(event.target.value === "none" ? null : event.target.value)}>
+            <option value="none">No pro comparison</option>
+            {characterPros.map((player) => <option key={player.id} value={player.id}>{player.display_name} · #{player.latest_ranking.rank} {player.latest_ranking.edition_year}</option>)}
+          </select>
+        </label>
+      </div>
+
+      {error ? <div className="acb-error" role="status">{error} Your local and opt-in Community comparisons above are unaffected.</div> : (
+        <>
+          <div className="table-scroll acb-execution"><table><thead><tr><th>Sample</th><th className="data">Win rate</th><th className="data">L-cancel</th><th className="data">Ground tech</th><th className="data">Wall tech</th><th className="data">Openings / kill</th><th className="data">Damage / opening</th><th className="data">Inputs / min</th><th className="data">Sample size</th></tr></thead><tbody>{executionRows.map((row) => <tr key={row.key}><td>{row.label}{row.balanceNote && <span className="sample-note">{row.balanceNote}</span>}</td><td className="data">{pct(row.winRate)}</td><td className="data">{pct(row.lCancel)}</td><td className="data">{pct(row.groundTech)}</td><td className="data">{pct(row.wallTech)}</td><td className="data">{num(row.opk, 2)}</td><td className="data">{num(row.dpo, 1)}</td><td className="data">{num(row.ipm, 1)}</td><td className="data">{row.sample.toLocaleString()}<span className="sample-note">{row.sampleLabel}</span></td></tr>)}</tbody></table></div>
+
+          <div className="acb-move-heading">
+            <h3>Move profile</h3>
+            <label>Measure<select value={moveMetric} onChange={(event) => setMoveMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label>
+          </div>
+          {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You</th><th className="data">Venue archive<span className="sample-note">{benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games</span></th>{selectedPro && <th className="data">{selectedPro.display_name}<span className="sample-note">{proBenchmark?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>{moveKeys.map((key) => <tr key={key}><td>{ownMoveByKey.get(key)?.label ?? moveGroupLabel(key)}</td><td className="data">{formatLocalMove(ownMoveByKey.get(key), moveMetric, ownMoves.covered)}</td><td className="data">{formatArchiveMove(moveSources.broad.get(key), moveMetric, benchmarks.broad)}</td><td className="data">{formatArchiveMove(moveSources.conservative.get(key), moveMetric, benchmarks.conservative)}</td>{selectedPro && <td className="data">{formatArchiveMove(moveSources.pro.get(key), moveMetric, proBenchmark)}</td>}</tr>)}</tbody></table></div> : <div className="empty-note">No move data is published for this character yet.</div>}
+        </>
+      )}
+
+      <div className="acb-separation-note">
+        These archive columns are separate event-derived averages—not additional members of the opt-in Community cohort
+        above, and not merged into its player-balanced quartiles. “Venue archive” includes usable event-associated games;
+        “Tournament archive” uses conservatively curated tournament games. Named rows appear only for published,
+        externally resolved Top 100 identities.
+      </div>
+      {dataset && <div className="hint">
+        Sources: <a href={dataset.source_url} target="_blank" rel="noreferrer">{dataset.source_label}</a> · derived snapshot {shortDate(dataset.data_as_of)};
+        {" "}<a href="https://liquipedia.net/smash/SSBMRank" target="_blank" rel="noreferrer">Liquipedia SSBMRank history</a> for the pro roster and rankings
+        {" "}(<a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noreferrer">CC BY-SA 3.0</a>).
+        Raw replay files and private identifiers are not part of the public dataset.
+      </div>}
+    </section>
+  );
+}
+
+function formatLocalMove(move: ReturnType<typeof moveTable>["rows"][number] | undefined, metric: MoveMetric, covered: number): string {
+  if (!move) return "—";
+  if (metric === "attempts") return move.attemptsPerGame === null ? "—" : num(move.attemptsPerGame, 2);
+  if (metric === "landed") return num(move.landedPerGame, 2);
+  if (metric === "damage") return pct(move.dmgShare);
+  if (metric === "kills") return covered > 0 ? num(move.kills / covered, 3) : "—";
+  return move.avgKillPct === null ? "—" : `${num(move.avgKillPct, 0)}%`;
+}
+
+function formatArchiveMove(move: GroupedArchiveMove | undefined, metric: MoveMetric, row: ArchiveRollup | null): string {
+  if (!move || !row || row.game_count === 0) return "—";
+  if (metric === "attempts") return move.attempts === 0 && move.landed > 0 ? "—" : num(move.attempts / row.game_count, 2);
+  if (metric === "landed") return num(move.landed / row.game_count, 2);
+  if (metric === "damage") return pct(ratio(move.damage, row.metrics.damageTotal));
+  if (metric === "kills") return num(move.kills / row.game_count, 3);
+  return move.kills > 0 ? `${num(move.killPctSum / move.kills, 0)}%` : "—";
+}

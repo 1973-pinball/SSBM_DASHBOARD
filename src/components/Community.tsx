@@ -20,6 +20,7 @@ import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { moveTabFocus } from "../lib/a11y";
 import { axisStyle, gridStyle, tooltipStyle } from "./chartStyle";
 import { Kpi } from "./Kpi";
+import { ArchiveCommunityBenchmark } from "./ArchiveCommunityBenchmark";
 
 type CommunityView = "matchups" | "benchmarks" | "moves" | "stages" | "pulse";
 
@@ -294,7 +295,8 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
   const own = useMemo(() => executionSummary(selected, Number.MAX_SAFE_INTEGER), [selected]);
   const ownMoves = useMemo(() => moveTable(selected), [selected]);
   return (
-    <div className="panel">
+    <>
+      <div className="panel">
       <div className="panel-heading-row community-heading-row">
         <div><div className="eyebrow">You vs Community</div><h2>Your character compared with the qualifying field</h2></div>
         <div className="community-controls">
@@ -336,7 +338,9 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
       )}
 
       <div className="hint">Your values use the most recent {own.games.toLocaleString()} matching games in the selected lookback, are computed in this browser, and are never sent by this comparison. The field side stays on the full qualifying aggregate. Community quartiles first average each contributor, so a 30,000-game library cannot overpower everyone else. Gold marks meaningfully above the field; violet marks meaningfully below. Direction is descriptive, not a quality judgment, and highlights require at least 10 local games. A dash means that side has not cleared the required data threshold.</div>
-    </div>
+      </div>
+      <ArchiveCommunityBenchmark games={selected} characterId={characterId === -1 ? null : characterId} />
+    </>
   );
 }
 

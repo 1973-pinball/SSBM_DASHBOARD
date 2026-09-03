@@ -37,6 +37,7 @@ const Insights = lazy(() => import("./components/Insights").then((m) => ({ defau
 
 
 const Liquipedia = lazy(() => import("./components/liquipedia/Liquipedia").then((m) => ({ default: m.Liquipedia })));
+const TournamentArchive = lazy(() => import("./components/TournamentArchive").then((m) => ({ default: m.TournamentArchive })));
 const AccountsEditor = lazy(() => import("./components/AccountsEditor").then((m) => ({ default: m.AccountsEditor })));
 const PrivacyPromise = lazy(() => import("./components/PrivacyPromise").then((m) => ({ default: m.PrivacyPromise })));
 
@@ -69,7 +70,7 @@ type Phase = "landing" | "parsing" | "identity" | "dashboard";
 // game log is a collapsed panel on Opponents. tabFromUrl validates against
 // TABS, so an old ?view= link for any of them falls back to overview rather
 // than rendering nothing.
-type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "community" | "liquipedia";
+type Tab = "overview" | "matchups" | "stages" | "opponents" | "execution" | "insights" | "community" | "liquipedia" | "tournaments";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
@@ -83,6 +84,7 @@ const TABS: { id: Tab; label: string }[] = [
 
   { id: "community", label: "Community" },
   { id: "liquipedia", label: "Liquipedia" },
+  { id: "tournaments", label: "Tournaments" },
 ];
 
 /**
@@ -100,7 +102,7 @@ const NEEDS_FULL_STATS: ReadonlySet<Tab> = new Set<Tab>(["execution", "insights"
 const PENDING_TAB_HINT = "Loading — waiting on execution stats from the parse still running";
 
 type Overlay = "guide" | "accounts" | "privacy" | null;
-type PublicView = "community" | "liquipedia" | null;
+type PublicView = "community" | "liquipedia" | "tournaments" | null;
 interface AppHistoryState { ssbm: true; tab: Tab; overlay: Overlay; publicView: PublicView }
 
 const tabFromUrl = (): Tab => {
@@ -171,7 +173,7 @@ export default function App() {
   // straight from the landing page as well as from dashboard tabs.
   const [publicView, setPublicView] = useState<PublicView>(() => {
     const initial = tabFromUrl();
-    return initial === "community" || initial === "liquipedia" ? initial : null;
+    return initial === "community" || initial === "liquipedia" || initial === "tournaments" ? initial : null;
   });
   const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
@@ -254,7 +256,9 @@ export default function App() {
 
   useEffect(() => {
     const initialTab = tabFromUrl();
-    const initialPublic = initialTab === "community" || initialTab === "liquipedia" ? initialTab : null;
+    const initialPublic = initialTab === "community" || initialTab === "liquipedia" || initialTab === "tournaments"
+      ? initialTab
+      : null;
     const initialOverlay = overlayFromUrl();
     const state: AppHistoryState = { ssbm: true, tab: initialTab, overlay: initialOverlay, publicView: initialPublic };
     window.history.replaceState(state, "", navUrl(initialTab, initialOverlay));
@@ -722,6 +726,7 @@ export default function App() {
       void import("./components/MetricsGuide");
       void import("./components/AccountsEditor");
       void import("./components/liquipedia/Liquipedia");
+      void import("./components/TournamentArchive");
     };
     // Optional-chained: Safari didn't ship requestIdleCallback until late.
     const ric = window.requestIdleCallback?.bind(window);
@@ -1147,6 +1152,14 @@ export default function App() {
         </ViewErrorBoundary>
       )}
 
+      {publicView === "tournaments" && (
+        <ViewErrorBoundary>
+          <Suspense fallback={<div className="empty-note">Loading…</div>}>
+            <TournamentArchive />
+          </Suspense>
+        </ViewErrorBoundary>
+      )}
+
       {!publicView && phase === "landing" && (
         <Landing
           onPickDirectory={onPickDirectory}
@@ -1154,6 +1167,7 @@ export default function App() {
           onDemo={onDemo}
           onBrowseHistory={() => browsePublic("liquipedia")}
           onBrowseCommunity={() => browsePublic("community")}
+          onBrowseTournaments={() => browsePublic("tournaments")}
           supportsFsAccess={supportsFsAccess}
           onCloudSignIn={cloudEnabled ? onCloudSignIn : null}
           cloudRestoring={cloudRestoring}
@@ -1272,6 +1286,7 @@ export default function App() {
 
           {tab === "community" && <Community games={resolved} isDemo={isDemo} onOpenAccount={() => openOverlay("accounts")} />}
           {tab === "liquipedia" && <Liquipedia />}
+          {tab === "tournaments" && <TournamentArchive />}
         </>
           )}
           </Suspense>

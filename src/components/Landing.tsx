@@ -9,6 +9,8 @@ interface Props {
   onBrowseHistory: () => void;
   /** Opens aggregate Community Lab data without requiring a replay folder. */
   onBrowseCommunity: () => void;
+  /** Opens public replay-derived tournament data without requiring a replay folder. */
+  onBrowseTournaments: () => void;
   supportsFsAccess: boolean;
   /** Non-null when cloud sync is configured: "sign in to restore" entry point. */
   onCloudSignIn: (() => void) | null;
@@ -25,6 +27,7 @@ export function Landing({
   onDemo,
   onBrowseHistory,
   onBrowseCommunity,
+  onBrowseTournaments,
   supportsFsAccess,
   onCloudSignIn,
   cloudRestoring,
@@ -120,7 +123,8 @@ export function Landing({
           folder picker or demo mode. */}
       <div className="landing-aside">
         No replays to hand? <button className="linky" onClick={onBrowseCommunity} disabled={cloudRestoring !== null}>Explore anonymous community benchmarks</button>
-        {" "}or <button className="linky" onClick={onBrowseHistory} disabled={cloudRestoring !== null}>browse Melee tournament history</button>. Neither needs
+        {", "}<button className="linky" onClick={onBrowseHistory} disabled={cloudRestoring !== null}>browse Melee tournament history</button>
+        {", or "}<button className="linky" onClick={onBrowseTournaments} disabled={cloudRestoring !== null}>explore replay-derived tournaments</button>. None needs
         access to your replay folder.
       </div>
       <div className="hint" style={{ marginTop: 10 }}>

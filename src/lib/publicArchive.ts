@@ -1,0 +1,524 @@
+import { supabase } from "./supabase";
+
+const PAGE_SIZE = 1_000;
+
+export type ArchivePopulation = "broad" | "conservative";
+export type ArchiveFormat = "singles" | "doubles";
+export type ArchiveScope = "community" | "series" | "tournament" | "player" | "set";
+export type ArchiveTarget =
+  | { kind: "series"; id: string }
+  | { kind: "event"; id: string };
+
+export interface ArchiveDataset {
+  id: string;
+  label: string;
+  source_url: string;
+  source_label: string;
+  license_url: string | null;
+  compressed_bytes: number;
+  archive_count: number;
+  replay_file_count: number;
+  parsed_replay_count: number;
+  unique_game_count: number;
+  broad_game_count: number;
+  conservative_game_count: number;
+  parser_version: string;
+  curation_version: string;
+  data_as_of: string;
+  notes: string | null;
+  published_at: string;
+}
+
+export interface ArchiveSeries {
+  id: string;
+  canonical_name: string;
+  source_url: string | null;
+  notes: string | null;
+}
+
+export interface ArchiveTournament {
+  id: string;
+  dataset_id: string;
+  series_id: string | null;
+  canonical_name: string;
+  year: number | null;
+  start_date: string | null;
+  end_date: string | null;
+  location: string | null;
+  online: boolean | null;
+  is_tournament: boolean;
+  event_source_url: string | null;
+  event_source_label: string | null;
+  source_confidence: "verified" | "probable" | "unverified";
+  notes: string | null;
+}
+
+export interface ArchiveMoveMetrics {
+  attempts: number;
+  landed: number;
+  damage: number;
+  kills: number;
+  killPctSum: number;
+  openings: number;
+  openingDmg: number;
+  lCancelSuccess: number;
+  lCancelFail: number;
+}
+
+export interface ArchiveRateDistribution {
+  qualifiedPlayers: number;
+  equalWeightMean: number | null;
+  p25: number | null;
+  median: number | null;
+  p75: number | null;
+}
+
+export interface ArchivePlayerBalancedMetrics {
+  lCancel: ArchiveRateDistribution;
+  techSuccess: ArchiveRateDistribution;
+}
+
+export interface ArchiveMetrics {
+  durationFrames: number;
+  damageTotal: number;
+  neutralWins: number;
+  openingsPerKillSum: number;
+  openingsPerKillSamples: number;
+  damagePerOpeningSum: number;
+  damagePerOpeningSamples: number;
+  inputsPerMinuteSum: number;
+  inputsPerMinuteSamples: number;
+  lCancelSuccess: number;
+  lCancelFail: number;
+  techInPlace: number;
+  techToward: number;
+  techAway: number;
+  techMissed: number;
+  wallTechSuccess: number;
+  wallTechMissed: number;
+  playerBalanced: ArchivePlayerBalancedMetrics | null;
+  moves: Record<string, ArchiveMoveMetrics> | null;
+}
+
+export interface ArchiveRollup {
+  rollup_key: string;
+  dataset_id: string;
+  scope: ArchiveScope;
+  population: ArchivePopulation;
+  series_id: string | null;
+  tournament_id: string | null;
+  set_id: string | null;
+  player_id: string | null;
+  format: ArchiveFormat | null;
+  character_id: number | null;
+  opponent_character_id: number | null;
+  stage_id: number | null;
+  game_count: number;
+  win_rate_game_count: number;
+  wins: number;
+  identified_player_count: number | null;
+  player_balanced_sample_count: number | null;
+  metrics: ArchiveMetrics;
+  stats_version: number;
+}
+
+export interface ArchivePlayer {
+  id: string;
+  display_name: string;
+  normalized_name: string;
+  liquipedia_url: string | null;
+  country_code: string | null;
+  active: boolean | null;
+}
+
+export interface ArchivePlayerRanking {
+  player_id: string;
+  ranking_series: string;
+  edition_label: string;
+  edition_year: number;
+  rank: number;
+  source_url: string;
+}
+
+export interface ArchiveProOption extends ArchivePlayer {
+  observed_character_ids: number[];
+  observed_game_count: number;
+  latest_ranking: ArchivePlayerRanking;
+  best_rank: number;
+}
+
+export interface ArchiveForecastEvent {
+  id: string;
+  canonical_name: string;
+  series_id: string | null;
+  start_date: string;
+  entrant_source_url: string;
+  bracket_source_url: string | null;
+  simulation_count: number;
+  data_cutoff: string;
+  notes: string | null;
+  published_at: string;
+}
+
+export interface ArchiveForecastPlayer {
+  forecast_event_id: string;
+  player_id: string;
+  seed: number | null;
+  title_probability: number;
+  top_8_probability: number;
+  interval_low: number | null;
+  interval_high: number | null;
+  confidence: "low" | "medium" | "high";
+}
+
+export interface ArchiveForecast extends ArchiveForecastEvent {
+  players: Array<ArchiveForecastPlayer & { player: ArchivePlayer }>;
+}
+
+export interface ArchiveCatalog {
+  dataset: ArchiveDataset | null;
+  series: ArchiveSeries[];
+  tournaments: ArchiveTournament[];
+}
+
+interface PageResponse {
+  data: unknown[] | null;
+  error: { message: string } | null;
+}
+
+async function readAll<T>(readPage: (from: number, to: number) => Promise<PageResponse>): Promise<T[]> {
+  const rows: T[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const response = await readPage(from, from + PAGE_SIZE - 1);
+    if (response.error) throw new Error(response.error.message);
+    const page = (response.data ?? []) as T[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) return rows;
+  }
+}
+
+function requireArchiveClient() {
+  if (!supabase) throw new Error("Public archive data is unavailable because Supabase is not configured.");
+  return supabase;
+}
+
+export async function fetchLatestArchiveDataset(): Promise<ArchiveDataset | null> {
+  const client = requireArchiveClient();
+  const latest = await client
+    .from("archive_datasets")
+    .select("id,label,source_url,source_label,license_url,compressed_bytes,archive_count,replay_file_count,parsed_replay_count,unique_game_count,broad_game_count,conservative_game_count,parser_version,curation_version,data_as_of,notes,published_at")
+    .eq("published", true)
+    .order("data_as_of", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (latest.error) throw new Error(latest.error.message);
+  return latest.data ? latest.data as unknown as ArchiveDataset : null;
+}
+
+export async function fetchArchiveCatalog(): Promise<ArchiveCatalog> {
+  const client = requireArchiveClient();
+  const dataset = await fetchLatestArchiveDataset();
+  if (!dataset) return { dataset: null, series: [], tournaments: [] };
+
+  const [series, tournaments] = await Promise.all([
+    readAll<ArchiveSeries>(async (from, to) => {
+      const response = await client
+        .from("archive_tournament_series")
+        .select("id,canonical_name,source_url,notes")
+        .eq("published", true)
+        .order("canonical_name")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+    readAll<ArchiveTournament>(async (from, to) => {
+      const response = await client
+        .from("archive_tournaments")
+        .select("id,dataset_id,series_id,canonical_name,year,start_date,end_date,location,online,is_tournament,event_source_url,event_source_label,source_confidence,notes")
+        .eq("published", true)
+        .eq("dataset_id", dataset.id)
+        .order("year", { ascending: false })
+        .order("canonical_name")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+  ]);
+
+  const publicTournaments = tournaments.filter((tournament) =>
+    tournament.is_tournament && tournament.source_confidence !== "unverified");
+  const tournamentSeries = new Set(publicTournaments.map((tournament) => tournament.series_id).filter(Boolean));
+  return {
+    dataset,
+    series: series.filter((item) => tournamentSeries.has(item.id)),
+    tournaments: publicTournaments,
+  };
+}
+
+interface TargetableQuery {
+  eq(column: string, value: string): TargetableQuery;
+  is(column: string, value: null): TargetableQuery;
+  order(column: string): TargetableQuery;
+  range(from: number, to: number): PromiseLike<PageResponse>;
+}
+
+function targetQuery(query: TargetableQuery, target: ArchiveTarget): TargetableQuery {
+  if (target.kind === "event") return query.eq("tournament_id", target.id);
+  return query.eq("series_id", target.id).is("tournament_id", null);
+}
+
+export interface ArchiveRollupQuery {
+  datasetId: string;
+  target: ArchiveTarget;
+  population: ArchivePopulation;
+  format: ArchiveFormat;
+  playerId?: string | null;
+}
+
+export async function fetchArchiveRollups(filters: ArchiveRollupQuery): Promise<ArchiveRollup[]> {
+  const client = requireArchiveClient();
+  return readAll<ArchiveRollup>(async (from, to) => {
+    let query = client
+      .from("archive_rollups")
+      .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
+      .eq("published", true)
+      .eq("dataset_id", filters.datasetId)
+      .eq("scope", filters.playerId ? "player" : filters.target.kind === "event" ? "tournament" : "series")
+      .eq("population", filters.playerId ? "conservative" : filters.population)
+      .eq("format", filters.format);
+    let targetted = targetQuery(query as unknown as TargetableQuery, filters.target);
+    if (filters.playerId) targetted = targetted.eq("player_id", filters.playerId);
+    const response = await targetted.order("rollup_key").range(from, to);
+    return response as unknown as PageResponse;
+  });
+}
+
+interface ObservedPlayerRollup {
+  player_id: string;
+  character_id: number;
+  game_count: number;
+}
+
+async function fetchPublishedPlayerDirectory(): Promise<[ArchivePlayer[], ArchivePlayerRanking[]]> {
+  const client = requireArchiveClient();
+  return Promise.all([
+    readAll<ArchivePlayer>(async (from, to) => {
+      const response = await client
+        .from("archive_players")
+        .select("id,display_name,normalized_name,liquipedia_url,country_code,active")
+        .eq("published", true)
+        .order("display_name")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+    readAll<ArchivePlayerRanking>(async (from, to) => {
+      const response = await client
+        .from("archive_player_rankings")
+        .select("player_id,ranking_series,edition_label,edition_year,rank,source_url")
+        .eq("published", true)
+        .order("edition_year", { ascending: false })
+        .order("rank")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+  ]);
+}
+
+function proOptions(
+  players: ArchivePlayer[],
+  rankings: ArchivePlayerRanking[],
+  observed: ObservedPlayerRollup[],
+): ArchiveProOption[] {
+  const rankingsByPlayer = new Map<string, ArchivePlayerRanking[]>();
+  for (const ranking of rankings) {
+    const list = rankingsByPlayer.get(ranking.player_id) ?? [];
+    list.push(ranking);
+    rankingsByPlayer.set(ranking.player_id, list);
+  }
+  const observedByPlayer = new Map<string, Map<number, number>>();
+  for (const row of observed) {
+    const chars = observedByPlayer.get(row.player_id) ?? new Map<number, number>();
+    chars.set(row.character_id, (chars.get(row.character_id) ?? 0) + row.game_count);
+    observedByPlayer.set(row.player_id, chars);
+  }
+
+  const options: ArchiveProOption[] = [];
+  for (const player of players) {
+    const playerRankings = rankingsByPlayer.get(player.id);
+    const characters = observedByPlayer.get(player.id);
+    if (!playerRankings?.length || !characters?.size) continue;
+    playerRankings.sort((a, b) => b.edition_year - a.edition_year || a.rank - b.rank);
+    const latestRanking = playerRankings[0];
+    if (!latestRanking) continue;
+    options.push({
+      ...player,
+      observed_character_ids: [...characters.keys()].sort((a, b) => a - b),
+      observed_game_count: [...characters.values()].reduce((sum, count) => sum + count, 0),
+      latest_ranking: latestRanking,
+      best_rank: Math.min(...playerRankings.map((ranking) => ranking.rank)),
+    });
+  }
+  return options.sort((a, b) => a.display_name.localeCompare(b.display_name));
+}
+
+export async function fetchArchiveProOptions(
+  datasetId: string,
+  target: ArchiveTarget,
+  format: ArchiveFormat,
+): Promise<ArchiveProOption[]> {
+  const client = requireArchiveClient();
+  const [[players, rankings], observed] = await Promise.all([
+    fetchPublishedPlayerDirectory(),
+    readAll<ObservedPlayerRollup>(async (from, to) => {
+      let query = client
+        .from("archive_rollups")
+        .select("player_id,character_id,game_count")
+        .eq("published", true)
+        .eq("dataset_id", datasetId)
+        .eq("scope", "player")
+        .eq("population", "conservative")
+        .eq("format", format)
+        .not("player_id", "is", null)
+        .not("character_id", "is", null)
+        .is("opponent_character_id", null)
+        .is("stage_id", null);
+      const targetted = targetQuery(query as unknown as TargetableQuery, target);
+      const response = await targetted.order("player_id").range(from, to);
+      return response as unknown as PageResponse;
+    }),
+  ]);
+  return proOptions(players, rankings, observed);
+}
+
+export interface ArchiveCommunityBenchmarks {
+  broad: ArchiveRollup | null;
+  conservative: ArchiveRollup | null;
+}
+
+/** Global, character-specific archive averages; deliberately separate from opt-in contributor quartiles. */
+export async function fetchArchiveCommunityBenchmarks(
+  datasetId: string,
+  characterId: number,
+  format: ArchiveFormat = "singles",
+): Promise<ArchiveCommunityBenchmarks> {
+  const client = requireArchiveClient();
+  const rows = await readAll<ArchiveRollup>(async (from, to) => {
+    const response = await client
+      .from("archive_rollups")
+      .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
+      .eq("published", true)
+      .eq("dataset_id", datasetId)
+      .eq("scope", "community")
+      .in("population", ["broad", "conservative"])
+      .eq("format", format)
+      .eq("character_id", characterId)
+      .is("opponent_character_id", null)
+      .is("stage_id", null)
+      .order("rollup_key")
+      .range(from, to);
+    return response as unknown as PageResponse;
+  });
+  return {
+    broad: rows.find((row) => row.population === "broad") ?? null,
+    conservative: rows.find((row) => row.population === "conservative") ?? null,
+  };
+}
+
+/** Top-100 identities with a published, global player rollup; private identity candidates never enter this list. */
+export async function fetchArchiveCommunityProOptions(
+  datasetId: string,
+  format: ArchiveFormat = "singles",
+): Promise<ArchiveProOption[]> {
+  const client = requireArchiveClient();
+  const [[players, rankings], observed] = await Promise.all([
+    fetchPublishedPlayerDirectory(),
+    readAll<ObservedPlayerRollup>(async (from, to) => {
+      const response = await client
+        .from("archive_rollups")
+        .select("player_id,character_id,game_count")
+        .eq("published", true)
+        .eq("dataset_id", datasetId)
+        .eq("scope", "player")
+        .eq("population", "conservative")
+        .eq("format", format)
+        .not("player_id", "is", null)
+        .not("character_id", "is", null)
+        .is("series_id", null)
+        .is("tournament_id", null)
+        .is("opponent_character_id", null)
+        .is("stage_id", null)
+        .order("player_id")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+  ]);
+  return proOptions(players, rankings, observed);
+}
+
+export async function fetchArchiveCommunityProBenchmark(
+  datasetId: string,
+  playerId: string,
+  characterId: number,
+  format: ArchiveFormat = "singles",
+): Promise<ArchiveRollup | null> {
+  const client = requireArchiveClient();
+  const response = await client
+    .from("archive_rollups")
+    .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
+    .eq("published", true)
+    .eq("dataset_id", datasetId)
+    .eq("scope", "player")
+    .eq("population", "conservative")
+    .eq("format", format)
+    .eq("player_id", playerId)
+    .eq("character_id", characterId)
+    .is("series_id", null)
+    .is("tournament_id", null)
+    .is("opponent_character_id", null)
+    .is("stage_id", null)
+    .limit(1)
+    .maybeSingle();
+  if (response.error) throw new Error(response.error.message);
+  return response.data ? response.data as unknown as ArchiveRollup : null;
+}
+
+export async function fetchPublishedForecasts(): Promise<ArchiveForecast[]> {
+  const client = requireArchiveClient();
+  const events = await readAll<ArchiveForecastEvent>(async (from, to) => {
+    const response = await client
+      .from("archive_forecast_events")
+      .select("id,canonical_name,series_id,start_date,entrant_source_url,bracket_source_url,simulation_count,data_cutoff,notes,published_at")
+      .eq("published", true)
+      .order("start_date")
+      .range(from, to);
+    return response as unknown as PageResponse;
+  });
+  if (!events.length) return [];
+
+  const [entries, players] = await Promise.all([
+    readAll<ArchiveForecastPlayer>(async (from, to) => {
+      const response = await client
+        .from("archive_forecast_players")
+        .select("forecast_event_id,player_id,seed,title_probability,top_8_probability,interval_low,interval_high,confidence")
+        .eq("published", true)
+        .order("title_probability", { ascending: false })
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+    readAll<ArchivePlayer>(async (from, to) => {
+      const response = await client
+        .from("archive_players")
+        .select("id,display_name,normalized_name,liquipedia_url,country_code,active")
+        .eq("published", true)
+        .order("display_name")
+        .range(from, to);
+      return response as unknown as PageResponse;
+    }),
+  ]);
+  const playerById = new Map(players.map((player) => [player.id, player]));
+  return events.map((event) => ({
+    ...event,
+    players: entries
+      .filter((entry) => entry.forecast_event_id === event.id && playerById.has(entry.player_id))
+      .map((entry) => ({ ...entry, player: playerById.get(entry.player_id)! }))
+      .sort((a, b) => b.title_probability - a.title_probability),
+  }));
+}
