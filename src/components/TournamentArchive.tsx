@@ -385,14 +385,32 @@ function MatchupPanel({ rows, characterId, selectedOpponentId, selectedStageId, 
   selectedStageId: number | null;
   format: ArchiveFormat;
 }) {
-  const matchups = characterId === null || format === "doubles" ? [] : rows
-    .filter((row) => row.character_id === characterId && row.opponent_character_id !== null && row.stage_id === selectedStageId)
-    .filter((row) => selectedOpponentId === null || row.opponent_character_id === selectedOpponentId)
-    .sort((a, b) => b.game_count - a.game_count);
+  type SortKey = "character" | "games" | "winRate";
+  type SortDirection = "asc" | "desc";
+  const [sort, setSort] = useState<{ key: SortKey; direction: SortDirection }>({ key: "games", direction: "desc" });
+  const matchups = useMemo(() => {
+    const filtered = characterId === null || format === "doubles" ? [] : rows
+      .filter((row) => row.character_id === characterId && row.opponent_character_id !== null && row.stage_id === selectedStageId)
+      .filter((row) => selectedOpponentId === null || row.opponent_character_id === selectedOpponentId);
+    const direction = sort.direction === "asc" ? 1 : -1;
+    return filtered.sort((a, b) => {
+      let comparison: number;
+      if (sort.key === "character") comparison = charName(a.opponent_character_id!).localeCompare(charName(b.opponent_character_id!));
+      else if (sort.key === "winRate") comparison = (rate(a.wins, a.win_rate_game_count) ?? -1) - (rate(b.wins, b.win_rate_game_count) ?? -1);
+      else comparison = a.game_count - b.game_count;
+      return comparison !== 0
+        ? direction * comparison
+        : b.game_count - a.game_count || charName(a.opponent_character_id!).localeCompare(charName(b.opponent_character_id!));
+    });
+  }, [characterId, format, rows, selectedOpponentId, selectedStageId, sort]);
+  const sortableHeader = (key: SortKey, label: string, data = false) => {
+    const active = sort.key === key;
+    return <th className={`ta-sortable${data ? " data" : ""}${active ? " active" : ""}`} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}><button type="button" onClick={() => setSort((previous) => previous.key === key ? { key, direction: previous.direction === "asc" ? "desc" : "asc" } : { key, direction: key === "character" ? "asc" : "desc" })}>{label}<span aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span></button></th>;
+  };
   return (
     <section className="panel">
       <h2>Matchups</h2>
-      {matchups.length ? <div className="table-scroll"><table><thead><tr><th>Opponent</th><th className="data">Games</th><th className="data">Record</th><th className="data">Win rate</th><th className="data">Damage / game</th><th className="data">L-cancel</th></tr></thead><tbody>{matchups.map((row) => {
+      {matchups.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("character", "Opponent")}{sortableHeader("games", "Games", true)}<th className="data">Record</th>{sortableHeader("winRate", "Win rate", true)}<th className="data">Damage / game</th><th className="data">L-cancel</th></tr></thead><tbody>{matchups.map((row) => {
         const decided = row.win_rate_game_count;
         const winRate = rate(row.wins, decided);
         const attempts = row.metrics.lCancelSuccess + row.metrics.lCancelFail;

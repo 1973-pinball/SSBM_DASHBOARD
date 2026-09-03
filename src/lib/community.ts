@@ -1,4 +1,4 @@
-import type { ResolvedGame } from "./types";
+import type { ActionCounts, ResolvedGame } from "./types";
 import { INCLUDED_CHARACTER_ID_SET } from "./config";
 import { executionSummary, moveTable } from "./stats";
 import { supabase } from "./supabase";
@@ -68,6 +68,10 @@ export interface CommunityExecutionRow extends CommunityLookbackRow {
   groundTechInPlace: number | null;
   groundTechIn: number | null;
   groundTechAway: number | null;
+  actionCounts: ActionCounts | null;
+  techInPlaceCount: number | null;
+  techInCount: number | null;
+  techAwayCount: number | null;
 }
 
 export interface CommunityMonthRow {
@@ -132,6 +136,25 @@ const withLookback = <T extends { lookbackDays?: unknown }>(row: T): T & Communi
   lookbackDays: normalizeLookbackDays(row.lookbackDays),
 });
 
+const emptyActionCounts = (): ActionCounts => ({
+  rolls: 0,
+  airDodges: 0,
+  spotDodges: 0,
+  wavedashes: 0,
+  wavelands: 0,
+  dashDances: 0,
+  ledgeGrabs: 0,
+  grabs: 0,
+});
+
+const normalizeExecution = (row: CommunityExecutionRow): CommunityExecutionRow => ({
+  ...withLookback(row),
+  actionCounts: row.actionCounts ? { ...emptyActionCounts(), ...row.actionCounts } : null,
+  techInPlaceCount: row.techInPlaceCount === null || row.techInPlaceCount === undefined ? null : Number(row.techInPlaceCount),
+  techInCount: row.techInCount === null || row.techInCount === undefined ? null : Number(row.techInCount),
+  techAwayCount: row.techAwayCount === null || row.techAwayCount === undefined ? null : Number(row.techAwayCount),
+});
+
 export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
@@ -158,7 +181,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     matchups: (payload.matchups ?? []).map(withLookback).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
     benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
     moves: (payload.moves ?? []).map(withLookback).filter((r) => playable(r.characterId)),
-    execution: (payload.execution ?? []).map(withLookback).filter((r) => playable(r.characterId)),
+    execution: (payload.execution ?? []).map(normalizeExecution).filter((r) => playable(r.characterId)),
     months: payload.months ?? [],
     characters: (payload.characters ?? []).filter((r) => playable(r.characterId)),
     stages: payload.stages ?? [],
@@ -293,6 +316,18 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
       const selected = games.filter((g) =>
         (characterId === -1 || g.me.characterId === characterId) && inLookback(g, lookbackDays));
       const summary = executionSummary(selected, Number.MAX_SAFE_INTEGER);
+      const actionCounts = emptyActionCounts();
+      let techInPlaceCount = 0;
+      let techInCount = 0;
+      let techAwayCount = 0;
+      for (const game of selected) {
+        for (const action of Object.keys(actionCounts) as (keyof ActionCounts)[]) {
+          actionCounts[action] += game.me.actions?.[action] ?? 0;
+        }
+        techInPlaceCount += game.me.techs?.inPlace ?? 0;
+        techInCount += game.me.techs?.toward ?? 0;
+        techAwayCount += game.me.techs?.away ?? 0;
+      }
       return {
         lookbackDays,
         characterId,
@@ -303,6 +338,10 @@ export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot 
         groundTechInPlace: summary.groundTechInPlace,
         groundTechIn: summary.groundTechIn,
         groundTechAway: summary.groundTechAway,
+        actionCounts,
+        techInPlaceCount,
+        techInCount,
+        techAwayCount,
       };
     }),
   );

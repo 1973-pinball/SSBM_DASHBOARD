@@ -38,6 +38,7 @@ const DEFAULTS = {
   identities: new URL("./data/nikki-player-overrides.json", import.meta.url).pathname,
   output: path.join(CACHE_ROOT, "public-export"),
   dataAsOf: localDate(),
+  version: "v1",
 };
 
 const args = { ...DEFAULTS };
@@ -45,14 +46,15 @@ for (let index = 2; index < process.argv.length; index += 2) {
   const key = process.argv[index];
   const value = process.argv[index + 1];
   if (!key?.startsWith("--") || value === undefined) {
-    throw new Error("Usage: build-nikki-public-archive.mjs [--results DIR] [--downloads DIR] [--curation FILE] [--events FILE] [--series FILE] [--identities FILE] [--output DIR] [--data-as-of YYYY-MM-DD]");
+    throw new Error("Usage: build-nikki-public-archive.mjs [--results DIR] [--downloads DIR] [--curation FILE] [--events FILE] [--series FILE] [--identities FILE] [--output DIR] [--data-as-of YYYY-MM-DD] [--version vN]");
   }
   const name = key.slice(2).replace(/-([a-z])/g, (_, char) => char.toUpperCase());
   if (!(name in args)) throw new Error(`Unknown option ${key}`);
   args[name] = value;
 }
 
-const DATASET_ID = `nikki-${args.dataAsOf}-v1`;
+if (!/^v[1-9]\d*$/.test(args.version)) throw new Error("--version must look like v1, v2, …");
+const DATASET_ID = `nikki-${args.dataAsOf}-${args.version}`;
 const SOURCE_URL = "https://replays.nikki.sh/";
 const MIN_GAME_FRAMES = 30 * 60;
 const MAX_SET_GAMES = 10;
@@ -465,6 +467,16 @@ const emptyMetrics = () => ({
   techMissed: 0,
   wallTechSuccess: 0,
   wallTechMissed: 0,
+  actions: {
+    rolls: 0,
+    airDodges: 0,
+    spotDodges: 0,
+    wavedashes: 0,
+    wavelands: 0,
+    dashDances: 0,
+    ledgeGrabs: 0,
+    grabs: 0,
+  },
   playerBalanced: null,
   moves: null,
 });
@@ -534,6 +546,9 @@ const addRollup = (dimensions, record, player, slot, includeMoves) => {
   metrics.techMissed += techs.missed ?? 0;
   metrics.wallTechSuccess += techs.wallSuccess ?? 0;
   metrics.wallTechMissed += techs.wallMissed ?? 0;
+  for (const action of Object.keys(metrics.actions)) {
+    metrics.actions[action] += player.actions?.[action] ?? 0;
+  }
   if (!includeMoves) return;
   metrics.moves ??= {};
   for (const [moveId, move] of Object.entries(player.moveStats ?? {})) {
@@ -681,6 +696,7 @@ for (const [fileIndex, name] of resultFiles.entries()) {
         tech_missed: player.techs?.missed ?? 0,
         wall_tech_success: player.techs?.wallSuccess ?? 0,
         wall_tech_missed: player.techs?.wallMissed ?? 0,
+        action_counts: player.actions ?? {},
         move_stats: player.moveStats ?? {},
         published: false,
       });

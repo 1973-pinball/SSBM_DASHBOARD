@@ -3,8 +3,10 @@ import type { ResolvedGame } from "../lib/types";
 import { WIN_MODEL_FEATURES, buildWinModelInput, quartileWinRates } from "../lib/model";
 import type { CoefRow, FeatureDef, WinModel } from "../lib/model";
 import type { ModelWorkerJob, ModelWorkerResult } from "../worker/model.worker";
-import { COACH_MIN_DECIDED, recommendations } from "../lib/coach";
+import { COACH_MIN_DECIDED, recommendations, type CoachMoveBenchmark } from "../lib/coach";
 import { num, pct, winRateColor } from "../lib/format";
+import { moveGroup } from "../lib/melee";
+import { fetchArchiveCommunityBenchmarks, fetchLatestArchiveDataset, type ArchiveRollup } from "../lib/publicArchive";
 // Statically imported, not lazy: Sessions used to be its own tab and chunk, and
 // now renders inside this one directly under the coach list.
 import { Sessions } from "./Sessions";
@@ -132,9 +134,45 @@ function useWinModel(
  */
 const COACH_VISIBLE = 5;
 
+function coachMoveBenchmark(row: ArchiveRollup): CoachMoveBenchmark {
+  const landedByMove: Record<string, number> = {};
+  for (const [moveId, metrics] of Object.entries(row.metrics.moves ?? {})) {
+    const key = moveGroup(Number(moveId)).key;
+    landedByMove[key] = (landedByMove[key] ?? 0) + metrics.landed;
+  }
+  return { characterId: row.character_id!, gameCount: row.game_count, landedByMove };
+}
+
+function useTournamentMoveBenchmarks(games: ResolvedGame[]): CoachMoveBenchmark[] {
+  const characterIds = useMemo(
+    () => [...new Set(games.map((game) => game.me.characterId))].sort((a, b) => a - b),
+    [games],
+  );
+  const [benchmarks, setBenchmarks] = useState<CoachMoveBenchmark[]>([]);
+  useEffect(() => {
+    let alive = true;
+    void fetchLatestArchiveDataset()
+      .then(async (dataset) => {
+        if (!dataset) return [];
+        const rows = await Promise.all(characterIds.map(async (characterId) => {
+          const result = await fetchArchiveCommunityBenchmarks(dataset.id, characterId);
+          return result.conservative;
+        }));
+        return rows.filter((row): row is ArchiveRollup => row !== null).map(coachMoveBenchmark);
+      })
+      .then((next) => { if (alive) setBenchmarks(next); })
+      .catch(() => { if (alive) setBenchmarks([]); });
+    return () => { alive = false; };
+  }, [characterIds]);
+  return benchmarks;
+}
+
 /** Ranked plain-English "do this" list — the tab's front door for non-stats readers. */
-function CoachPanel({ games }: { games: ResolvedGame[] }) {
-  const recs = useMemo(() => recommendations(games, Infinity), [games]);
+function CoachPanel({ games, tournamentMoveBenchmarks }: { games: ResolvedGame[]; tournamentMoveBenchmarks: CoachMoveBenchmark[] }) {
+  const recs = useMemo(
+    () => recommendations(games, Infinity, { tournamentMoveBenchmarks }),
+    [games, tournamentMoveBenchmarks],
+  );
   const [expanded, setExpanded] = useState(false);
   const hidden = recs.length - COACH_VISIBLE;
   const shown = expanded ? recs : recs.slice(0, COACH_VISIBLE);
@@ -166,7 +204,7 @@ function CoachPanel({ games }: { games: ResolvedGame[] }) {
       <div className="hint">
         Ranked by effect size × evidence, each against your own overall win rate — the top {COACH_VISIBLE} show by
         default. Anything that doesn't clear a significance bar is left out entirely. The models below show the full
-        picture behind these.
+        picture behind these. Move-habit advice also checks the matching character's tournament benchmark when available.
       </div>
     </div>
   );
@@ -209,6 +247,7 @@ function CoefBar({ coef, max }: { coef: number; max: number }) {
 
 export function Insights({ games }: { games: ResolvedGame[] }) {
   const [includeOutcome, setIncludeOutcome] = useState(false);
+  const tournamentMoveBenchmarks = useTournamentMoveBenchmarks(games);
 
   const features = useMemo(
     () => WIN_MODEL_FEATURES.filter((f) => f.group === "execution" || includeOutcome),
@@ -302,7 +341,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
   if (!model || !primary) {
     return (
       <>
-        <CoachPanel games={games} />
+        <CoachPanel games={games} tournamentMoveBenchmarks={tournamentMoveBenchmarks} />
 
         <div className="panel">
           <h2>What predicts your wins</h2>
@@ -329,7 +368,7 @@ export function Insights({ games }: { games: ResolvedGame[] }) {
 
   return (
     <>
-      <CoachPanel games={games} />
+      <CoachPanel games={games} tournamentMoveBenchmarks={tournamentMoveBenchmarks} />
 
       <div className="panel">
         <h2>What would help you win — logistic regression</h2>

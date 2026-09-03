@@ -20,6 +20,9 @@
 .acb-panel .hint { line-height: 1.5; }
 .acb-panel .hint a { color: var(--accent); }
 .acb-error { padding: 18px; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); font-size: 12px; text-align: center; }
+.community-atlas-archive { margin-top: var(--gap); }
+.atlas-rate-cell b { display: block; font-family: var(--font-data); font-size: 13px; }
+.atlas-low-sample { opacity: 0.58; }
 
 @media (max-width: 700px) {
   .acb-heading, .acb-move-heading { align-items: stretch; flex-direction: column; }

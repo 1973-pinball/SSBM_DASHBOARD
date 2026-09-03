@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import type { CommunityMoveRow } from "../lib/community";
 import { pct, num, shortDate } from "../lib/format";
 import { charName, moveGroup, moveGroupLabel } from "../lib/melee";
 import {
   fetchArchiveCommunityBenchmarks,
   fetchArchiveCommunityProBenchmark,
   fetchArchiveCommunityProOptions,
+  fetchArchiveProAggregateAtlasRows,
   fetchLatestArchiveDataset,
   type ArchiveCommunityBenchmarks,
   type ArchiveDataset,
@@ -19,6 +21,7 @@ import "./ArchiveCommunityBenchmark.css";
 interface Props {
   games: ResolvedGame[];
   characterId: number | null;
+  communityMoves: CommunityMoveRow[];
 }
 
 type MoveMetric = "attempts" | "landed" | "damage" | "kills" | "killPct";
@@ -108,11 +111,12 @@ function archiveExecution(
   };
 }
 
-export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
+export function ArchiveCommunityBenchmark({ games, characterId, communityMoves }: Props) {
   const [dataset, setDataset] = useState<ArchiveDataset | null>(null);
   const [benchmarks, setBenchmarks] = useState<ArchiveCommunityBenchmarks>(EMPTY_BENCHMARKS);
   const [pros, setPros] = useState<ArchiveProOption[]>([]);
   const [playerId, setPlayerId] = useState<string | null>(null);
+  const [proAggregateBenchmark, setProAggregateBenchmark] = useState<ArchiveRollup | null>(null);
   const [proBenchmark, setProBenchmark] = useState<ArchiveRollup | null>(null);
   const [moveMetric, setMoveMetric] = useState<MoveMetric>("attempts");
   const [loading, setLoading] = useState(true);
@@ -148,13 +152,17 @@ export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
   useEffect(() => {
     if (!dataset || characterId === null) {
       setBenchmarks(EMPTY_BENCHMARKS);
+      setProAggregateBenchmark(null);
       return;
     }
     let alive = true;
     setLoading(true);
-    void fetchArchiveCommunityBenchmarks(dataset.id, characterId)
-      .then((next) => { if (alive) { setBenchmarks(next); setError(null); } })
-      .catch(() => { if (alive) { setBenchmarks(EMPTY_BENCHMARKS); setError("Archive benchmarks are temporarily unavailable."); } })
+    void Promise.all([
+      fetchArchiveCommunityBenchmarks(dataset.id, characterId),
+      fetchArchiveProAggregateAtlasRows(dataset.id, characterId),
+    ])
+      .then(([next, proRows]) => { if (alive) { setBenchmarks(next); setProAggregateBenchmark(proRows.find((row) => row.opponent_character_id === null && row.stage_id === null) ?? null); setError(null); } })
+      .catch(() => { if (alive) { setBenchmarks(EMPTY_BENCHMARKS); setProAggregateBenchmark(null); setError("Archive benchmarks are temporarily unavailable."); } })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
   }, [characterId, dataset]);
@@ -202,24 +210,35 @@ export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
   }];
   if (benchmarks.broad) executionRows.push(archiveExecution(benchmarks.broad, "Venue archive", false));
   if (benchmarks.conservative) executionRows.push(archiveExecution(benchmarks.conservative, "Tournament archive", true));
+  if (proAggregateBenchmark) executionRows.push(archiveExecution(proAggregateBenchmark, "Pro tournament archive", false));
   if (proBenchmark && selectedPro) executionRows.push(archiveExecution(proBenchmark, selectedPro.display_name, false, "games"));
 
   const moveSources = {
     broad: groupArchiveMoves(benchmarks.broad),
     conservative: groupArchiveMoves(benchmarks.conservative),
+    proAggregate: groupArchiveMoves(proAggregateBenchmark),
     pro: groupArchiveMoves(proBenchmark),
   };
+  const comparisonRow = benchmarks.conservative ?? benchmarks.broad;
+  const comparisonMoves = benchmarks.conservative ? moveSources.conservative : moveSources.broad;
+  const communityMoveByKey = new Map(communityMoves.map((move) => [move.moveKey, move]));
+  const communityDamage = communityMoves.reduce((sum, move) => sum + move.damage, 0);
+  const communityGames = Math.max(0, ...communityMoves.map((move) => move.characterGames));
   const ownMoveByKey = new Map(ownMoves.rows.map((move) => [move.key, move]));
   const moveKeys = [...new Set([
     ...ownMoveByKey.keys(),
+    ...communityMoveByKey.keys(),
     ...moveSources.broad.keys(),
     ...moveSources.conservative.keys(),
+    ...moveSources.proAggregate.keys(),
     ...moveSources.pro.keys(),
   ])].sort((a, b) => {
     const damage = (key: string) => Math.max(
       ownMoveByKey.get(key)?.dmgShare ?? 0,
+      ratio(communityMoveByKey.get(key)?.damage ?? 0, communityDamage) ?? 0,
       ratio(moveSources.broad.get(key)?.damage ?? 0, benchmarks.broad?.metrics.damageTotal ?? 0) ?? 0,
       ratio(moveSources.conservative.get(key)?.damage ?? 0, benchmarks.conservative?.metrics.damageTotal ?? 0) ?? 0,
+      ratio(moveSources.proAggregate.get(key)?.damage ?? 0, proAggregateBenchmark?.metrics.damageTotal ?? 0) ?? 0,
       ratio(moveSources.pro.get(key)?.damage ?? 0, proBenchmark?.metrics.damageTotal ?? 0) ?? 0,
     );
     return damage(b) - damage(a);
@@ -249,7 +268,13 @@ export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
             <h3>Move profile</h3>
             <label>Measure<select value={moveMetric} onChange={(event) => setMoveMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label>
           </div>
-          {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You</th><th className="data">Venue archive<span className="sample-note">{benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games</span></th>{selectedPro && <th className="data">{selectedPro.display_name}<span className="sample-note">{proBenchmark?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>{moveKeys.map((key) => <tr key={key}><td>{ownMoveByKey.get(key)?.label ?? moveGroupLabel(key)}</td><td className="data">{formatLocalMove(ownMoveByKey.get(key), moveMetric, ownMoves.covered)}</td><td className="data">{formatArchiveMove(moveSources.broad.get(key), moveMetric, benchmarks.broad)}</td><td className="data">{formatArchiveMove(moveSources.conservative.get(key), moveMetric, benchmarks.conservative)}</td>{selectedPro && <td className="data">{formatArchiveMove(moveSources.pro.get(key), moveMetric, proBenchmark)}</td>}</tr>)}</tbody></table></div> : <div className="empty-note">No move data is published for this character yet.</div>}
+          {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You</th><th className="data">SSBM Stats<span className="sample-note">{communityGames.toLocaleString()} player-games</span></th><th className="data">Venue archive<span className="sample-note">{benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · {proAggregateBenchmark?.identified_player_count?.toLocaleString() ?? "—"} pros</span></th>{selectedPro && <th className="data">{selectedPro.display_name}<span className="sample-note">{proBenchmark?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>{moveKeys.map((key) => {
+            const ownMove = ownMoveByKey.get(key);
+            const mine = localMoveMetric(ownMove, moveMetric, ownMoves.covered);
+            const field = archiveMoveMetric(comparisonMoves.get(key), moveMetric, comparisonRow);
+            const direction = moveDifference(mine, field, moveMetric, ownMoves.covered, comparisonRow?.game_count ?? 0);
+            return <tr key={key}><td>{ownMove?.label ?? moveGroupLabel(key)}</td><td className={`data ${direction ? `community-diff-${direction}` : ""}`} title={direction ? `Large ${direction === "above" ? "increase over" : "decrease from"} the ${benchmarks.conservative ? "tournament" : "venue"} archive benchmark` : undefined}>{formatLocalMove(ownMove, moveMetric, ownMoves.covered)}</td><td className="data">{formatCommunityMove(communityMoveByKey.get(key), moveMetric, communityDamage)}</td><td className="data">{formatArchiveMove(moveSources.broad.get(key), moveMetric, benchmarks.broad)}</td><td className="data">{formatArchiveMove(moveSources.conservative.get(key), moveMetric, benchmarks.conservative)}</td><td className="data">{formatArchiveMove(moveSources.proAggregate.get(key), moveMetric, proAggregateBenchmark)}</td>{selectedPro && <td className="data">{formatArchiveMove(moveSources.pro.get(key), moveMetric, proBenchmark)}</td>}</tr>;
+          })}</tbody></table></div> : <div className="empty-note">No move data is published for this character yet.</div>}
         </>
       )}
 
@@ -270,19 +295,57 @@ export function ArchiveCommunityBenchmark({ games, characterId }: Props) {
 }
 
 function formatLocalMove(move: ReturnType<typeof moveTable>["rows"][number] | undefined, metric: MoveMetric, covered: number): string {
-  if (!move) return "—";
-  if (metric === "attempts") return move.attemptsPerGame === null ? "—" : num(move.attemptsPerGame, 2);
-  if (metric === "landed") return num(move.landedPerGame, 2);
-  if (metric === "damage") return pct(move.dmgShare);
-  if (metric === "kills") return covered > 0 ? num(move.kills / covered, 3) : "—";
-  return move.avgKillPct === null ? "—" : `${num(move.avgKillPct, 0)}%`;
+  return formatMoveMetric(localMoveMetric(move, metric, covered), metric);
 }
 
 function formatArchiveMove(move: GroupedArchiveMove | undefined, metric: MoveMetric, row: ArchiveRollup | null): string {
-  if (!move || !row || row.game_count === 0) return "—";
-  if (metric === "attempts") return move.attempts === 0 && move.landed > 0 ? "—" : num(move.attempts / row.game_count, 2);
-  if (metric === "landed") return num(move.landed / row.game_count, 2);
-  if (metric === "damage") return pct(ratio(move.damage, row.metrics.damageTotal));
-  if (metric === "kills") return num(move.kills / row.game_count, 3);
-  return move.kills > 0 ? `${num(move.killPctSum / move.kills, 0)}%` : "—";
+  return formatMoveMetric(archiveMoveMetric(move, metric, row), metric);
+}
+
+function formatCommunityMove(move: CommunityMoveRow | undefined, metric: MoveMetric, totalDamage: number): string {
+  if (!move || move.characterGames === 0) return "—";
+  if (metric === "attempts") return formatMoveMetric(move.attempts === null ? null : move.attempts / move.characterGames, metric);
+  if (metric === "landed") return formatMoveMetric(move.landed / move.characterGames, metric);
+  if (metric === "damage") return formatMoveMetric(ratio(move.damage, totalDamage), metric);
+  if (metric === "kills") return formatMoveMetric(move.kills / move.characterGames, metric);
+  return formatMoveMetric(move.kills > 0 ? move.killPctSum / move.kills : null, metric);
+}
+
+function localMoveMetric(move: ReturnType<typeof moveTable>["rows"][number] | undefined, metric: MoveMetric, covered: number): number | null {
+  if (!move) return null;
+  if (metric === "attempts") return move.attemptsPerGame;
+  if (metric === "landed") return move.landedPerGame;
+  if (metric === "damage") return move.dmgShare;
+  if (metric === "kills") return covered > 0 ? move.kills / covered : null;
+  return move.avgKillPct;
+}
+
+function archiveMoveMetric(move: GroupedArchiveMove | undefined, metric: MoveMetric, row: ArchiveRollup | null): number | null {
+  if (!move || !row || row.game_count === 0) return null;
+  if (metric === "attempts") return move.attempts === 0 && move.landed > 0 ? null : move.attempts / row.game_count;
+  if (metric === "landed") return move.landed / row.game_count;
+  if (metric === "damage") return ratio(move.damage, row.metrics.damageTotal);
+  if (metric === "kills") return move.kills / row.game_count;
+  return move.kills > 0 ? move.killPctSum / move.kills : null;
+}
+
+function formatMoveMetric(value: number | null, metric: MoveMetric): string {
+  if (value === null) return "—";
+  if (metric === "damage") return pct(value);
+  if (metric === "killPct") return `${num(value, 0)}%`;
+  return num(value, metric === "kills" ? 3 : 2);
+}
+
+function moveDifference(
+  mine: number | null,
+  field: number | null,
+  metric: MoveMetric,
+  localGames: number,
+  fieldGames: number,
+): "above" | "below" | null {
+  if (mine === null || field === null || localGames < 10 || fieldGames < 25) return null;
+  const absoluteMinimum = metric === "damage" ? 0.05 : metric === "killPct" ? 10 : metric === "kills" ? 0.05 : metric === "landed" ? 0.25 : 0.5;
+  const gap = mine - field;
+  if (Math.abs(gap) < Math.max(absoluteMinimum, Math.abs(field) * 0.35)) return null;
+  return gap > 0 ? "above" : "below";
 }

@@ -91,6 +91,12 @@
 .ta-panel-empty { padding: 20px 8px; color: var(--faint); font-size: 12px; text-align: center; }
 .ta-low-sample { opacity: 0.67; }
 .ta-winrate { font-weight: 600; }
+.ta-sortable { padding: 0; }
+.ta-sortable button { display: flex; width: 100%; align-items: center; gap: 6px; padding: 10px 8px; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.ta-sortable.data button { justify-content: flex-end; }
+.ta-sortable button span { color: var(--faint); font-size: 9px; }
+.ta-sortable.active button span, .ta-sortable button:hover { color: var(--text); }
+.ta-sortable button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 
 .ta-forecast .panel-heading-row { align-items: flex-start; margin-bottom: 12px; }
 .ta-forecast .panel-heading-row h2 { margin-bottom: 3px; color: var(--muted); font-size: 13px; letter-spacing: 0.08em; text-transform: uppercase; }

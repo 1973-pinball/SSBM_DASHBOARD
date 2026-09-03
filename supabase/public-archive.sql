@@ -309,6 +309,7 @@ create table if not exists public.archive_game_players (
   tech_missed integer not null default 0 check (tech_missed >= 0),
   wall_tech_success integer not null default 0 check (wall_tech_success >= 0),
   wall_tech_missed integer not null default 0 check (wall_tech_missed >= 0),
+  action_counts jsonb not null default '{}'::jsonb check (jsonb_typeof(action_counts) = 'object'),
   move_stats jsonb not null default '{}'::jsonb check (jsonb_typeof(move_stats) = 'object'),
   published boolean not null default false,
   primary key (game_key, slot),
@@ -323,6 +324,12 @@ alter table public.archive_game_players add column if not exists identity_resolu
 alter table public.archive_game_players add column if not exists identity_source_url text;
 alter table public.archive_game_players add column if not exists wall_tech_success integer not null default 0;
 alter table public.archive_game_players add column if not exists wall_tech_missed integer not null default 0;
+alter table public.archive_game_players add column if not exists action_counts jsonb not null default '{}'::jsonb;
+alter table public.archive_game_players
+  drop constraint if exists archive_game_players_action_counts_check;
+alter table public.archive_game_players
+  add constraint archive_game_players_action_counts_check
+  check (jsonb_typeof(action_counts) = 'object');
 alter table public.archive_game_players
   drop constraint if exists archive_game_players_wall_tech_check;
 alter table public.archive_game_players

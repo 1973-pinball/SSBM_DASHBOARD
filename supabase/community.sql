@@ -703,7 +703,15 @@ base as materialized (
     coalesce((own_side->'techs'->>'missed')::numeric, 0) as tech_missed,
     nullif(own_side->>'openingsPerKill', '')::numeric as openings_per_kill,
     nullif(own_side->>'damagePerOpening', '')::numeric as damage_per_opening,
-    nullif(own_side->>'inputsPerMinute', '')::numeric as inputs_per_minute
+    nullif(own_side->>'inputsPerMinute', '')::numeric as inputs_per_minute,
+    coalesce((own_side->'actions'->>'rolls')::numeric, 0) as action_rolls,
+    coalesce((own_side->'actions'->>'airDodges')::numeric, 0) as action_air_dodges,
+    coalesce((own_side->'actions'->>'spotDodges')::numeric, 0) as action_spot_dodges,
+    coalesce((own_side->'actions'->>'wavedashes')::numeric, 0) as action_wavedashes,
+    coalesce((own_side->'actions'->>'wavelands')::numeric, 0) as action_wavelands,
+    coalesce((own_side->'actions'->>'dashDances')::numeric, 0) as action_dash_dances,
+    coalesce((own_side->'actions'->>'ledgeGrabs')::numeric, 0) as action_ledge_grabs,
+    coalesce((own_side->'actions'->>'grabs')::numeric, 0) as action_grabs
   from eligible
 ),
 periods(lookback_days) as (
@@ -727,7 +735,15 @@ windowed as materialized (
     b.tech_in_place,
     b.tech_in,
     b.tech_away,
-    b.tech_missed
+    b.tech_missed,
+    b.action_rolls,
+    b.action_air_dodges,
+    b.action_spot_dodges,
+    b.action_wavedashes,
+    b.action_wavelands,
+    b.action_dash_dances,
+    b.action_ledge_grabs,
+    b.action_grabs
   from base b
   cross join periods p
   where p.lookback_days is null
@@ -780,7 +796,15 @@ execution_rollup as (
     sum(tech_in_place) as tech_in_place,
     sum(tech_in) as tech_in,
     sum(tech_away) as tech_away,
-    sum(tech_missed) as tech_missed
+    sum(tech_missed) as tech_missed,
+    sum(action_rolls) as action_rolls,
+    sum(action_air_dodges) as action_air_dodges,
+    sum(action_spot_dodges) as action_spot_dodges,
+    sum(action_wavedashes) as action_wavedashes,
+    sum(action_wavelands) as action_wavelands,
+    sum(action_dash_dances) as action_dash_dances,
+    sum(action_ledge_grabs) as action_ledge_grabs,
+    sum(action_grabs) as action_grabs
   from windowed
   where has_techs and character_id between 0 and 25
   group by lookback_days, grouping sets ((character_id), ())
@@ -931,7 +955,19 @@ assembled as (
       'characterId', character_id, 'games', games,
       'lCancelSuccess', l_cancel_success, 'lCancelFail', l_cancel_fail,
       'techInPlace', tech_in_place, 'techIn', tech_in,
-      'techAway', tech_away, 'techMissed', tech_missed
+      'techAway', tech_away, 'techMissed', tech_missed,
+      'techInPlaceCount', tech_in_place, 'techInCount', tech_in,
+      'techAwayCount', tech_away,
+      'actionCounts', jsonb_build_object(
+        'rolls', action_rolls,
+        'airDodges', action_air_dodges,
+        'spotDodges', action_spot_dodges,
+        'wavedashes', action_wavedashes,
+        'wavelands', action_wavelands,
+        'dashDances', action_dash_dances,
+        'ledgeGrabs', action_ledge_grabs,
+        'grabs', action_grabs
+      )
     )) from execution_rollup), '[]'::jsonb),
     'moves', coalesce((select jsonb_agg(jsonb_build_object(
       'lookbackDays', lookback_days,
@@ -1086,7 +1122,15 @@ begin
       (j->>'techInPlace')::numeric as tech_in_place,
       (j->>'techIn')::numeric as tech_in,
       (j->>'techAway')::numeric as tech_away,
-      (j->>'techMissed')::numeric as tech_missed
+      (j->>'techMissed')::numeric as tech_missed,
+      coalesce((j->'actionCounts'->>'rolls')::numeric, 0) as action_rolls,
+      coalesce((j->'actionCounts'->>'airDodges')::numeric, 0) as action_air_dodges,
+      coalesce((j->'actionCounts'->>'spotDodges')::numeric, 0) as action_spot_dodges,
+      coalesce((j->'actionCounts'->>'wavedashes')::numeric, 0) as action_wavedashes,
+      coalesce((j->'actionCounts'->>'wavelands')::numeric, 0) as action_wavelands,
+      coalesce((j->'actionCounts'->>'dashDances')::numeric, 0) as action_dash_dances,
+      coalesce((j->'actionCounts'->>'ledgeGrabs')::numeric, 0) as action_ledge_grabs,
+      coalesce((j->'actionCounts'->>'grabs')::numeric, 0) as action_grabs
     from public.community_user_rollups r
     cross join lateral jsonb_array_elements(coalesce(r.payload->'execution', '[]'::jsonb)) j
   ),
@@ -1111,7 +1155,18 @@ begin
       end as ground_tech_in,
       case when sum(tech_in_place + tech_in + tech_away) > 0
         then 100.0 * sum(tech_away) / sum(tech_in_place + tech_in + tech_away)
-      end as ground_tech_away
+      end as ground_tech_away,
+      sum(tech_in_place) as tech_in_place_count,
+      sum(tech_in) as tech_in_count,
+      sum(tech_away) as tech_away_count,
+      sum(action_rolls) as action_rolls,
+      sum(action_air_dodges) as action_air_dodges,
+      sum(action_spot_dodges) as action_spot_dodges,
+      sum(action_wavedashes) as action_wavedashes,
+      sum(action_wavelands) as action_wavelands,
+      sum(action_dash_dances) as action_dash_dances,
+      sum(action_ledge_grabs) as action_ledge_grabs,
+      sum(action_grabs) as action_grabs
     from execution_user, params
     group by lookback_days, character_id, params.min_contributors, params.min_games
     having sum(games) >= params.min_games and count(*) >= params.min_contributors
@@ -1265,7 +1320,20 @@ begin
         'groundTechSuccess', round(ground_tech_success, 1),
         'groundTechInPlace', round(ground_tech_in_place, 1),
         'groundTechIn', round(ground_tech_in, 1),
-        'groundTechAway', round(ground_tech_away, 1)
+        'groundTechAway', round(ground_tech_away, 1),
+        'techInPlaceCount', tech_in_place_count,
+        'techInCount', tech_in_count,
+        'techAwayCount', tech_away_count,
+        'actionCounts', jsonb_build_object(
+          'rolls', action_rolls,
+          'airDodges', action_air_dodges,
+          'spotDodges', action_spot_dodges,
+          'wavedashes', action_wavedashes,
+          'wavelands', action_wavelands,
+          'dashDances', action_dash_dances,
+          'ledgeGrabs', action_ledge_grabs,
+          'grabs', action_grabs
+        )
       ) order by character_id) from execution_rollup), '[]'::jsonb),
       'moves', coalesce((select jsonb_agg(jsonb_build_object(
         'lookbackDays', lookback_days,

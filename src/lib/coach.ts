@@ -26,6 +26,17 @@ export interface Recommendation {
   score: number;
 }
 
+export interface CoachMoveBenchmark {
+  characterId: number;
+  gameCount: number;
+  /** Aggregate landed instances by the same grouped move keys used by moveImpact(). */
+  landedByMove: Record<string, number>;
+}
+
+export interface RecommendationOptions {
+  tournamentMoveBenchmarks?: CoachMoveBenchmark[];
+}
+
 export const COACH_MIN_DECIDED = 40;
 
 const pctText = (p: number, digits = 0) => `${(p * 100).toFixed(digits)}%`;
@@ -102,7 +113,7 @@ const HOUR_BUCKETS: { label: string; lo: number; hi: number }[] = [
   { label: "the evening", lo: 18, hi: 23 },
 ];
 
-export function recommendations(games: ResolvedGame[], max = 5): Recommendation[] {
+export function recommendations(games: ResolvedGame[], max = 5, options: RecommendationOptions = {}): Recommendation[] {
   const base = tally(games);
   if (base.decided < COACH_MIN_DECIDED || base.winRate === null) return [];
   const p0 = base.winRate;
@@ -349,23 +360,76 @@ export function recommendations(games: ResolvedGame[], max = 5): Recommendation[
 
   // Move habit: a move that's a real part of the kit whose heavy-usage games
   // are losses. Two-proportion z between the heavy and light halves.
-  let worstMove: { label: string; delta: number; high: number; low: number; n: number; share: number; z: number } | null = null;
-  for (const row of moveImpact(games)) {
-    if (row.avgShare < 0.05 || row.delta === null || row.winRateHigh === null || row.winRateLow === null) continue;
-    if (row.highN + row.lowN < 60) continue;
-    const pooled = (row.highWins + row.lowWins) / (row.highN + row.lowN);
-    if (pooled <= 0 || pooled >= 1) continue;
-    const se = Math.sqrt(pooled * (1 - pooled) * (1 / row.highN + 1 / row.lowN));
-    const z = (row.winRateHigh - row.winRateLow) / se;
-    if (z <= -Z_GATE && row.delta <= -0.08 && (!worstMove || z < worstMove.z)) {
-      worstMove = { label: row.label, delta: row.delta, high: row.winRateHigh, low: row.winRateLow, n: row.highN + row.lowN, share: row.avgShare, z };
+  type MoveCandidate = {
+    label: string;
+    delta: number;
+    high: number;
+    low: number;
+    n: number;
+    share: number;
+    z: number;
+    characterId?: number;
+    tournamentShare?: number;
+    tournamentGames?: number;
+  };
+  const negativeMoveCandidate = (
+    rows: ReturnType<typeof moveImpact>,
+    benchmark?: CoachMoveBenchmark,
+  ): MoveCandidate | null => {
+    let candidate: MoveCandidate | null = null;
+    const tournamentLanded = benchmark
+      ? Object.values(benchmark.landedByMove).reduce((sum, count) => sum + count, 0)
+      : 0;
+    for (const row of rows) {
+      const tournamentShare = benchmark && tournamentLanded > 0
+        ? (benchmark.landedByMove[row.key] ?? 0) / tournamentLanded
+        : undefined;
+      if (benchmark) {
+        if (benchmark.gameCount < 100 || tournamentShare === undefined) continue;
+        const overuseGap = row.avgShare - tournamentShare;
+        if (overuseGap < Math.max(0.04, tournamentShare * 0.5)) continue;
+      }
+      if (row.avgShare < 0.05 || row.delta === null || row.winRateHigh === null || row.winRateLow === null) continue;
+      if (row.highN + row.lowN < 60) continue;
+      const pooled = (row.highWins + row.lowWins) / (row.highN + row.lowN);
+      if (pooled <= 0 || pooled >= 1) continue;
+      const se = Math.sqrt(pooled * (1 - pooled) * (1 / row.highN + 1 / row.lowN));
+      const z = (row.winRateHigh - row.winRateLow) / se;
+      if (z <= -Z_GATE && row.delta <= -0.08 && (!candidate || z < candidate.z)) {
+        candidate = {
+          label: row.label,
+          delta: row.delta,
+          high: row.winRateHigh,
+          low: row.winRateLow,
+          n: row.highN + row.lowN,
+          share: row.avgShare,
+          z,
+          characterId: benchmark?.characterId,
+          tournamentShare,
+          tournamentGames: benchmark?.gameCount,
+        };
+      }
     }
+    return candidate;
+  };
+
+  let worstMove: MoveCandidate | null = null;
+  for (const benchmark of options.tournamentMoveBenchmarks ?? []) {
+    const characterGames = games.filter((game) => game.me.characterId === benchmark.characterId);
+    const candidate = negativeMoveCandidate(moveImpact(characterGames), benchmark);
+    if (candidate && (!worstMove || candidate.z < worstMove.z)) worstMove = candidate;
   }
+  // Preserve the local-only detector when the archive is unavailable or no
+  // move is unusually common versus its character benchmark.
+  if (!worstMove) worstMove = negativeMoveCandidate(moveImpact(games));
   if (worstMove) {
+    const benchmarkDetail = worstMove.tournamentShare !== undefined && worstMove.tournamentGames !== undefined && worstMove.characterId !== undefined
+      ? `${worstMove.label} is ${pctText(worstMove.share)} of your landed hits, versus ${pctText(worstMove.tournamentShare)} across ${worstMove.tournamentGames.toLocaleString()} tournament ${charName(worstMove.characterId)} player-games. `
+      : `${worstMove.label} averages ${pctText(worstMove.share)} of your landed hits. `;
     push(
       "move",
       `Rethink the ${worstMove.label.toLowerCase()} habit`,
-      `${worstMove.label} averages ${pctText(worstMove.share)} of your landed hits, but in games where you lean on it hardest you win ${pctText(worstMove.high)}, versus ${pctText(worstMove.low)} when you barely use it (${worstMove.n} games). Volume on it isn't paying off — check what you're reaching for it instead of.`,
+      `${benchmarkDetail}In games where you lean on it hardest you win ${pctText(worstMove.high)}, versus ${pctText(worstMove.low)} when you use it least (${worstMove.n} games). That is an association, not proof the move causes losses—check the situations where you reach for it.`,
       worstMove.delta,
       worstMove.n,
     );

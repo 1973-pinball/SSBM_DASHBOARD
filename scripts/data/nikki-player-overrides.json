@@ -46,6 +46,69 @@
       "resolution": "probable",
       "sourceUrl": "https://liquipedia.net/smash/SDJ",
       "notes": "The replay label exactly matches the public player name, and the cited player page confirms SDJ placed third at GOML Forever 2025. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2022",
+      "observedAlias": "LLOD",
+      "playerId": "llod",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Riptide/2022/Melee",
+      "notes": "The replay label exactly matches lloD's public tag, and the cited event page confirms lloD competed at Riptide 2022. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2023",
+      "observedAlias": "LLOD",
+      "playerId": "llod",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Riptide/2023/Melee",
+      "notes": "The replay label exactly matches lloD's public tag, and the cited event page confirms lloD competed at Riptide 2023. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2024",
+      "observedAlias": "AKLO",
+      "playerId": "aklo",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Riptide/2024/Melee/Singles_Bracket",
+      "notes": "The replay label exactly matches Aklo's public tag, and the cited bracket confirms Aklo competed at Riptide 2024. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2024",
+      "observedAlias": "SDJ",
+      "playerId": "sdj",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Riptide/2024/Melee/Singles_Bracket",
+      "notes": "The replay label exactly matches SDJ's public tag, and the cited bracket confirms SDJ competed at Riptide 2024. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2025",
+      "observedAlias": "AKLO",
+      "playerId": "aklo",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Aklo",
+      "notes": "The replay label exactly matches Aklo's public tag, and the cited player page confirms Aklo competed at Riptide 2025. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2025",
+      "observedAlias": "SDJ",
+      "playerId": "sdj",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/SDJ",
+      "notes": "The replay label exactly matches SDJ's public tag, and the cited player page confirms SDJ competed at Riptide 2025. Individual replay sides remain probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_alias",
+      "eventId": "riptide-2022",
+      "observedAlias": "ZAIN",
+      "playerId": "zain",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Riptide/2022/Melee",
+      "notes": "The replay label exactly matches Zain's public tag, and the cited event page confirms Zain competed at Riptide 2022. The available replay sample is very small, so the individual side remains probable rather than bracket-verified."
     }
   ]
 }

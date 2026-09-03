@@ -1280,7 +1280,7 @@ export default function App() {
             />
           )}
 
-          {tab === "execution" && <Execution games={filtered} />}
+          {tab === "execution" && <Execution games={filtered} isDemo={isDemo} />}
           {tab === "insights" && <Insights games={filtered} />}
 
 

@@ -743,7 +743,6 @@ select:disabled { opacity: 0.45; }
 .stage-rate { position: relative; height: 30px; overflow: hidden; border-radius: 6px; background: var(--panel-2); }
 .stage-rate > span { display: block; height: 100%; opacity: 0.78; }
 .stage-rate b { position: absolute; inset: 0 9px 0 auto; display: flex; align-items: center; color: #18152a; font-family: var(--font-data); }
-.community-pulse-grid { grid-template-columns: 1fr 1fr; }
 .community-warmup { max-width: 720px; margin: 30px auto; padding: 28px; }
 .community-warmup .primary { margin-top: 16px; }
 .community-preview-progress { max-width: none; margin: 0 0 var(--gap); }
@@ -755,21 +754,6 @@ select:disabled { opacity: 0.45; }
 .community-placeholder .community-card-value,
 .community-placeholder-row td { color: var(--faint); }
 .community-stage-placeholder b { color: var(--faint); }
-.community-chart-placeholder {
-  display: flex;
-  height: 240px;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 7px;
-  border: 1px dashed var(--line);
-  border-radius: 8px;
-  background: linear-gradient(180deg, rgba(143, 127, 247, 0.035), transparent);
-  color: var(--faint);
-  font-family: var(--font-data);
-  font-size: 11px;
-}
-.community-chart-placeholder b { color: var(--muted); font-size: 28px; }
 .community-table-subhead {
   margin: 18px 10px 5px;
 }
@@ -780,32 +764,6 @@ select:disabled { opacity: 0.45; }
 }
 .community-comparison-table .community-own-row { background: rgba(143, 127, 247, 0.08); }
 .community-comparison-table .community-own-row td:first-child { color: var(--accent); font-weight: 600; }
-.community-move-pair {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(54px, 1fr));
-  gap: 5px;
-  min-width: 118px;
-}
-.community-move-pair span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-  border-radius: 5px;
-  background: var(--panel-2);
-  padding: 4px 6px;
-}
-.community-move-pair small {
-  overflow: hidden;
-  color: var(--faint);
-  font-family: var(--font-body);
-  font-size: 8px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-}
-.community-move-pair b { color: var(--text); font-size: 12px; font-weight: 600; }
 .community-diff-above {
   background: rgba(232, 181, 77, 0.12) !important;
   box-shadow: inset 0 0 0 1px rgba(232, 181, 77, 0.35);
@@ -1694,7 +1652,6 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
   .team-chart-grid { grid-template-columns: 1fr; }
   .community-matchup-grid,
   .benchmark-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .community-pulse-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 640px) {

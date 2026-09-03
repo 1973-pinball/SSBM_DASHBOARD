@@ -1,14 +1,22 @@
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, ExecutionSummary, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
-import { charName, stageName } from "../lib/melee";
+import { charName, moveGroup, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
 import { activateOnKey } from "../lib/a11y";
+import { demoCommunitySnapshot, fetchCommunitySnapshot, type CommunityExecutionRow, type CommunityMoveRow } from "../lib/community";
+import {
+  fetchArchiveCommunityBenchmarks,
+  fetchArchiveProAggregateAtlasRows,
+  fetchLatestArchiveDataset,
+  type ArchiveMoveMetrics,
+  type ArchiveRollup,
+} from "../lib/publicArchive";
 
 /**
  * A horizontally scrolling win-rate grid with a second scrollbar above it.
@@ -572,6 +580,102 @@ export function Opponents({
 
 // ---------------- Execution ----------------
 
+type BenchmarkKind = "community" | "venue" | "tournament" | "pro";
+
+const EXECUTION_BENCHMARK_STYLES: { key: BenchmarkKind; label: string; color: string; dash: string }[] = [
+  { key: "community", label: "SSBM Stats", color: "#4fc9c4", dash: "2 5" },
+  { key: "venue", label: "Venue", color: "#6db3f2", dash: "6 4" },
+  { key: "tournament", label: "Tournament", color: "#e8b54d", dash: "2 3" },
+  { key: "pro", label: "Pro", color: "#e87fd0", dash: "8 3 2 3" },
+];
+
+interface ExecutionBenchmarks {
+  characterId: number | null;
+  characterGames: number;
+  totalGames: number;
+  communityExecution: CommunityExecutionRow | null;
+  communityMoves: CommunityMoveRow[];
+  venue: ArchiveRollup | null;
+  tournament: ArchiveRollup | null;
+  pro: ArchiveRollup | null;
+}
+
+const emptyExecutionBenchmarks = (
+  characterId: number | null,
+  characterGames: number,
+  totalGames: number,
+): ExecutionBenchmarks => ({
+  characterId,
+  characterGames,
+  totalGames,
+  communityExecution: null,
+  communityMoves: [],
+  venue: null,
+  tournament: null,
+  pro: null,
+});
+
+function dominantCharacter(games: ResolvedGame[]): { id: number | null; games: number } {
+  const counts = new Map<number, number>();
+  for (const game of games) counts.set(game.me.characterId, (counts.get(game.me.characterId) ?? 0) + 1);
+  let best: { id: number | null; games: number } = { id: null, games: 0 };
+  for (const [id, count] of counts) {
+    if (count > best.games || (count === best.games && (best.id === null || id < best.id))) best = { id, games: count };
+  }
+  return best;
+}
+
+function useExecutionBenchmarks(games: ResolvedGame[], isDemo: boolean): ExecutionBenchmarks {
+  const dominant = useMemo(() => dominantCharacter(games), [games]);
+  const [benchmarks, setBenchmarks] = useState<ExecutionBenchmarks>(() =>
+    emptyExecutionBenchmarks(dominant.id, dominant.games, games.length));
+
+  useEffect(() => {
+    const base = emptyExecutionBenchmarks(dominant.id, dominant.games, games.length);
+    setBenchmarks(base);
+    if (dominant.id === null) return;
+    let alive = true;
+    void Promise.all([isDemo ? Promise.resolve(demoCommunitySnapshot(games)) : fetchCommunitySnapshot(), fetchLatestArchiveDataset()])
+      .then(async ([community, dataset]) => {
+        const archive = dataset
+          ? await Promise.all([
+            fetchArchiveCommunityBenchmarks(dataset.id, dominant.id!),
+            fetchArchiveProAggregateAtlasRows(dataset.id, dominant.id!),
+          ])
+          : null;
+        if (!alive) return;
+        const proRows = archive?.[1] ?? [];
+        setBenchmarks({
+          ...base,
+          communityExecution: community?.execution.find((row) =>
+            row.lookbackDays === null && row.characterId === dominant.id) ?? null,
+          communityMoves: community?.moves.filter((row) =>
+            row.lookbackDays === null && row.characterId === dominant.id) ?? [],
+          venue: archive?.[0].broad ?? null,
+          tournament: archive?.[0].conservative ?? null,
+          pro: proRows.find((row) => row.opponent_character_id === null && row.stage_id === null) ?? null,
+        });
+      })
+      .catch(() => { /* Charts remain fully usable without remote benchmarks. */ });
+    return () => { alive = false; };
+  }, [dominant.games, dominant.id, games, games.length, isDemo]);
+
+  return benchmarks;
+}
+
+function BenchmarkFootnote({ benchmarks }: { benchmarks: ExecutionBenchmarks }) {
+  if (benchmarks.characterId === null) return null;
+  const dominant = benchmarks.characterGames < benchmarks.totalGames;
+  return (
+    <div className="hint execution-benchmark-footnote">
+      Benchmarks use {charName(benchmarks.characterId)}{dominant
+        ? `, your most-played character in the active filters (${benchmarks.characterGames.toLocaleString()} of ${benchmarks.totalGames.toLocaleString()} games)`
+        : ", the character represented by the active filters"}. The dotted horizontal lines are fixed full-sample
+      aggregate references, not rolling histories. A missing line means that source has no qualifying published sample.
+    </div>
+  );
+}
+
 const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color: string }[] = [
   { key: "lCancel", label: "L-cancel success", unit: "%", color: "var(--accent)" },
   { key: "groundTechSuccess", label: "Ground Tech Success", unit: "%", color: "#9adb4f" },
@@ -706,24 +810,50 @@ const ACTION_SERIES: SeriesDef[] = [
   },
 ];
 
+function communityActionBenchmark(row: CommunityExecutionRow | null, key: string): number | null {
+  if (!row || row.games <= 0) return null;
+  if (key === "techInPlace") return row.techInPlaceCount === null ? null : row.techInPlaceCount / row.games;
+  if (key === "techIn") return row.techInCount === null ? null : row.techInCount / row.games;
+  if (key === "techAway") return row.techAwayCount === null ? null : row.techAwayCount / row.games;
+  if (!(key in ACTION_COLORS) || !row.actionCounts) return null;
+  return row.actionCounts[key as keyof ActionCounts] / row.games;
+}
+
+function archiveActionBenchmark(row: ArchiveRollup | null, key: string): number | null {
+  if (!row || row.game_count <= 0) return null;
+  if (key === "techInPlace") return row.metrics.techInPlace / row.game_count;
+  if (key === "techIn") return row.metrics.techToward / row.game_count;
+  if (key === "techAway") return row.metrics.techAway / row.game_count;
+  if (!(key in ACTION_COLORS)) return null;
+  const value = row.metrics.actions?.[key as keyof ActionCounts];
+  return value === undefined ? null : value / row.game_count;
+}
+
+function actionBenchmarkValue(benchmarks: ExecutionBenchmarks, kind: BenchmarkKind, key: string): number | null {
+  if (kind === "community") return communityActionBenchmark(benchmarks.communityExecution, key);
+  return archiveActionBenchmark(benchmarks[kind], key);
+}
+
 /** Per-game line chart with chip toggles choosing which metrics are plotted. */
 function PerGameMetricChart({
   title,
   games,
   series,
   defaults,
+  benchmarks,
 }: {
   title: string;
   games: ResolvedGame[];
   series: SeriesDef[];
   defaults: string[];
+  benchmarks: ExecutionBenchmarks;
 }) {
   const [selected, setSelected] = useState<Set<string>>(() => new Set(defaults));
   // Opponent overlay defaults on — the chip is there to turn it OFF when it clutters.
   const [showOpp, setShowOpp] = useState(true);
   const hasOpp = series.some((s) => s.oppValue);
   // All metrics (including opponent counterparts) are computed once; the chips only toggle which lines render.
-  const data = useMemo(
+  const rawData = useMemo(
     () =>
       perGameSeries(games, [
         ...series,
@@ -731,9 +861,22 @@ function PerGameMetricChart({
       ]),
     [games, series],
   );
+  const benchmarkValues = useMemo(() => {
+    const values = new Map<string, number>();
+    for (const item of series) for (const style of EXECUTION_BENCHMARK_STYLES) {
+      const value = actionBenchmarkValue(benchmarks, style.key, item.key);
+      if (value !== null) values.set(`benchmark:${style.key}:${item.key}`, value);
+    }
+    return values;
+  }, [benchmarks, series]);
+  const data = useMemo(() => rawData.map((point) => {
+    const row = { ...point } as Record<string, string | number | null>;
+    for (const [key, value] of benchmarkValues) row[key] = value;
+    return row;
+  }), [benchmarkValues, rawData]);
   // Points are thinned across the whole history, so a tick's game index is no
   // longer its position in the array — look the date up instead of deriving it.
-  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
+  const dateByIndex = useMemo(() => new Map<number, string>(rawData.map((p) => [p.index, p.date])), [rawData]);
 
   const toggle = (key: string) =>
     setSelected((prev) => {
@@ -821,6 +964,27 @@ function PerGameMetricChart({
                     dot={false}
                   />
                 ))}
+            {series
+              .filter((s) => selected.has(s.key))
+              .flatMap((s) => EXECUTION_BENCHMARK_STYLES.map((style) => {
+                const key = `benchmark:${style.key}:${s.key}`;
+                if (!benchmarkValues.has(key)) return null;
+                return (
+                  <Line
+                    key={key}
+                    type="linear"
+                    dataKey={key}
+                    name={`${style.label} · ${s.label}`}
+                    stroke={style.color}
+                    strokeWidth={1.5}
+                    strokeDasharray={style.dash}
+                    strokeOpacity={0.95}
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                );
+              }))}
           </LineChart>
         </ResponsiveContainer>
       )}
@@ -829,6 +993,7 @@ function PerGameMetricChart({
         games in this filter
         {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
       </div>
+      <BenchmarkFootnote benchmarks={benchmarks} />
     </div>
   );
 }
@@ -869,13 +1034,90 @@ const MOVE_TREND_COLORS = [
   "#f2985e",
 ];
 
+function groupedArchiveMove(row: ArchiveRollup | null, moveKey: string): ArchiveMoveMetrics | null {
+  let aggregate: ArchiveMoveMetrics | null = null;
+  for (const [moveId, value] of Object.entries(row?.metrics.moves ?? {})) {
+    if (moveGroup(Number(moveId)).key !== moveKey) continue;
+    aggregate ??= {
+      attempts: 0,
+      landed: 0,
+      damage: 0,
+      kills: 0,
+      killPctSum: 0,
+      openings: 0,
+      openingDmg: 0,
+      lCancelSuccess: 0,
+      lCancelFail: 0,
+    };
+    aggregate.attempts += value.attempts;
+    aggregate.landed += value.landed;
+    aggregate.damage += value.damage;
+    aggregate.kills += value.kills;
+    aggregate.killPctSum += value.killPctSum;
+    aggregate.openings += value.openings;
+    aggregate.openingDmg += value.openingDmg;
+    aggregate.lCancelSuccess += value.lCancelSuccess;
+    aggregate.lCancelFail += value.lCancelFail;
+  }
+  return aggregate;
+}
+
+function archiveMoveBenchmark(row: ArchiveRollup | null, moveKey: string, metric: MoveMetricKey): number | null {
+  const move = groupedArchiveMove(row, moveKey);
+  if (!row || row.game_count <= 0 || !move) return null;
+  if (metric === "attemptsPerGame") return move.attempts === 0 && move.landed > 0 ? null : move.attempts / row.game_count;
+  if (metric === "landedPerGame") return move.landed / row.game_count;
+  if (metric === "dmgPerGame") return move.damage / row.game_count;
+  if (metric === "dmgShare") return row.metrics.damageTotal > 0 ? 100 * move.damage / row.metrics.damageTotal : null;
+  if (metric === "avgDmgPerHit") return move.landed > 0 ? move.damage / move.landed : null;
+  if (metric === "killsPerGame") return move.kills / row.game_count;
+  if (metric === "killShare") {
+    const total = Object.values(row.metrics.moves ?? {}).reduce((sum, value) => sum + value.kills, 0);
+    return total > 0 ? 100 * move.kills / total : null;
+  }
+  if (metric === "avgKillPct") return move.kills > 0 ? move.killPctSum / move.kills : null;
+  const attempts = move.lCancelSuccess + move.lCancelFail;
+  return attempts > 0 ? 100 * move.lCancelSuccess / attempts : null;
+}
+
+function communityMoveBenchmark(rows: CommunityMoveRow[], moveKey: string, metric: MoveMetricKey): number | null {
+  const move = rows.find((row) => row.moveKey === moveKey);
+  if (!move || move.characterGames <= 0) return null;
+  if (metric === "attemptsPerGame") return move.attempts === null ? null : move.attempts / move.characterGames;
+  if (metric === "landedPerGame") return move.landed / move.characterGames;
+  if (metric === "dmgPerGame") return move.damage / move.characterGames;
+  if (metric === "dmgShare") {
+    const total = rows.reduce((sum, row) => sum + row.damage, 0);
+    return total > 0 ? 100 * move.damage / total : null;
+  }
+  if (metric === "avgDmgPerHit") return move.landed > 0 ? move.damage / move.landed : null;
+  if (metric === "killsPerGame") return move.kills / move.characterGames;
+  if (metric === "killShare") {
+    const total = rows.reduce((sum, row) => sum + row.kills, 0);
+    return total > 0 ? 100 * move.kills / total : null;
+  }
+  if (metric === "avgKillPct") return move.kills > 0 ? move.killPctSum / move.kills : null;
+  const attempts = move.lCancelSuccess + move.lCancelFail;
+  return attempts > 0 ? 100 * move.lCancelSuccess / attempts : null;
+}
+
+function moveBenchmarkValue(
+  benchmarks: ExecutionBenchmarks,
+  kind: BenchmarkKind,
+  moveKey: string,
+  metric: MoveMetricKey,
+): number | null {
+  if (kind === "community") return communityMoveBenchmark(benchmarks.communityMoves, moveKey, metric);
+  return archiveMoveBenchmark(benchmarks[kind], moveKey, metric);
+}
+
 /**
  * Any cell of the Move effectiveness table, plotted over time. That table is a
  * snapshot of the last ROLLING_WINDOW games; this is the same figure computed
  * over the window ending at every game, so its right edge is that table and
  * the line behind it is how the number got there.
  */
-function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveRow[] }) {
+function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; moves: MoveRow[]; benchmarks: ExecutionBenchmarks }) {
   const [moveKeys, setMoveKeys] = useState<Set<string>>(() => new Set(moves[0] ? [moves[0].key] : []));
   const [metric, setMetric] = useState<MoveMetricKey>("attemptsPerGame");
   // Filters change which moves exist at all. Preserve selections that remain
@@ -889,13 +1131,25 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
     () => moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric),
     [games, activeMoves, metric],
   );
+  const benchmarkValues = useMemo(() => {
+    const values = new Map<string, number>();
+    for (let index = 0; index < activeMoves.length; index++) {
+      const move = activeMoves[index]!;
+      for (const style of EXECUTION_BENCHMARK_STYLES) {
+        const value = moveBenchmarkValue(benchmarks, style.key, move.key, metric);
+        if (value !== null) values.set(`benchmark:${style.key}:move-${index}`, value);
+      }
+    }
+    return values;
+  }, [activeMoves, benchmarks, metric]);
   const data = useMemo(
     () => points.map((point) => {
       const row: Record<string, string | number | null> = { index: point.index, date: point.date };
       for (let i = 0; i < activeMoves.length; i++) row[`move-${i}`] = point.values[i] ?? null;
+      for (const [key, value] of benchmarkValues) row[key] = value;
       return row;
     }),
-    [activeMoves, points],
+    [activeMoves, benchmarkValues, points],
   );
   // Points are thinned across the whole history, so a tick's game index is no
   // longer its position in the array — look the date up instead of deriving it.
@@ -995,7 +1249,7 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
                 }}
                 formatter={(v, name) => [`${num(Number(v), def.digits)}${def.unit}`, `${String(name)} — ${def.label}`]}
               />
-              {activeMoves.length > 1 && <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />}
+              <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
               {activeMoves.map((move, i) => (
                 <Line
                   key={move.key}
@@ -1008,6 +1262,25 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
                   connectNulls
                 />
               ))}
+              {activeMoves.flatMap((move, index) => EXECUTION_BENCHMARK_STYLES.map((style) => {
+                const key = `benchmark:${style.key}:move-${index}`;
+                if (!benchmarkValues.has(key)) return null;
+                return (
+                  <Line
+                    key={key}
+                    type="linear"
+                    dataKey={key}
+                    name={`${style.label} · ${move.label}`}
+                    stroke={style.color}
+                    strokeWidth={1.5}
+                    strokeDasharray={style.dash}
+                    strokeOpacity={0.95}
+                    dot={false}
+                    activeDot={false}
+                    isAnimationActive={false}
+                  />
+                );
+              }))}
             </LineChart>
           </ResponsiveContainer>
           <div className="hint">
@@ -1018,6 +1291,7 @@ function MoveMetricChart({ games, moves }: { games: ResolvedGame[]; moves: MoveR
             Gaps are windows with no denominator — games you never threw it in — rather than zeroes, which would claim
             you threw it and got nothing.
           </div>
+          <BenchmarkFootnote benchmarks={benchmarks} />
         </>
       )}
     </div>
@@ -1043,7 +1317,7 @@ function TechKpi({ summary }: { summary: ExecutionSummary }) {
   );
 }
 
-export function Execution({ games }: { games: ResolvedGame[] }) {
+export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; isDemo?: boolean }) {
   // The charts cover the whole filter; everything under them describes current
   // form, so it reads the trailing window the charts smooth over. The same
   // number on purpose — see ROLLING_WINDOW.
@@ -1055,6 +1329,7 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
   // the window pass feeds the two tables that report current habits.
   const career = useMemo(() => moveTable(games), [games]);
   const recentMoves = useMemo(() => moveTable(recentGames), [recentGames]);
+  const benchmarks = useExecutionBenchmarks(games, isDemo);
   if (games.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
@@ -1068,13 +1343,14 @@ export function Execution({ games }: { games: ResolvedGame[] }) {
 
       <RollingExecChart games={games} />
 
-      <MoveMetricChart games={games} moves={career.rows} />
+      <MoveMetricChart games={games} moves={career.rows} benchmarks={benchmarks} />
 
       <PerGameMetricChart
         title={`Actions — per game, ${ROLLING_WINDOW}-game rolling average`}
         games={games}
         series={ACTION_SERIES}
         defaults={["wavedashes"]}
+        benchmarks={benchmarks}
       />
 
       <div className="panel">
