@@ -2014,7 +2014,7 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
     label: "Grab success %",
     value: (p) => {
       const attempts = p.actions?.grabs ?? 0;
-      return attempts === 0 ? "—" : `${pct(p.grabSuccess / attempts, 0)} (${p.grabSuccess}/${attempts})`;
+      return attempts === 0 ? "—" : `${p.grabSuccess}/${attempts} (${pct(p.grabSuccess / attempts, 0)})`;
     },
   },
   {
