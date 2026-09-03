@@ -225,7 +225,26 @@ for (const edition of liquipedia.editions) {
 
 const characterIdentityOverrides = new Map();
 const aliasIdentityOverrides = new Map();
-for (const override of identityDoc.overrides) {
+// Most reviewed additions arrive as an event roster with one shared bracket
+// source. Keep that evidence grouped in the checked-in file, then expand it to
+// the same strict event+alias rules used by the resolver. A group is only a
+// compact authoring format; it does not weaken the per-alias publication gate.
+const identityOverrides = identityDoc.overrides.flatMap((override) => {
+  if (override.kind !== "event_aliases") return [override];
+  if (!Array.isArray(override.aliases) || override.aliases.length === 0) {
+    throw new Error(`event_aliases override needs aliases for ${override.eventId}`);
+  }
+  return override.aliases.map((alias) => ({
+    kind: "event_alias",
+    eventId: override.eventId,
+    observedAlias: alias.observedAlias,
+    playerId: alias.playerId,
+    resolution: override.resolution,
+    sourceUrl: override.sourceUrl,
+    notes: override.notes,
+  }));
+});
+for (const override of identityOverrides) {
   if (!eventById.has(override.eventId)) throw new Error(`Identity override has unknown event ${override.eventId}`);
   if (!rankedPlayers.has(override.playerId)) throw new Error(`Identity override has unknown player ${override.playerId}`);
   if (!override.sourceUrl) throw new Error(`Identity override needs a public source URL for ${override.playerId}`);

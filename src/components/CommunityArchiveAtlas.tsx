@@ -5,7 +5,7 @@ import type {
   CommunityMoveRow,
 } from "../lib/community";
 import { INCLUDED_STAGE_IDS } from "../lib/config";
-import { num, pct, shortDate, winRateColor } from "../lib/format";
+import { countNoun, num, pct, shortDate, winRateColor } from "../lib/format";
 import { charName, moveGroup, moveGroupLabel, stageName } from "../lib/melee";
 import {
   fetchArchiveCommunityAtlasRows,
@@ -244,9 +244,9 @@ export function ArchiveMatchupAtlasComparison({
   onCharacterChange?: (characterId: number) => void;
 }) {
   const archive = useArchiveAtlas(characterId);
-  const [sort, setSort] = useState<{ key: MatchupSortKey | null; direction: SortDirection }>({ key: null, direction: "desc" });
+  const [sort, setSort] = useState<{ key: MatchupSortKey | null; direction: SortDirection }>({ key: "games", direction: "desc" });
   useEffect(() => {
-    if (!archive.selectedPro && sort.key === "pro") setSort({ key: null, direction: "desc" });
+    if (!archive.selectedPro && sort.key === "pro") setSort({ key: "games", direction: "desc" });
   }, [archive.selectedPro, sort.key]);
   const local = useMemo(() => {
     const rows = new Map<number, RateSummary>();
@@ -599,7 +599,7 @@ export function ArchiveMoveAtlasComparison({
   return (
     <ArchiveFrame archive={archive} eyebrow="Move Atlas" title={`Your ${charName(characterId)} move profile across the full field`} controls={controls} onCharacterChange={onCharacterChange}>
       <div className="acb-move-heading"><h3>Move profile</h3><label>Measure<select value={metric} onChange={(event) => setMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label></div>
-      {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You<span className="sample-note">{localMoves.covered.toLocaleString()} games</span></th><th className="data">SSBM Stats<span className="sample-note">{communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`}</span></th><th className="data">Venue archive<span className="sample-note">{broadRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{conservativeRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · {proAggregateRow?.identified_player_count?.toLocaleString() ?? "—"} pros</span></th>{archive.selectedPro && <th className="data">{archive.selectedPro.display_name}<span className="sample-note">{proRow?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>
+      {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You<span className="sample-note">{localMoves.covered.toLocaleString()} games</span></th><th className="data">SSBM Stats<span className="sample-note">{communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`}</span></th><th className="data">Venue archive<span className="sample-note">{broadRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{conservativeRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · {countNoun(proAggregateRow?.identified_player_count, "pro")}</span></th>{archive.selectedPro && <th className="data">{archive.selectedPro.display_name}<span className="sample-note">{proRow?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>
         {moveKeys.map((key) => {
           const mine = localMoveMetric(localByKey.get(key), metric, localMoves.covered);
           const field = archiveMoveMetric(comparisonMoves.get(key), metric, comparisonRow);

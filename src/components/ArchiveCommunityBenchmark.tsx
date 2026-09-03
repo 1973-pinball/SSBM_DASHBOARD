@@ -5,7 +5,7 @@ import type {
   CommunityExecutionRow,
   CommunityMoveRow,
 } from "../lib/community";
-import { pct, num, shortDate } from "../lib/format";
+import { countNoun, pct, num, shortDate } from "../lib/format";
 import { charName, moveGroup, moveGroupLabel } from "../lib/melee";
 import {
   fetchArchiveCommunityBenchmarks,
@@ -348,7 +348,7 @@ export function ArchiveCommunityBenchmark({
     {
       key: "pro-aggregate",
       label: "Pro tournament archive",
-      sampleNote: `${proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · ${proAggregateBenchmark?.identified_player_count?.toLocaleString() ?? "—"} pros`,
+      sampleNote: `${proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · ${countNoun(proAggregateBenchmark?.identified_player_count, "pro")}`,
       execution: proAggregateExecutionRow,
       actionRate: (key) => archiveActionRate(proAggregateBenchmark, key),
     },
@@ -427,7 +427,7 @@ export function ArchiveCommunityBenchmark({
             <h3>Move profile</h3>
             <label>Measure<select value={moveMetric} onChange={(event) => setMoveMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label>
           </div>
-          {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You</th><th className="data">SSBM Stats<span className="sample-note">{communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`}</span></th><th className="data">Venue archive<span className="sample-note">{benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · {proAggregateBenchmark?.identified_player_count?.toLocaleString() ?? "—"} pros</span></th>{selectedPro && <th className="data">{selectedPro.display_name}<span className="sample-note">{proBenchmark?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>{moveKeys.map((key) => {
+          {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You</th><th className="data">SSBM Stats<span className="sample-note">{communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`}</span></th><th className="data">Venue archive<span className="sample-note">{benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · {countNoun(proAggregateBenchmark?.identified_player_count, "pro")}</span></th>{selectedPro && <th className="data">{selectedPro.display_name}<span className="sample-note">{proBenchmark?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>{moveKeys.map((key) => {
             const ownMove = ownMoveByKey.get(key);
             const mine = localMoveMetric(ownMove, moveMetric, ownMoves.covered);
             const field = archiveMoveMetric(comparisonMoves.get(key), moveMetric, comparisonRow);

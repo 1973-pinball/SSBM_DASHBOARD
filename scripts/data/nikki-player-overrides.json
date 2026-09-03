@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "methodology": "Only mappings backed by a public event/set source belong here. Candidate tag matches are generated locally for review and are never published automatically.",
+  "methodology": "Only mappings backed by a public event/set source belong here. Candidate tag matches are generated locally for review and are never published automatically. event_aliases groups share one event source but expand to independent strict event-and-alias rules during the build.",
   "overrides": [
     {
       "kind": "event_character",
@@ -109,6 +109,97 @@
       "resolution": "probable",
       "sourceUrl": "https://liquipedia.net/smash/Riptide/2022/Melee",
       "notes": "The replay label exactly matches Zain's public tag, and the cited event page confirms Zain competed at Riptide 2022. The available replay sample is very small, so the individual side remains probable rather than bracket-verified."
+    },
+    {
+      "kind": "event_aliases",
+      "eventId": "bobc-8",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Battle_of_BC/8/Melee/Singles_Bracket",
+      "notes": "The cited singles bracket confirms attendance and each replay display name matches the public bracket tag exactly. Individual replay sides remain probable rather than bracket-verified; no Summit aliases are included.",
+      "aliases": [
+        { "observedAlias": "Axe", "playerId": "axe" },
+        { "observedAlias": "Fiction", "playerId": "fiction" },
+        { "observedAlias": "Hungrybox", "playerId": "hungrybox" },
+        { "observedAlias": "Jmook", "playerId": "jmook" },
+        { "observedAlias": "Joshman", "playerId": "joshman" },
+        { "observedAlias": "moky", "playerId": "moky" },
+        { "observedAlias": "n0ne", "playerId": "none" },
+        { "observedAlias": "Soonsay", "playerId": "soonsay" },
+        { "observedAlias": "Spark", "playerId": "spark" },
+        { "observedAlias": "Wizzrobe", "playerId": "wizzrobe" },
+        { "observedAlias": "Zain", "playerId": "zain" }
+      ]
+    },
+    {
+      "kind": "event_aliases",
+      "eventId": "gx-2",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/GENESIS/X2/Melee/Singles_Bracket",
+      "notes": "The cited singles bracket confirms attendance and each replay display name matches the public bracket tag exactly. Individual replay sides remain probable rather than bracket-verified.",
+      "aliases": [
+        { "observedAlias": "Axe", "playerId": "axe" },
+        { "observedAlias": "Fiction", "playerId": "fiction" },
+        { "observedAlias": "Hungrybox", "playerId": "hungrybox" },
+        { "observedAlias": "Jmook", "playerId": "jmook" },
+        { "observedAlias": "Joshman", "playerId": "joshman" },
+        { "observedAlias": "Krudo", "playerId": "krudo" },
+        { "observedAlias": "Magi", "playerId": "magi" },
+        { "observedAlias": "moky", "playerId": "moky" },
+        { "observedAlias": "Ossify", "playerId": "ossify" },
+        { "observedAlias": "S2J", "playerId": "s2j" },
+        { "observedAlias": "SFAT", "playerId": "sfat" },
+        { "observedAlias": "Soonsay", "playerId": "soonsay" },
+        { "observedAlias": "Spark", "playerId": "spark" },
+        { "observedAlias": "Wizzrobe", "playerId": "wizzrobe" }
+      ]
+    },
+    {
+      "kind": "event_aliases",
+      "eventId": "gx3",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/GENESIS/X3/Melee/Singles_Bracket",
+      "notes": "The cited singles bracket confirms attendance and each replay display name matches the public bracket tag exactly. Individual replay sides remain probable rather than bracket-verified; no Summit aliases are included.",
+      "aliases": [
+        { "observedAlias": "Axe", "playerId": "axe" },
+        { "observedAlias": "Fiction", "playerId": "fiction" },
+        { "observedAlias": "Ginger", "playerId": "ginger" },
+        { "observedAlias": "Hungrybox", "playerId": "hungrybox" },
+        { "observedAlias": "Jmook", "playerId": "jmook" },
+        { "observedAlias": "Joshman", "playerId": "joshman" },
+        { "observedAlias": "KoDoRiN", "playerId": "kodorin" },
+        { "observedAlias": "Krudo", "playerId": "krudo" },
+        { "observedAlias": "Magi", "playerId": "magi" },
+        { "observedAlias": "moky", "playerId": "moky" },
+        { "observedAlias": "n0ne", "playerId": "none" },
+        { "observedAlias": "Ossify", "playerId": "ossify" },
+        { "observedAlias": "S2J", "playerId": "s2j" },
+        { "observedAlias": "SFAT", "playerId": "sfat" },
+        { "observedAlias": "Shroomed", "playerId": "shroomed" },
+        { "observedAlias": "Soonsay", "playerId": "soonsay" },
+        { "observedAlias": "Spark", "playerId": "spark" },
+        { "observedAlias": "Wizzrobe", "playerId": "wizzrobe" },
+        { "observedAlias": "Zain", "playerId": "zain" }
+      ]
+    },
+    {
+      "kind": "event_aliases",
+      "eventId": "ootb5",
+      "resolution": "probable",
+      "sourceUrl": "https://liquipedia.net/smash/Out_of_the_Blue/5/Singles_Bracket",
+      "notes": "The cited singles bracket confirms attendance and each replay display name matches the public bracket tag exactly. Individual replay sides remain probable rather than bracket-verified.",
+      "aliases": [
+        { "observedAlias": "Ginger", "playerId": "ginger" },
+        { "observedAlias": "Hungrybox", "playerId": "hungrybox" },
+        { "observedAlias": "Jmook", "playerId": "jmook" },
+        { "observedAlias": "Joshman", "playerId": "joshman" },
+        { "observedAlias": "Krudo", "playerId": "krudo" },
+        { "observedAlias": "Magi", "playerId": "magi" },
+        { "observedAlias": "moky", "playerId": "moky" },
+        { "observedAlias": "Ossify", "playerId": "ossify" },
+        { "observedAlias": "Spark", "playerId": "spark" },
+        { "observedAlias": "Wizzrobe", "playerId": "wizzrobe" },
+        { "observedAlias": "Zain", "playerId": "zain" }
+      ]
     }
   ]
 }

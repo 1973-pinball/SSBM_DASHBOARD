@@ -6,6 +6,12 @@ export const num = (x: number | null, digits = 1): string =>
 
 export const int = (x: number | null): string => (x === null ? "—" : Math.round(x).toLocaleString());
 
+export const countNoun = (
+  count: number | null | undefined,
+  singular: string,
+  plural = `${singular}s`,
+): string => `${count?.toLocaleString() ?? "—"} ${count === 1 ? singular : plural}`;
+
 /**
  * Hours played, formatted one way everywhere it appears — the Overview KPI and
  * the player card show the same figure side by side, so two rounding rules read
