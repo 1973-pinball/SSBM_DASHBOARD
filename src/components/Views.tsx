@@ -1991,6 +1991,7 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
   { label: "Airs (F/U/D/N/B)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [14, 16, 17, 13, 15]) },
   { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
+  { label: "Tilts (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [7, 8, 9]) },
   { label: "Neutral wins", value: (p, o) => withShare(p.neutralWins, o.neutralWins) },
   { label: "Counter hits", value: (p, o) => withShare(p.counterHits, o.counterHits) },
   { label: "Beneficial trades", value: (p, o) => withShare(p.beneficialTrades, o.beneficialTrades) },
