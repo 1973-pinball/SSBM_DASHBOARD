@@ -1280,7 +1280,9 @@ export default function App() {
             />
           )}
 
-          {tab === "execution" && <Execution games={filtered} isDemo={isDemo} />}
+          {tab === "execution" && (
+            <Execution games={filtered} isDemo={isDemo} selectedCharacterId={filters.myCharacter} />
+          )}
           {tab === "insights" && <Insights games={filtered} />}
 
 

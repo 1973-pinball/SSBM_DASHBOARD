@@ -591,8 +591,6 @@ const EXECUTION_BENCHMARK_STYLES: { key: BenchmarkKind; label: string; color: st
 
 interface ExecutionBenchmarks {
   characterId: number | null;
-  characterGames: number;
-  totalGames: number;
   communityBenchmark: CommunityBenchmarkRow | null;
   communityExecution: CommunityExecutionRow | null;
   communityMoves: CommunityMoveRow[];
@@ -601,14 +599,8 @@ interface ExecutionBenchmarks {
   pro: ArchiveRollup | null;
 }
 
-const emptyExecutionBenchmarks = (
-  characterId: number | null,
-  characterGames: number,
-  totalGames: number,
-): ExecutionBenchmarks => ({
+const emptyExecutionBenchmarks = (characterId: number | null): ExecutionBenchmarks => ({
   characterId,
-  characterGames,
-  totalGames,
   communityBenchmark: null,
   communityExecution: null,
   communityMoves: [],
@@ -617,43 +609,37 @@ const emptyExecutionBenchmarks = (
   pro: null,
 });
 
-function dominantCharacter(games: ResolvedGame[]): { id: number | null; games: number } {
-  const counts = new Map<number, number>();
-  for (const game of games) counts.set(game.me.characterId, (counts.get(game.me.characterId) ?? 0) + 1);
-  let best: { id: number | null; games: number } = { id: null, games: 0 };
-  for (const [id, count] of counts) {
-    if (count > best.games || (count === best.games && (best.id === null || id < best.id))) best = { id, games: count };
-  }
-  return best;
-}
-
-function useExecutionBenchmarks(games: ResolvedGame[], isDemo: boolean): ExecutionBenchmarks {
-  const dominant = useMemo(() => dominantCharacter(games), [games]);
+function useExecutionBenchmarks(
+  games: ResolvedGame[],
+  isDemo: boolean,
+  selectedCharacterId: number | null,
+): ExecutionBenchmarks {
   const [benchmarks, setBenchmarks] = useState<ExecutionBenchmarks>(() =>
-    emptyExecutionBenchmarks(dominant.id, dominant.games, games.length));
+    emptyExecutionBenchmarks(selectedCharacterId));
 
   useEffect(() => {
-    const base = emptyExecutionBenchmarks(dominant.id, dominant.games, games.length);
+    const base = emptyExecutionBenchmarks(selectedCharacterId);
     setBenchmarks(base);
-    if (dominant.id === null) return;
+    if (games.length === 0) return;
     let alive = true;
     void Promise.all([isDemo ? Promise.resolve(demoCommunitySnapshot(games)) : fetchCommunitySnapshot(), fetchLatestArchiveDataset()])
       .then(async ([community, dataset]) => {
         const archive = dataset
           ? await Promise.all([
-            fetchArchiveCommunityBenchmarks(dataset.id, dominant.id!),
-            fetchArchiveProAggregateAtlasRows(dataset.id, dominant.id!),
+            fetchArchiveCommunityBenchmarks(dataset.id, selectedCharacterId),
+            fetchArchiveProAggregateAtlasRows(dataset.id, selectedCharacterId),
           ])
           : null;
         if (!alive) return;
         const proRows = archive?.[1] ?? [];
+        const communityCharacterId = selectedCharacterId ?? -1;
         setBenchmarks({
           ...base,
-          communityBenchmark: community?.benchmarks.find((row) => row.characterId === dominant.id) ?? null,
+          communityBenchmark: community?.benchmarks.find((row) => row.characterId === communityCharacterId) ?? null,
           communityExecution: community?.execution.find((row) =>
-            row.lookbackDays === null && row.characterId === dominant.id) ?? null,
+            row.lookbackDays === null && row.characterId === communityCharacterId) ?? null,
           communityMoves: community?.moves.filter((row) =>
-            row.lookbackDays === null && row.characterId === dominant.id) ?? [],
+            row.lookbackDays === null && (selectedCharacterId === null || row.characterId === selectedCharacterId)) ?? [],
           venue: archive?.[0].broad ?? null,
           tournament: archive?.[0].conservative ?? null,
           pro: proRows.find((row) => row.opponent_character_id === null && row.stage_id === null) ?? null,
@@ -661,19 +647,21 @@ function useExecutionBenchmarks(games: ResolvedGame[], isDemo: boolean): Executi
       })
       .catch(() => { /* Charts remain fully usable without remote benchmarks. */ });
     return () => { alive = false; };
-  }, [dominant.games, dominant.id, games, games.length, isDemo]);
+  }, [games, games.length, isDemo, selectedCharacterId]);
 
   return benchmarks;
 }
 
 function BenchmarkFootnote({ benchmarks }: { benchmarks: ExecutionBenchmarks }) {
-  if (benchmarks.characterId === null) return null;
-  const dominant = benchmarks.characterGames < benchmarks.totalGames;
+  if (benchmarks.characterId === null) return (
+    <div className="hint execution-benchmark-footnote">
+      Benchmarks use all characters, matching the active Me filter. The dotted horizontal lines are fixed full-sample
+      aggregate references, not rolling histories. A missing line means that source has no qualifying published sample.
+    </div>
+  );
   return (
     <div className="hint execution-benchmark-footnote">
-      Benchmarks use {charName(benchmarks.characterId)}{dominant
-        ? `, your most-played character in the active filters (${benchmarks.characterGames.toLocaleString()} of ${benchmarks.totalGames.toLocaleString()} games)`
-        : ", the character represented by the active filters"}. The dotted horizontal lines are fixed full-sample
+      Benchmarks use {charName(benchmarks.characterId)}, matching the active Me filter. The dotted horizontal lines are fixed full-sample
       aggregate references, not rolling histories. A missing line means that source has no qualifying published sample.
     </div>
   );
@@ -707,6 +695,15 @@ function archiveExecutionBenchmark(row: ArchiveRollup | null, metric: ExecMetric
   if (metric === "opk") return values.openingsPerKillSamples > 0 ? values.openingsPerKillSum / values.openingsPerKillSamples : null;
   if (metric === "dpo") return values.damagePerOpeningSamples > 0 ? values.damagePerOpeningSum / values.damagePerOpeningSamples : null;
   return values.inputsPerMinuteSamples > 0 ? values.inputsPerMinuteSum / values.inputsPerMinuteSamples : null;
+}
+
+function archiveGroundTechBreakdown(row: ArchiveRollup | null): [number | null, number | null, number | null] {
+  if (!row) return [null, null, null];
+  const { techInPlace, techToward, techAway } = row.metrics;
+  const successful = techInPlace + techToward + techAway;
+  return successful > 0
+    ? [techInPlace / successful, techToward / successful, techAway / successful]
+    : [null, null, null];
 }
 
 function executionBenchmarkValue(benchmarks: ExecutionBenchmarks, kind: BenchmarkKind, metric: ExecMetricKey): number | null {
@@ -1188,24 +1185,39 @@ function archiveBenchmarkSample(row: ArchiveRollup | null, includeProCount = fal
 }
 
 function communityMoveBenchmark(rows: CommunityMoveRow[], moveKey: string, metric: MoveMetricKey): number | null {
-  const move = rows.find((row) => row.moveKey === moveKey);
-  if (!move || move.characterGames <= 0) return null;
-  if (metric === "attemptsPerGame") return move.attempts === null ? null : move.attempts / move.characterGames;
-  if (metric === "landedPerGame") return move.landed / move.characterGames;
-  if (metric === "dmgPerGame") return move.damage / move.characterGames;
+  const moves = rows.filter((row) => row.moveKey === moveKey);
+  if (moves.length === 0) return null;
+  const gamesByCharacter = new Map<number, number>();
+  for (const row of rows) {
+    gamesByCharacter.set(row.characterId, Math.max(gamesByCharacter.get(row.characterId) ?? 0, row.characterGames));
+  }
+  const characterGames = [...gamesByCharacter.values()].reduce((sum, games) => sum + games, 0);
+  if (characterGames <= 0) return null;
+  const attempts = moves.some((move) => move.attempts === null)
+    ? null
+    : moves.reduce((sum, move) => sum + (move.attempts ?? 0), 0);
+  const landed = moves.reduce((sum, move) => sum + move.landed, 0);
+  const damage = moves.reduce((sum, move) => sum + move.damage, 0);
+  const kills = moves.reduce((sum, move) => sum + move.kills, 0);
+  const killPctSum = moves.reduce((sum, move) => sum + move.killPctSum, 0);
+  const lCancelSuccess = moves.reduce((sum, move) => sum + move.lCancelSuccess, 0);
+  const lCancelFail = moves.reduce((sum, move) => sum + move.lCancelFail, 0);
+  if (metric === "attemptsPerGame") return attempts === null ? null : attempts / characterGames;
+  if (metric === "landedPerGame") return landed / characterGames;
+  if (metric === "dmgPerGame") return damage / characterGames;
   if (metric === "dmgShare") {
     const total = rows.reduce((sum, row) => sum + row.damage, 0);
-    return total > 0 ? 100 * move.damage / total : null;
+    return total > 0 ? 100 * damage / total : null;
   }
-  if (metric === "avgDmgPerHit") return move.landed > 0 ? move.damage / move.landed : null;
-  if (metric === "killsPerGame") return move.kills / move.characterGames;
+  if (metric === "avgDmgPerHit") return landed > 0 ? damage / landed : null;
+  if (metric === "killsPerGame") return kills / characterGames;
   if (metric === "killShare") {
     const total = rows.reduce((sum, row) => sum + row.kills, 0);
-    return total > 0 ? 100 * move.kills / total : null;
+    return total > 0 ? 100 * kills / total : null;
   }
-  if (metric === "avgKillPct") return move.kills > 0 ? move.killPctSum / move.kills : null;
-  const attempts = move.lCancelSuccess + move.lCancelFail;
-  return attempts > 0 ? 100 * move.lCancelSuccess / attempts : null;
+  if (metric === "avgKillPct") return kills > 0 ? killPctSum / kills : null;
+  const lCancelAttempts = lCancelSuccess + lCancelFail;
+  return lCancelAttempts > 0 ? 100 * lCancelSuccess / lCancelAttempts : null;
 }
 
 function moveBenchmarkValue(
@@ -1491,7 +1503,15 @@ function TechKpi({ summary }: { summary: ExecutionSummary }) {
   );
 }
 
-export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; isDemo?: boolean }) {
+export function Execution({
+  games,
+  isDemo = false,
+  selectedCharacterId,
+}: {
+  games: ResolvedGame[];
+  isDemo?: boolean;
+  selectedCharacterId: number | null;
+}) {
   // The charts cover the whole filter; everything under them describes current
   // form, so it reads the trailing window the charts smooth over. The same
   // number on purpose — see ROLLING_WINDOW.
@@ -1503,7 +1523,8 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
   // the window pass feeds the two tables that report current habits.
   const career = useMemo(() => moveTable(games), [games]);
   const recentMoves = useMemo(() => moveTable(recentGames), [recentGames]);
-  const benchmarks = useExecutionBenchmarks(games, isDemo);
+  const benchmarks = useExecutionBenchmarks(games, isDemo, selectedCharacterId);
+  const venueGroundTechBreakdown = archiveGroundTechBreakdown(benchmarks.venue);
   if (games.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
     <>
@@ -1566,10 +1587,17 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
                   <th className="data">Opponents</th>
                   <th className="data">Opp / game</th>
                   <th className="data">Opp %<br />breakdown</th>
+                  <th
+                    className="data metric-header-wrap"
+                    title={`${selectedCharacterId === null ? "All-character" : charName(selectedCharacterId)} Venue benchmark`}
+                  >
+                    Venue %<br />breakdown
+                    <span className="sample-note">{archiveBenchmarkSample(benchmarks.venue)}</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                {neutral.techRows.map((r) => (
+                {neutral.techRows.map((r, index) => (
                   <tr key={r.label}>
                     <td>{r.label}</td>
                     <td className="data">{r.mine.toLocaleString()}</td>
@@ -1578,6 +1606,7 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
                     <td className="data">{r.theirs.toLocaleString()}</td>
                     <td className="data">{num(r.oppPerGame ?? 0, 1)}</td>
                     <td className="data">{pct(r.theirsPct ?? null, 0)}</td>
+                    <td className="data">{pct(venueGroundTechBreakdown[index] ?? null, 0)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -1586,7 +1615,9 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
               Your most recent {neutral.covered.toLocaleString()} games in this filter — current form, not career
               totals. Share is your count ÷ the game total, so over 50% means you're winning that kind of exchange
               more often than your opponents. The % breakdown columns show the in-place / in / away composition of your ground techs and
-              your opponents' ground techs.
+              your opponents' ground techs. Venue % is the fixed successful-ground-tech mix for {selectedCharacterId === null
+                ? "all characters"
+                : charName(selectedCharacterId)}, following the Me character filter.
             </div>
           </>
         )}
@@ -1646,7 +1677,7 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
             <div className="hint">
               Your most recent {actions.covered.toLocaleString()} games in this filter, compared with fixed Venue,
               Tournament, and aggregate Pro per-game benchmarks for {benchmarks.characterId === null
-                ? "your selected character"
+                ? "all characters"
                 : charName(benchmarks.characterId)}. Per-minute normalizes your rate for game length; a dash means
               that archive has no qualifying published sample. Your per-game cell is highlighted when it differs
               materially from Tournament, or Venue when Tournament is unavailable; brighter shading means a larger
@@ -1846,7 +1877,7 @@ function MovesSection({
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
           headline rate, which corrects for edge-cancels). Venue, Tournament, and Pro show fixed attempted-per-game
-          references for your benchmark character. Your attempted-per-game cell compares with Tournament, or Venue
+          references for {benchmarks.characterId === null ? "all characters" : charName(benchmarks.characterId)}. Your attempted-per-game cell compares with Tournament, or Venue
           when Tournament is unavailable; brighter red or blue means a larger difference. Moves below {minDamageShare}%
           of your damage are hidden.
         </div>
@@ -1925,7 +1956,7 @@ function MovesSection({
         <div className="hint">
           The first move of each conversion, over your most recent {recent.covered.toLocaleString()} games in this
           filter. Venue, Tournament, and Pro are fixed openings-per-game benchmarks for {benchmarks.characterId === null
-            ? "your selected character"
+            ? "all characters"
             : charName(benchmarks.characterId)}; a dash means that archive has no qualifying published sample. High
           damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to see whether
           you're converting them. A short window makes rare openings noisy. Moves below {minOpeningShare}% of your

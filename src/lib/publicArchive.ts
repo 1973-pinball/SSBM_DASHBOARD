@@ -265,8 +265,9 @@ export async function fetchArchiveCatalog(): Promise<ArchiveCatalog> {
 }
 
 interface TargetableQuery {
-  eq(column: string, value: string): TargetableQuery;
+  eq(column: string, value: string | number | boolean): TargetableQuery;
   is(column: string, value: null): TargetableQuery;
+  not(column: string, operator: string, value: null): TargetableQuery;
   order(column: string): TargetableQuery;
   range(from: number, to: number): PromiseLike<PageResponse>;
 }
@@ -435,15 +436,15 @@ export interface ArchiveCommunityBenchmarks {
   conservative: ArchiveRollup | null;
 }
 
-/** Global, character-specific archive averages; deliberately separate from opt-in contributor quartiles. */
+/** Global archive averages, optionally scoped to one character; deliberately separate from opt-in contributor quartiles. */
 export async function fetchArchiveCommunityBenchmarks(
   datasetId: string,
-  characterId: number,
+  characterId: number | null,
   format: ArchiveFormat = "singles",
 ): Promise<ArchiveCommunityBenchmarks> {
   const client = requireArchiveClient();
   const rows = await readAll<ArchiveRollup>(async (from, to) => {
-    const response = await client
+    const query = client
       .from("archive_rollups")
       .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
       .eq("published", true)
@@ -451,16 +452,20 @@ export async function fetchArchiveCommunityBenchmarks(
       .eq("scope", "community")
       .in("population", ["broad", "conservative"])
       .eq("format", format)
-      .eq("character_id", characterId)
       .is("opponent_character_id", null)
-      .is("stage_id", null)
+      .is("stage_id", null) as unknown as TargetableQuery;
+    // Character rows carry per-move metrics; the prebuilt all-character row
+    // deliberately does not. Sum the disjoint character rows so an unfiltered
+    // Execution view can still show honest move benchmarks.
+    const response = await (characterId === null ? query.not("character_id", "is", null) : query.eq("character_id", characterId))
       .order("rollup_key")
       .range(from, to);
     return response as unknown as PageResponse;
   });
+  const benchmarkRows = characterId === null ? aggregateCommunityCharacterRows(rows, datasetId, format) : rows;
   return {
-    broad: rows.find((row) => row.population === "broad") ?? null,
-    conservative: rows.find((row) => row.population === "conservative") ?? null,
+    broad: benchmarkRows.find((row) => row.population === "broad") ?? null,
+    conservative: benchmarkRows.find((row) => row.population === "conservative") ?? null,
   };
 }
 
@@ -611,18 +616,96 @@ function emptyArchiveMetrics(): ArchiveMetrics {
   };
 }
 
+function addArchiveMetrics(into: ArchiveMetrics, metrics: ArchiveMetrics): void {
+  into.durationFrames += metrics.durationFrames;
+  into.damageTotal += metrics.damageTotal;
+  into.neutralWins += metrics.neutralWins;
+  into.openingsPerKillSum += metrics.openingsPerKillSum;
+  into.openingsPerKillSamples += metrics.openingsPerKillSamples;
+  into.damagePerOpeningSum += metrics.damagePerOpeningSum;
+  into.damagePerOpeningSamples += metrics.damagePerOpeningSamples;
+  into.inputsPerMinuteSum += metrics.inputsPerMinuteSum;
+  into.inputsPerMinuteSamples += metrics.inputsPerMinuteSamples;
+  into.lCancelSuccess += metrics.lCancelSuccess;
+  into.lCancelFail += metrics.lCancelFail;
+  into.techInPlace += metrics.techInPlace;
+  into.techToward += metrics.techToward;
+  into.techAway += metrics.techAway;
+  into.techMissed += metrics.techMissed;
+  into.wallTechSuccess += metrics.wallTechSuccess ?? 0;
+  into.wallTechMissed += metrics.wallTechMissed ?? 0;
+  for (const action of Object.keys(into.actions) as (keyof ActionCounts)[]) {
+    into.actions[action] += metrics.actions?.[action] ?? 0;
+  }
+  if (!metrics.moves) return;
+  into.moves ??= {};
+  for (const [moveId, move] of Object.entries(metrics.moves)) {
+    const aggregate = into.moves[moveId] ?? {
+      attempts: 0,
+      landed: 0,
+      damage: 0,
+      kills: 0,
+      killPctSum: 0,
+      openings: 0,
+      openingDmg: 0,
+      lCancelSuccess: 0,
+      lCancelFail: 0,
+    };
+    aggregate.attempts += move.attempts;
+    aggregate.landed += move.landed;
+    aggregate.damage += move.damage;
+    aggregate.kills += move.kills;
+    aggregate.killPctSum += move.killPctSum;
+    aggregate.openings += move.openings;
+    aggregate.openingDmg += move.openingDmg;
+    aggregate.lCancelSuccess += move.lCancelSuccess;
+    aggregate.lCancelFail += move.lCancelFail;
+    into.moves[moveId] = aggregate;
+  }
+}
+
+function aggregateCommunityCharacterRows(
+  rows: ArchiveRollup[],
+  datasetId: string,
+  format: ArchiveFormat,
+): ArchiveRollup[] {
+  const grouped = new Map<ArchivePopulation, ArchiveRollup>();
+  for (const source of rows) {
+    let target = grouped.get(source.population);
+    if (!target) {
+      target = {
+        ...source,
+        rollup_key: `community-character-aggregate:${datasetId}:${format}:${source.population}`,
+        character_id: null,
+        game_count: 0,
+        win_rate_game_count: 0,
+        wins: 0,
+        identified_player_count: null,
+        player_balanced_sample_count: null,
+        metrics: emptyArchiveMetrics(),
+      };
+      grouped.set(source.population, target);
+    }
+    target.game_count += source.game_count;
+    target.win_rate_game_count += source.win_rate_game_count;
+    target.wins += source.wins;
+    addArchiveMetrics(target.metrics, source.metrics);
+  }
+  return [...grouped.values()];
+}
+
 /**
- * Aggregate every safely resolved Top-100 player for one character. This is a
- * player-game sample: when two named pros face each other, both sides belong.
+ * Aggregate every safely resolved Top-100 player for one or all characters.
+ * This is a player-game sample: when two named pros face each other, both sides belong.
  */
 export async function fetchArchiveProAggregateAtlasRows(
   datasetId: string,
-  characterId: number,
+  characterId: number | null,
   format: ArchiveFormat = "singles",
 ): Promise<ArchiveRollup[]> {
   const client = requireArchiveClient();
   const sourceRows = await readAll<ArchiveRollup>(async (from, to) => {
-    const response = await client
+    const query = client
       .from("archive_rollups")
       .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
       .eq("published", true)
@@ -630,11 +713,13 @@ export async function fetchArchiveProAggregateAtlasRows(
       .eq("scope", "player")
       .eq("population", "conservative")
       .eq("format", format)
-      .eq("character_id", characterId)
       .not("player_id", "is", null)
       .is("series_id", null)
       .is("tournament_id", null)
-      .is("set_id", null)
+      .is("set_id", null) as unknown as TargetableQuery;
+    const response = await (characterId === null
+      ? query.not("character_id", "is", null).is("opponent_character_id", null).is("stage_id", null)
+      : query.eq("character_id", characterId))
       .order("rollup_key")
       .range(from, to);
     return response as unknown as PageResponse;
@@ -649,6 +734,7 @@ export async function fetchArchiveProAggregateAtlasRows(
         row: {
           ...source,
           rollup_key: `pro-aggregate:${datasetId}:${characterId}:${key}`,
+          character_id: characterId,
           player_id: null,
           game_count: 0,
           win_rate_game_count: 0,
@@ -665,54 +751,7 @@ export async function fetchArchiveProAggregateAtlasRows(
     target.row.game_count += source.game_count;
     target.row.win_rate_game_count += source.win_rate_game_count;
     target.row.wins += source.wins;
-    const into = target.row.metrics;
-    const metrics = source.metrics;
-    into.durationFrames += metrics.durationFrames;
-    into.damageTotal += metrics.damageTotal;
-    into.neutralWins += metrics.neutralWins;
-    into.openingsPerKillSum += metrics.openingsPerKillSum;
-    into.openingsPerKillSamples += metrics.openingsPerKillSamples;
-    into.damagePerOpeningSum += metrics.damagePerOpeningSum;
-    into.damagePerOpeningSamples += metrics.damagePerOpeningSamples;
-    into.inputsPerMinuteSum += metrics.inputsPerMinuteSum;
-    into.inputsPerMinuteSamples += metrics.inputsPerMinuteSamples;
-    into.lCancelSuccess += metrics.lCancelSuccess;
-    into.lCancelFail += metrics.lCancelFail;
-    into.techInPlace += metrics.techInPlace;
-    into.techToward += metrics.techToward;
-    into.techAway += metrics.techAway;
-    into.techMissed += metrics.techMissed;
-    into.wallTechSuccess += metrics.wallTechSuccess ?? 0;
-    into.wallTechMissed += metrics.wallTechMissed ?? 0;
-    for (const action of Object.keys(into.actions) as (keyof ActionCounts)[]) {
-      into.actions[action] += metrics.actions?.[action] ?? 0;
-    }
-    if (metrics.moves) {
-      into.moves ??= {};
-      for (const [moveId, move] of Object.entries(metrics.moves)) {
-        const aggregate = into.moves[moveId] ?? {
-          attempts: 0,
-          landed: 0,
-          damage: 0,
-          kills: 0,
-          killPctSum: 0,
-          openings: 0,
-          openingDmg: 0,
-          lCancelSuccess: 0,
-          lCancelFail: 0,
-        };
-        aggregate.attempts += move.attempts;
-        aggregate.landed += move.landed;
-        aggregate.damage += move.damage;
-        aggregate.kills += move.kills;
-        aggregate.killPctSum += move.killPctSum;
-        aggregate.openings += move.openings;
-        aggregate.openingDmg += move.openingDmg;
-        aggregate.lCancelSuccess += move.lCancelSuccess;
-        aggregate.lCancelFail += move.lCancelFail;
-        into.moves[moveId] = aggregate;
-      }
-    }
+    addArchiveMetrics(target.row.metrics, source.metrics);
   }
   return [...grouped.values()].map(({ row, players }) => ({
     ...row,
