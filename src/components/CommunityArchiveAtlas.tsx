@@ -197,7 +197,7 @@ interface RateSummary {
   contributors?: number;
 }
 
-type MatchupSortKey = "opponent" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
+type MatchupSortKey = "opponent" | "games" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
 type StageSortKey = "stage" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
 type SortDirection = "asc" | "desc";
 
@@ -207,13 +207,13 @@ const rateSummary = (row: ArchiveRollup | undefined): RateSummary | null => row 
   games: row.game_count,
 } : null;
 
-function RateCell({ value }: { value: RateSummary | null | undefined }) {
+function RateCell({ value, showSample = true }: { value: RateSummary | null | undefined; showSample?: boolean }) {
   if (!value || value.decided === 0) return <td className="data atlas-rate-cell">—</td>;
   const rate = value.wins / value.decided;
   return (
     <td className={`data atlas-rate-cell ${value.games < 10 ? "atlas-low-sample" : ""}`}>
       <b style={{ color: winRateColor(rate) }}>{pct(rate)}</b>
-      <span className="sample-note">{value.games.toLocaleString()} games{value.contributors === undefined ? "" : ` · ${value.contributors.toLocaleString()} users`}</span>
+      {showSample && <span className="sample-note">{value.games.toLocaleString()} games{value.contributors === undefined ? "" : ` · ${value.contributors.toLocaleString()} users`}</span>}
     </td>
   );
 }
@@ -291,6 +291,15 @@ export function ArchiveMatchupAtlasComparison({
         const order = charName(a).localeCompare(charName(b));
         return sort.direction === "asc" ? order : -order;
       }
+      if (sort.key === "games") {
+        const leftGames = local.get(a)?.games ?? null;
+        const rightGames = local.get(b)?.games ?? null;
+        if (leftGames === null && rightGames === null) return charName(a).localeCompare(charName(b));
+        if (leftGames === null) return 1;
+        if (rightGames === null) return -1;
+        const direction = sort.direction === "asc" ? 1 : -1;
+        return direction * (leftGames - rightGames) || charName(a).localeCompare(charName(b));
+      }
       const left = sourceFor(sort.key, a);
       const right = sourceFor(sort.key, b);
       const leftRate = left && left.decided > 0 ? left.wins / left.decided : null;
@@ -316,8 +325,8 @@ export function ArchiveMatchupAtlasComparison({
 
   return (
     <ArchiveFrame archive={archive} eyebrow="Matchup Atlas" title={`Your ${charName(characterId)} matchups across the full field`} controls={controls} onCharacterChange={onCharacterChange}>
-      {opponents.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("opponent", "Opponent")}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
-        {opponents.map((opponentId) => <tr key={opponentId}><td>{charName(opponentId)}</td><RateCell value={local.get(opponentId)} /><RateCell value={community.get(opponentId)} /><RateCell value={broad.get(opponentId)} /><RateCell value={conservative.get(opponentId)} /><RateCell value={proAggregate.get(opponentId)} />{archive.selectedPro && <RateCell value={pro.get(opponentId)} />}</tr>)}
+      {opponents.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("opponent", "Opponent")}{sortableHeader("games", "Games", true)}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
+        {opponents.map((opponentId) => <tr key={opponentId}><td>{charName(opponentId)}</td><td className="data">{local.get(opponentId)?.games.toLocaleString() ?? "—"}</td><RateCell value={local.get(opponentId)} showSample={false} /><RateCell value={community.get(opponentId)} /><RateCell value={broad.get(opponentId)} /><RateCell value={conservative.get(opponentId)} /><RateCell value={proAggregate.get(opponentId)} />{archive.selectedPro && <RateCell value={pro.get(opponentId)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No matching matchup samples are available.</div>}
       {gameType !== "all" && <div className="hint">Your and SSBM Stats columns use the selected mode. Historical archive columns are offline event games.</div>}
     </ArchiveFrame>
