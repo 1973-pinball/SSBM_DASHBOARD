@@ -1983,7 +1983,7 @@ const moveAttemptsLabel = (p: PlayerSide, rec: GameRecord, moveIds: number[]): s
     ? moveIds.map((moveId) => p.moveStats?.[moveId]?.attempts ?? 0).join("/")
     : "—";
 
-const DODGE_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls"]);
+const COMBINED_ACTION_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls", "grabs", "ledgeGrabs"]);
 
 const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, rec: GameRecord) => string }[] = [
   { label: "Kills", value: (p) => int(p.kills) },
@@ -2009,17 +2009,14 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Tech dirs (IP/in/away)", value: techDirectionLabel },
   { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
   {
-    label: "Grabs (landed)",
-    value: (p) => {
-      const attempts = p.actions?.grabs ?? 0;
-      return attempts === 0 ? "—" : `${p.grabSuccess}/${attempts} (${pct(p.grabSuccess / attempts, 0)})`;
-    },
+    label: "Grabs (Landed/Total/Ledge)",
+    value: (p) => `${int(p.grabSuccess)}/${int(p.actions?.grabs ?? null)}/${int(p.actions?.ledgeGrabs ?? null)}`,
   },
   {
     label: "Dodges (Air/Spot/Roll)",
     value: (p) => (["airDodges", "spotDodges", "rolls"] as const).map((key) => int(p.actions?.[key] ?? null)).join("/"),
   },
-  ...ACTION_LABELS.filter(({ key }) => !DODGE_KEYS.has(key) && key !== "grabs").map(({ key, label }) => ({
+  ...ACTION_LABELS.filter(({ key }) => !COMBINED_ACTION_KEYS.has(key)).map(({ key, label }) => ({
     label,
     value: (p: PlayerSide) => int(p.actions?.[key] ?? null),
   })),
