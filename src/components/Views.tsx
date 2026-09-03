@@ -1983,6 +1983,8 @@ const moveAttemptsLabel = (p: PlayerSide, rec: GameRecord, moveIds: number[]): s
     ? moveIds.map((moveId) => p.moveStats?.[moveId]?.attempts ?? 0).join("/")
     : "—";
 
+const DODGE_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls"]);
+
 const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, rec: GameRecord) => string }[] = [
   { label: "Kills", value: (p) => int(p.kills) },
   { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
@@ -2013,7 +2015,11 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
       return attempts === 0 ? "—" : `${p.grabSuccess}/${attempts} (${pct(p.grabSuccess / attempts, 0)})`;
     },
   },
-  ...ACTION_LABELS.filter(({ key }) => key !== "grabs").map(({ key, label }) => ({
+  {
+    label: "Dodges (Air/Spot/Roll)",
+    value: (p) => (["airDodges", "spotDodges", "rolls"] as const).map((key) => int(p.actions?.[key] ?? null)).join("/"),
+  },
+  ...ACTION_LABELS.filter(({ key }) => !DODGE_KEYS.has(key) && key !== "grabs").map(({ key, label }) => ({
     label,
     value: (p: PlayerSide) => int(p.actions?.[key] ?? null),
   })),
