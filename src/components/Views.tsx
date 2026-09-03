@@ -1990,7 +1990,11 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Airs (F/U/D/N/B)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [14, 16, 17, 13, 15]) },
   { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
   { label: "Tilts (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [7, 8, 9]) },
-  { label: "Jabs (1/2/3/R)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [2, 3, 4, 5]) },
+  {
+    label: "Jabs",
+    value: (p, _other, rec) =>
+      hasCurrentStats(rec) ? int([2, 3, 4, 5].reduce((sum, moveId) => sum + (p.moveStats?.[moveId]?.attempts ?? 0), 0)) : "—",
+  },
   { label: "Neutral (Wins/Counter hits/Beneficial trades)", value: (p) => `${int(p.neutralWins)}/${int(p.counterHits)}/${int(p.beneficialTrades)}` },
   {
     label: "L-cancels",
