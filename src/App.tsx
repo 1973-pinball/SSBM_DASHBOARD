@@ -83,8 +83,8 @@ const TABS: { id: Tab; label: string }[] = [
 
 
   { id: "community", label: "Community" },
-  { id: "liquipedia", label: "Liquipedia" },
   { id: "tournaments", label: "Tournaments" },
+  { id: "liquipedia", label: "Liquipedia" },
 ];
 
 /**

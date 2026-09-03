@@ -107,7 +107,11 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
   // of mounting placeholder controls that would retain their empty selection.
   const displaySnapshot = snapshot ?? (isDemo ? demo : EMPTY_COMMUNITY_SNAPSHOT);
   const hasSnapshot = snapshot !== null || isDemo;
-  const nextMilestone = Math.max(25, Math.ceil((displaySnapshot.contributorCount + 1) / 25) * 25);
+  const nextMilestone = displaySnapshot.contributorCount < 25
+    ? 25
+    : displaySnapshot.contributorCount < 100
+      ? 100
+      : Math.ceil((displaySnapshot.contributorCount + 1) / 100) * 100;
   const progress = Math.min(100, (displaySnapshot.contributorCount / nextMilestone) * 100);
 
   return (
@@ -194,6 +198,18 @@ const localGamesInLookback = (games: ResolvedGame[], lookbackDays: CommunityLook
   return games.filter((game) => game.date !== null && game.date.getTime() >= cutoff);
 };
 
+const mostPlayedCharacter = (games: ResolvedGame[]): number | null => {
+  const counts = new Map<number, number>();
+  for (const game of games) counts.set(game.me.characterId, (counts.get(game.me.characterId) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1] || charName(a[0]).localeCompare(charName(b[0])))[0]?.[0] ?? null;
+};
+
+const defaultCharacter = (games: ResolvedGame[], available: number[]): number => {
+  const mostPlayed = mostPlayedCharacter(games);
+  return mostPlayed !== null && available.includes(mostPlayed) ? mostPlayed : available[0] ?? -1;
+};
+
 function MatchupAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
   const lookbackRows = snapshot.matchups.filter((row) => hasLookback(row, lookbackDays));
   const chars = [...new Set([
@@ -201,8 +217,9 @@ function MatchupAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { sna
     ...games.map((game) => game.me.characterId),
   ])]
     .sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
-  const selectedCharacterId = chars.includes(characterId) ? characterId : chars[0] ?? -1;
+  const preferredCharacterId = defaultCharacter(games, chars);
+  const [characterId, setCharacterId] = useState(preferredCharacterId);
+  const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const [stageId, setStageId] = useState(0);
   const [gameType, setGameType] = useState("all");
   const rows = lookbackRows
@@ -232,8 +249,9 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
     for (const game of games) ids.add(game.me.characterId);
     return [...ids].sort((a, b) => charName(a).localeCompare(charName(b)));
   }, [games, snapshot]);
-  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
-  const selectedCharacterId = chars.includes(characterId) ? characterId : chars[0] ?? -1;
+  const preferredCharacterId = defaultCharacter(games, chars);
+  const [characterId, setCharacterId] = useState(preferredCharacterId);
+  const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const [lookbackInput, setLookbackInput] = useState("100");
   const parsedLookback = Number(lookbackInput);
   const lookback = Number.isFinite(parsedLookback) && parsedLookback > 0
@@ -278,8 +296,9 @@ function MoveAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { snapsh
     ...lookbackExecution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
     ...games.map((game) => game.me.characterId),
   ])].sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
-  const selectedCharacterId = characterId === -1 || chars.includes(characterId) ? characterId : chars[0] ?? -1;
+  const preferredCharacterId = defaultCharacter(games, chars);
+  const [characterId, setCharacterId] = useState(preferredCharacterId);
+  const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const rows = lookbackMoves.filter((m) => m.characterId === selectedCharacterId).sort((a, b) => b.damage - a.damage);
   if (selectedCharacterId < 0) return <div className="panel empty-note">Choose a character to compare move samples.</div>;
   return <ArchiveMoveAtlasComparison
@@ -303,19 +322,24 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
     ...localGames.map((game) => game.me.characterId),
   ])]
     .sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [characterId, setCharacterId] = useState(chars[0] ?? -1);
-  const selectedCharacterId = chars.includes(characterId) ? characterId : chars[0] ?? -1;
+  const preferredCharacterId = defaultCharacter(games, chars);
+  const [characterId, setCharacterId] = useState(preferredCharacterId);
+  const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const communityOpponents = overall.filter((r) => r.characterId === selectedCharacterId);
   const opponentIds = [...new Set([
     ...communityOpponents.map((row) => row.opponentCharacterId),
     ...localGames.filter((game) => game.me.characterId === selectedCharacterId).map((game) => game.opp.characterId),
   ])].sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [opponentId, setOpponentId] = useState(opponentIds[0] ?? -1);
-  const selectedOpponentId = opponentIds.includes(opponentId)
+  const [opponentId, setOpponentId] = useState<number | null>(opponentIds[0] ?? null);
+  const selectedOpponentId = opponentId === null || opponentIds.includes(opponentId)
     ? opponentId
-    : opponentIds[0] ?? -1;
-  const rows = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays) && r.characterId === selectedCharacterId && r.opponentCharacterId === selectedOpponentId && r.stageId !== 0 && r.gameType === "all").sort((a, b) => b.winRate - a.winRate);
-  if (selectedCharacterId < 0 || selectedOpponentId < 0) return <div className="panel empty-note">Choose a character and opponent to compare stage samples.</div>;
+    : opponentIds[0] ?? null;
+  const rows = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays)
+    && r.characterId === selectedCharacterId
+    && (selectedOpponentId === null || r.opponentCharacterId === selectedOpponentId)
+    && r.stageId !== 0
+    && r.gameType === "all");
+  if (selectedCharacterId < 0) return <div className="panel empty-note">Choose a character to compare stage samples.</div>;
   return <ArchiveStageAtlasComparison
     games={games}
     characterId={selectedCharacterId}
@@ -324,13 +348,14 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
     communityRows={rows}
     onCharacterChange={(id) => {
       setCharacterId(id);
+      if (selectedOpponentId === null) return;
       const nextCommunity = overall.find((row) => row.characterId === id)?.opponentCharacterId;
       const nextLocal = localGames.find((game) => game.me.characterId === id)?.opp.characterId;
-      setOpponentId(nextCommunity ?? nextLocal ?? -1);
+      setOpponentId(nextCommunity ?? nextLocal ?? null);
     }}
     controls={<>
-      <label>Character<select value={selectedCharacterId} onChange={(event) => { const id = Number(event.target.value); setCharacterId(id); const nextCommunity = overall.find((row) => row.characterId === id)?.opponentCharacterId; const nextLocal = localGames.find((game) => game.me.characterId === id)?.opp.characterId; setOpponentId(nextCommunity ?? nextLocal ?? -1); }}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
-      <label>Opponent<select value={selectedOpponentId} onChange={(event) => setOpponentId(Number(event.target.value))}>{opponentIds.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
+      <label>Character<select value={selectedCharacterId} onChange={(event) => { const id = Number(event.target.value); setCharacterId(id); if (selectedOpponentId === null) return; const nextCommunity = overall.find((row) => row.characterId === id)?.opponentCharacterId; const nextLocal = localGames.find((game) => game.me.characterId === id)?.opp.characterId; setOpponentId(nextCommunity ?? nextLocal ?? null); }}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
+      <label>Opponent<select value={selectedOpponentId ?? "all"} onChange={(event) => setOpponentId(event.target.value === "all" ? null : Number(event.target.value))}><option value="all">All opponents</option>{opponentIds.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
       <LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} />
     </>}
   />;

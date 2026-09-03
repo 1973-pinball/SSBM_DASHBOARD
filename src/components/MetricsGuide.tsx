@@ -38,7 +38,7 @@ export function MetricsGuide({ onClose }: Props) {
       const dialog = dialogRef.current;
       if (!dialog) return;
       const focusables = dialog.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        'button:not([disabled]), summary, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
       );
       if (focusables.length === 0) {
         e.preventDefault();
@@ -89,8 +89,11 @@ export function MetricsGuide({ onClose }: Props) {
         </div>
         <div className="modal-body">
           {SECTIONS.map((s) => (
-            <section key={s.title}>
-              <h3>{s.title}</h3>
+            <details className="metric-guide-section" key={s.title}>
+              <summary>
+                <span>{s.title}</span>
+                <span className="metric-guide-chevron" aria-hidden="true">⌄</span>
+              </summary>
               <dl>
                 {s.items.map((it) => (
                   <div key={it.term} className="metric-def">
@@ -99,7 +102,7 @@ export function MetricsGuide({ onClose }: Props) {
                   </div>
                 ))}
               </dl>
-            </section>
+            </details>
           ))}
           <p className="hint">
             Neutral and punish metrics come from slippi-js conversion detection over the replay's frame data; they exist only

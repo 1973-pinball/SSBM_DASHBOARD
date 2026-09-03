@@ -745,8 +745,11 @@ select:disabled { opacity: 0.45; }
 .stage-rate b { position: absolute; inset: 0 9px 0 auto; display: flex; align-items: center; color: #18152a; font-family: var(--font-data); }
 .community-warmup { max-width: 720px; margin: 30px auto; padding: 28px; }
 .community-warmup .primary { margin-top: 16px; }
-.community-preview-progress { max-width: none; margin: 0 0 var(--gap); }
-.community-progress { height: 8px; margin-top: 18px; overflow: hidden; border-radius: 999px; background: var(--panel-2); }
+.community-preview-progress { max-width: none; margin: 0 0 var(--gap); padding: 18px 22px; }
+.community-preview-progress h2 { margin: 4px 0 8px; font-size: 22px; }
+.community-preview-progress p { max-width: 1050px; font-size: 12px; line-height: 1.5; }
+.community-preview-progress .primary { margin-top: 10px; padding: 9px 14px; font-size: 12px; }
+.community-progress { height: 7px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: var(--panel-2); }
 .community-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--win)); }
 .community-progress-label { margin-top: 6px; color: var(--muted); font-family: var(--font-data); font-size: 11px; }
 .community-progress-label b { color: var(--text); }
@@ -765,17 +768,18 @@ select:disabled { opacity: 0.45; }
 .community-comparison-table .community-own-row { background: rgba(143, 127, 247, 0.08); }
 .community-comparison-table .community-own-row td:first-child { color: var(--accent); font-weight: 600; }
 .community-diff-above {
-  background: rgba(232, 181, 77, 0.12) !important;
-  box-shadow: inset 0 0 0 1px rgba(232, 181, 77, 0.35);
+  background: rgb(232 181 77 / var(--diff-bg, 0.12)) !important;
+  box-shadow: inset 0 0 0 1px rgb(232 181 77 / var(--diff-border, 0.35));
   color: var(--gold) !important;
 }
 .community-diff-below {
-  background: rgba(143, 127, 247, 0.13) !important;
-  box-shadow: inset 0 0 0 1px rgba(143, 127, 247, 0.35);
+  background: rgb(143 127 247 / var(--diff-bg, 0.13)) !important;
+  box-shadow: inset 0 0 0 1px rgb(143 127 247 / var(--diff-border, 0.35));
   color: var(--accent) !important;
 }
 .community-diff-above b { color: var(--gold) !important; }
 .community-diff-below b { color: var(--accent) !important; }
+.community-diff-cue { margin-left: 5px; font-size: 9px; vertical-align: 1px; }
 .benchmark-values span.community-diff-above,
 .benchmark-values span.community-diff-below {
   border-radius: 6px;
@@ -1014,6 +1018,27 @@ tr.clickable:focus-visible { outline: 2px solid var(--accent); outline-offset: -
   color: var(--accent);
   margin: 16px 0 4px;
 }
+.metric-guide-section { border-bottom: 1px solid rgba(52, 48, 90, 0.7); }
+.metric-guide-section summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 2px;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  list-style: none;
+}
+.metric-guide-section summary::-webkit-details-marker { display: none; }
+.metric-guide-section summary:hover { color: var(--text); }
+.metric-guide-section summary:focus-visible { border-radius: 4px; outline: 1px solid var(--accent); outline-offset: 2px; }
+.metric-guide-chevron { color: var(--faint); font-size: 16px; line-height: 1; transition: transform 150ms ease; }
+.metric-guide-section[open] .metric-guide-chevron { transform: rotate(180deg); }
+.metric-guide-section dl { padding: 0 2px 8px; }
 .modal-body dl { margin: 0; }
 .metric-def { padding: 8px 0; border-bottom: 1px solid rgba(52, 48, 90, 0.45); }
 .metric-def:last-child { border-bottom: none; }

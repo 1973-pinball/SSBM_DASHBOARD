@@ -71,7 +71,7 @@ export const SECTIONS = [
       },
       {
         term: "Tech success",
-        def: "Made ground techs plus wall techs ÷ all ground/wall tech attempts. The tech breakdown's in-place, toward-opponent and away-from-opponent rows are shares of successful ground techs; direction is relative to the opponent, not stage left/right.",
+        def: "Ground tech success is made ground techs ÷ ground tech attempts; wall-tech success is shown separately. The in-place, toward-opponent and away-from-opponent split is a share of successful ground techs, and direction is relative to the opponent rather than stage left/right.",
       },
       {
         term: "Inputs per minute",

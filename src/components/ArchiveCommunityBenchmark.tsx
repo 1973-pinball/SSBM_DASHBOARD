@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   CommunityBenchmarkRow,
   CommunityCharacterRow,
@@ -19,8 +19,8 @@ import {
   type ArchiveProOption,
   type ArchiveRollup,
 } from "../lib/publicArchive";
-import { executionSummary, moveTable } from "../lib/stats";
-import type { ResolvedGame } from "../lib/types";
+import { actionAverages, executionSummary, moveTable } from "../lib/stats";
+import type { ActionCounts, ResolvedGame } from "../lib/types";
 import "./ArchiveCommunityBenchmark.css";
 
 interface Props {
@@ -56,6 +56,33 @@ interface ExecutionRow {
   balanceNote?: string;
 }
 
+type ExecutionComparisonMetric =
+  | { key: string; label: string; format: "percent" | "rate"; field: "groundTech" | "wallTech" | "lCancel" | "ipm" }
+  | { key: string; label: string; format: "rate"; action: keyof ActionCounts };
+
+interface ExecutionComparisonSource {
+  key: string;
+  label: string;
+  sampleNote: string;
+  execution: ExecutionRow | null;
+  actionRate: (key: keyof ActionCounts) => number | null;
+}
+
+const EXECUTION_COMPARISON_METRICS: ExecutionComparisonMetric[] = [
+  { key: "ground-tech", label: "Ground tech success", format: "percent", field: "groundTech" },
+  { key: "wall-tech", label: "Wall tech success", format: "percent", field: "wallTech" },
+  { key: "l-cancel", label: "L-cancel success", format: "percent", field: "lCancel" },
+  { key: "inputs", label: "Inputs / min", format: "rate", field: "ipm" },
+  { key: "wavedashes", label: "Wavedashes / min", format: "rate", action: "wavedashes" },
+  { key: "wavelands", label: "Wavelands / min", format: "rate", action: "wavelands" },
+  { key: "dash-dances", label: "Dash dances / min", format: "rate", action: "dashDances" },
+  { key: "rolls", label: "Rolls / min", format: "rate", action: "rolls" },
+  { key: "spot-dodges", label: "Spot dodges / min", format: "rate", action: "spotDodges" },
+  { key: "air-dodges", label: "Air dodges / min", format: "rate", action: "airDodges" },
+  { key: "ledge-grabs", label: "Ledge grabs / min", format: "rate", action: "ledgeGrabs" },
+  { key: "grabs", label: "Grabs / min", format: "rate", action: "grabs" },
+];
+
 function ssbmStatsExecution(
   benchmark: CommunityBenchmarkRow | undefined,
   execution: CommunityExecutionRow | undefined,
@@ -85,6 +112,24 @@ function ssbmStatsExecution(
 
 const EMPTY_BENCHMARKS: ArchiveCommunityBenchmarks = { broad: null, conservative: null };
 const ratio = (numerator: number, denominator: number): number | null => denominator > 0 ? numerator / denominator : null;
+
+function archiveActionRate(row: ArchiveRollup | null, key: keyof ActionCounts): number | null {
+  if (!row || row.metrics.durationFrames <= 0) return null;
+  const count = row.metrics.actions?.[key];
+  return count === undefined ? null : count / (row.metrics.durationFrames / 3_600);
+}
+
+function executionComparisonValue(
+  source: ExecutionComparisonSource,
+  metric: ExecutionComparisonMetric,
+): number | null {
+  if ("action" in metric) return source.actionRate(metric.action);
+  return source.execution?.[metric.field] ?? null;
+}
+
+function formatExecutionComparison(value: number | null, metric: ExecutionComparisonMetric): string {
+  return metric.format === "percent" ? pct(value) : num(value, 1);
+}
 
 function groupArchiveMoves(row: ArchiveRollup | null): Map<string, GroupedArchiveMove> {
   const grouped = new Map<string, GroupedArchiveMove>();
@@ -127,11 +172,8 @@ function archiveExecution(
   const groundSuccess = metrics.techInPlace + metrics.techToward + metrics.techAway;
   const playerBalanced = usePlayerBalance ? metrics.playerBalanced : null;
   const lCancel = playerBalanced?.lCancel.equalWeightMean ?? ratio(metrics.lCancelSuccess, metrics.lCancelSuccess + metrics.lCancelFail);
-  const groundTech = playerBalanced?.techSuccess.equalWeightMean ?? ratio(groundSuccess, groundSuccess + metrics.techMissed);
-  const balancedSamples = Math.max(
-    playerBalanced?.lCancel.qualifiedPlayers ?? 0,
-    playerBalanced?.techSuccess.qualifiedPlayers ?? 0,
-  );
+  const groundTech = ratio(groundSuccess, groundSuccess + metrics.techMissed);
+  const balancedSamples = playerBalanced?.lCancel.qualifiedPlayers ?? 0;
   return {
     key: `${row.population}:${label}`,
     label,
@@ -144,7 +186,7 @@ function archiveExecution(
     opk: ratio(metrics.openingsPerKillSum, metrics.openingsPerKillSamples),
     dpo: ratio(metrics.damagePerOpeningSum, metrics.damagePerOpeningSamples),
     ipm: ratio(metrics.inputsPerMinuteSum, metrics.inputsPerMinuteSamples),
-    balanceNote: balancedSamples > 0 ? `L-cancel and ground tech equally weight ${balancedSamples.toLocaleString()} qualified players` : undefined,
+    balanceNote: balancedSamples > 0 ? `L-cancel equally weights ${balancedSamples.toLocaleString()} qualified players` : undefined,
   };
 }
 
@@ -226,6 +268,7 @@ export function ArchiveCommunityBenchmark({
   }, [characterId, dataset, playerId]);
 
   const ownExecution = useMemo(() => executionSummary(games, Number.MAX_SAFE_INTEGER), [games]);
+  const ownActions = useMemo(() => actionAverages(games), [games]);
   const ownMoves = useMemo(() => moveTable(games), [games]);
   const selectedPro = characterPros.find((player) => player.id === playerId) ?? null;
 
@@ -243,7 +286,7 @@ export function ArchiveCommunityBenchmark({
 
   const ownWins = games.reduce((count, game) => count + (game.isWin === true ? 1 : 0), 0);
   const ownDecided = games.reduce((count, game) => count + (game.isWin !== null ? 1 : 0), 0);
-  const executionRows: ExecutionRow[] = [{
+  const ownExecutionRow: ExecutionRow = {
     key: "you",
     label: "You",
     sample: ownExecution.games,
@@ -255,12 +298,68 @@ export function ArchiveCommunityBenchmark({
     opk: ownExecution.opk,
     dpo: ownExecution.dpo,
     ipm: ownExecution.ipm,
-  }];
-  executionRows.push(ssbmStatsExecution(communityBenchmark, communityExecution, communityCharacter));
-  if (benchmarks.broad) executionRows.push(archiveExecution(benchmarks.broad, "Venue archive", false));
-  if (benchmarks.conservative) executionRows.push(archiveExecution(benchmarks.conservative, "Tournament archive", true));
-  if (proAggregateBenchmark) executionRows.push(archiveExecution(proAggregateBenchmark, "Pro tournament archive", false));
-  if (proBenchmark && selectedPro) executionRows.push(archiveExecution(proBenchmark, selectedPro.display_name, false, "games"));
+  };
+  const ssbmStatsExecutionRow = ssbmStatsExecution(communityBenchmark, communityExecution, communityCharacter);
+  const venueExecutionRow = benchmarks.broad ? archiveExecution(benchmarks.broad, "Venue archive", false) : null;
+  const tournamentExecutionRow = benchmarks.conservative ? archiveExecution(benchmarks.conservative, "Tournament archive", true) : null;
+  const proAggregateExecutionRow = proAggregateBenchmark ? archiveExecution(proAggregateBenchmark, "Pro tournament archive", false) : null;
+  const selectedProExecutionRow = proBenchmark && selectedPro
+    ? archiveExecution(proBenchmark, selectedPro.display_name, false, "games")
+    : null;
+  const executionRows: ExecutionRow[] = [ownExecutionRow, ssbmStatsExecutionRow];
+  if (venueExecutionRow) executionRows.push(venueExecutionRow);
+  if (tournamentExecutionRow) executionRows.push(tournamentExecutionRow);
+  if (proAggregateExecutionRow) executionRows.push(proAggregateExecutionRow);
+  if (selectedProExecutionRow) executionRows.push(selectedProExecutionRow);
+
+  const ownActionRates = new Map(ownActions.rows.map((row) => [row.key, row.perMinute]));
+  const executionComparisonSources: ExecutionComparisonSource[] = [
+    {
+      key: "you",
+      label: "You",
+      sampleNote: `${ownActions.covered.toLocaleString()} measured games`,
+      execution: ownExecutionRow,
+      actionRate: (key) => ownActionRates.get(key) ?? null,
+    },
+    {
+      key: "ssbm-stats",
+      label: "SSBM Stats",
+      sampleNote: ssbmStatsExecutionRow.sample === null
+        ? "sample not yet publishable"
+        : `${ssbmStatsExecutionRow.sample.toLocaleString()} player-games`,
+      execution: ssbmStatsExecutionRow,
+      // This snapshot publishes aggregate action counts but no duration denominator.
+      actionRate: () => null,
+    },
+    {
+      key: "venue",
+      label: "Venue archive",
+      sampleNote: `${benchmarks.broad?.game_count.toLocaleString() ?? "—"} player-games`,
+      execution: venueExecutionRow,
+      actionRate: (key) => archiveActionRate(benchmarks.broad, key),
+    },
+    {
+      key: "tournament",
+      label: "Tournament archive",
+      sampleNote: `${benchmarks.conservative?.game_count.toLocaleString() ?? "—"} player-games`,
+      execution: tournamentExecutionRow,
+      actionRate: (key) => archiveActionRate(benchmarks.conservative, key),
+    },
+    {
+      key: "pro-aggregate",
+      label: "Pro tournament archive",
+      sampleNote: `${proAggregateBenchmark?.game_count.toLocaleString() ?? "—"} player-games · ${proAggregateBenchmark?.identified_player_count?.toLocaleString() ?? "—"} pros`,
+      execution: proAggregateExecutionRow,
+      actionRate: (key) => archiveActionRate(proAggregateBenchmark, key),
+    },
+  ];
+  if (selectedPro) executionComparisonSources.push({
+    key: `pro:${selectedPro.id}`,
+    label: selectedPro.display_name,
+    sampleNote: `${proBenchmark?.game_count.toLocaleString() ?? "—"} games`,
+    execution: selectedProExecutionRow,
+    actionRate: (key) => archiveActionRate(proBenchmark, key),
+  });
 
   const moveSources = {
     broad: groupArchiveMoves(benchmarks.broad),
@@ -332,9 +431,33 @@ export function ArchiveCommunityBenchmark({
             const ownMove = ownMoveByKey.get(key);
             const mine = localMoveMetric(ownMove, moveMetric, ownMoves.covered);
             const field = archiveMoveMetric(comparisonMoves.get(key), moveMetric, comparisonRow);
-            const direction = moveDifference(mine, field, moveMetric, ownMoves.covered, comparisonRow?.game_count ?? 0);
-            return <tr key={key}><td>{ownMove?.label ?? moveGroupLabel(key)}</td><td className={`data ${direction ? `community-diff-${direction}` : ""}`} title={direction ? `Large ${direction === "above" ? "increase over" : "decrease from"} the ${benchmarks.conservative ? "tournament" : "venue"} archive benchmark` : undefined}>{formatLocalMove(ownMove, moveMetric, ownMoves.covered)}</td><td className="data">{formatCommunityMove(communityMoveByKey.get(key), moveMetric, communityDamage)}</td><td className="data">{formatArchiveMove(moveSources.broad.get(key), moveMetric, benchmarks.broad)}</td><td className="data">{formatArchiveMove(moveSources.conservative.get(key), moveMetric, benchmarks.conservative)}</td><td className="data">{formatArchiveMove(moveSources.proAggregate.get(key), moveMetric, proAggregateBenchmark)}</td>{selectedPro && <td className="data">{formatArchiveMove(moveSources.pro.get(key), moveMetric, proBenchmark)}</td>}</tr>;
+            const difference = moveDifference(mine, field, moveMetric, ownMoves.covered, comparisonRow?.game_count ?? 0);
+            const localValue = formatLocalMove(ownMove, moveMetric, ownMoves.covered);
+            const comparisonLabel = benchmarks.conservative ? "tournament" : "venue";
+            return <tr key={key}><td>{ownMove?.label ?? moveGroupLabel(key)}</td><td className={`data ${difference ? `community-diff-${difference.direction}` : ""}`} style={differenceStyle(difference)} title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined} aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}>{localValue}{difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}</td><td className="data">{formatCommunityMove(communityMoveByKey.get(key), moveMetric, communityDamage)}</td><td className="data">{formatArchiveMove(moveSources.broad.get(key), moveMetric, benchmarks.broad)}</td><td className="data">{formatArchiveMove(moveSources.conservative.get(key), moveMetric, benchmarks.conservative)}</td><td className="data">{formatArchiveMove(moveSources.proAggregate.get(key), moveMetric, proAggregateBenchmark)}</td>{selectedPro && <td className="data">{formatArchiveMove(moveSources.pro.get(key), moveMetric, proBenchmark)}</td>}</tr>;
           })}</tbody></table></div> : <div className="empty-note">No move data is published for this character yet.</div>}
+
+          <h3 className="table-subhead acb-execution-comparison-heading">Full execution comparison</h3>
+          <div className="table-scroll acb-execution-comparison">
+            <table>
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  {executionComparisonSources.map((source) => <th className="data" key={source.key}>{source.label}<span className="sample-note">{source.sampleNote}</span></th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {EXECUTION_COMPARISON_METRICS.map((metric) => <tr key={metric.key}>
+                  <td>{metric.label}</td>
+                  {executionComparisonSources.map((source) => <td className="data" key={source.key}>{formatExecutionComparison(executionComparisonValue(source, metric), metric)}</td>)}
+                </tr>)}
+              </tbody>
+            </table>
+          </div>
+          <div className="hint acb-execution-comparison-note">
+            Action rates use total measured actions divided by total measured game minutes. SSBM Stats does not publish
+            that duration denominator, so its action-rate cells show dashes rather than estimates.
+          </div>
         </>
       )}
 
@@ -402,10 +525,20 @@ function moveDifference(
   metric: MoveMetric,
   localGames: number,
   fieldGames: number,
-): "above" | "below" | null {
+): { direction: "above" | "below"; strength: number } | null {
   if (mine === null || field === null || localGames < 10 || fieldGames < 25) return null;
   const absoluteMinimum = metric === "damage" ? 0.05 : metric === "killPct" ? 10 : metric === "kills" ? 0.05 : metric === "landed" ? 0.25 : 0.5;
   const gap = mine - field;
-  if (Math.abs(gap) < Math.max(absoluteMinimum, Math.abs(field) * 0.35)) return null;
-  return gap > 0 ? "above" : "below";
+  const threshold = Math.max(absoluteMinimum, Math.abs(field) * 0.35);
+  if (Math.abs(gap) < threshold) return null;
+  const strength = Math.min(1, 0.15 + Math.max(0, Math.abs(gap) / threshold - 1) * 0.425);
+  return { direction: gap > 0 ? "above" : "below", strength };
+}
+
+function differenceStyle(difference: ReturnType<typeof moveDifference>): CSSProperties | undefined {
+  if (!difference) return undefined;
+  return {
+    "--diff-bg": String(0.06 + difference.strength * 0.28),
+    "--diff-border": String(0.18 + difference.strength * 0.42),
+  } as CSSProperties;
 }

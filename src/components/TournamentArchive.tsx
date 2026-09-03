@@ -254,6 +254,7 @@ export function TournamentArchive() {
     .map((row) => row.opponent_character_id!), [characterId, rollups]);
 
   const selected = findRollup(rollups, characterId, opponentCharacterId, stageId);
+  const selectedMoveRow = characterId === null ? null : findRollup(rollups, characterId, null, null);
   const selectedPlayer = pros.find((player) => player.id === playerId) ?? null;
   const selectedEvent = catalog.tournaments.find((tournament) => tournament.id === (mode === "event" ? eventId : editionId)) ?? null;
   const selectedSeries = catalog.series.find((series) => series.id === (mode === "event" ? selectedEvent?.series_id : seriesId)) ?? null;
@@ -268,8 +269,6 @@ export function TournamentArchive() {
   }
 
   const lCancelAttempts = (selected?.metrics.lCancelSuccess ?? 0) + (selected?.metrics.lCancelFail ?? 0);
-  const successfulTechs = (selected?.metrics.techInPlace ?? 0) + (selected?.metrics.techToward ?? 0) + (selected?.metrics.techAway ?? 0);
-  const techAttempts = successfulTechs + (selected?.metrics.techMissed ?? 0);
   const durationHours = (selected?.metrics.durationFrames ?? 0) / 60 / 60 / 60;
 
   return (
@@ -306,7 +305,7 @@ export function TournamentArchive() {
         <label>Top 100 player<select value={playerId ?? "field"} disabled={pros.length === 0} onChange={(event) => { const next = event.target.value === "field" ? null : event.target.value; setPlayerId(next); setOpponentCharacterId(null); setStageId(null); if (next) { const player = pros.find((option) => option.id === next); setMode("event"); setEventId(""); setCharacterId(player?.primary_character_id ?? null); setPopulation("conservative"); } }}><option value="field">Tournament field</option>{pros.map((player) => <option key={player.id} value={player.id}>{player.display_name} · {charName(player.primary_character_id)} · #{player.latest_ranking.rank} {player.latest_ranking.edition_year}</option>)}</select></label>
         <div className="ta-filter-note">
           {playerId
-            ? "Named-player views use conservatively curated games. Event lists show only events with verified mappings for that pro; choosing an event selects their most-played character there."
+            ? "Named-player views use conservatively curated games. Event lists show only events with published evidence-backed mappings for that pro; choosing an event selects their most-played character there."
             : population === "broad"
               ? "Venue benchmark includes technically usable event-associated games, including games not tied to a bracket set."
               : "Tournament benchmark includes only verified or probable tournament-set games. Choose a named pro to narrow Events and Character automatically."}
@@ -332,12 +331,12 @@ export function TournamentArchive() {
             />
             <Kpi label="Player-hours" value={`${hoursLabel(durationHours)}h`} />
             <Kpi label="L-cancel" value={pct(rate(selected.metrics.lCancelSuccess, lCancelAttempts))} delta={`${int(lCancelAttempts)} attempts`} />
-            <Kpi label="Ground tech rate" value={pct(rate(successfulTechs, techAttempts))} delta={`${int(techAttempts)} opportunities`} />
+            <TournamentTechKpi row={selected} />
             <Kpi label="Inputs / min" value={num(rate(selected.metrics.inputsPerMinuteSum, selected.metrics.inputsPerMinuteSamples), 1)} delta={`${int(selected.metrics.inputsPerMinuteSamples)} games sampled`} />
           </div>
 
           <div className="grid-2">
-            <ExecutionPanel row={selected} />
+            <ExecutionPanel row={selected} moveRow={selectedMoveRow} />
             <StagePanel rows={rollups} characterId={characterId} opponentCharacterId={opponentCharacterId} selectedStageId={stageId} />
           </div>
           <MatchupPanel rows={rollups} characterId={characterId} selectedOpponentId={opponentCharacterId} selectedStageId={stageId} format={format} />
@@ -361,16 +360,32 @@ function ArchiveUnavailable({ message }: { message: string }) {
   );
 }
 
-function ExecutionPanel({ row }: { row: ArchiveRollup }) {
+function TournamentTechKpi({ row }: { row: ArchiveRollup }) {
   const metrics = row.metrics;
-  const successfulTechs = metrics.techInPlace + metrics.techToward + metrics.techAway;
-  const techAttempts = successfulTechs + metrics.techMissed;
-  const techRows = [
-    { label: "In place", value: metrics.techInPlace },
-    { label: "Toward", value: metrics.techToward },
-    { label: "Away", value: metrics.techAway },
-    { label: "Missed", value: metrics.techMissed },
-  ];
+  const successful = metrics.techInPlace + metrics.techToward + metrics.techAway;
+  const attempts = successful + metrics.techMissed;
+  const split = [metrics.techInPlace, metrics.techToward, metrics.techAway]
+    .map((value) => pct(rate(value, successful), 0))
+    .join(" / ");
+  return (
+    <div className="kpi tech-kpi">
+      <div className="label">Ground tech success</div>
+      <div className="value">{pct(rate(successful, attempts))}</div>
+      <div className="tech-kpi-split" title="Share of successful ground techs: in-place / in / away">
+        In-place / in / away: {split}
+      </div>
+      <div className="delta">{int(attempts)} opportunities</div>
+    </div>
+  );
+}
+
+function ExecutionPanel({ row, moveRow }: { row: ArchiveRollup; moveRow: ArchiveRollup | null }) {
+  const metrics = row.metrics;
+  const moveDamageTotal = moveRow?.metrics.damageTotal ?? metrics.damageTotal;
+  const topDamageMoves = (moveRow ? groupedMoves(moveRow.metrics, moveRow.game_count) : [])
+    .filter((move) => move.damage > 0)
+    .sort((a, b) => b.damage - a.damage || a.label.localeCompare(b.label))
+    .slice(0, 4);
   return (
     <section className="panel">
       <h2>Execution</h2>
@@ -381,16 +396,23 @@ function ExecutionPanel({ row }: { row: ArchiveRollup }) {
         <div><dt>Neutral wins / game</dt><dd>{num(rate(metrics.neutralWins, row.game_count), 2)}</dd></div>
         <div><dt>Wall-tech success</dt><dd>{pct(rate(metrics.wallTechSuccess ?? 0, (metrics.wallTechSuccess ?? 0) + (metrics.wallTechMissed ?? 0)))}</dd></div>
       </dl>
-      <div className="ta-techs" aria-label="Tech option distribution">
-        {techRows.map((tech) => (
-          <div key={tech.label}>
-            <span>{tech.label}</span>
-            <div><i style={{ width: `${(rate(tech.value, techAttempts) ?? 0) * 100}%` }} /></div>
-            <b>{pct(rate(tech.value, techAttempts), 0)}</b>
+      <h3 className="ta-mini-heading">Top moves by damage share</h3>
+      {topDamageMoves.length ? <div className="ta-damage-moves" aria-label="Top four moves by damage share">
+        {topDamageMoves.map((move, index) => {
+          const share = rate(move.damage, moveDamageTotal);
+          return <div key={move.key}>
+            <span>{index + 1}. {move.label}</span>
+            <div><i style={{ width: `${(share ?? 0) * 100}%` }} /></div>
+            <b>{pct(share, 1)}</b>
           </div>
-        ))}
+        })}
+      </div> : <div className="ta-panel-empty">Choose a character to rank moves by damage share.</div>}
+      <div className="hint">
+        Damage share is each move group's portion of recorded damage
+        {moveRow && (row.opponent_character_id !== null || row.stage_id !== null)
+          ? " for this character across all opponents and legal stages; fine-grained archive rows do not retain move tables."
+          : " in the selected character sample."}
       </div>
-      <div className="hint">Rates are based on recorded opportunities; a dash means the replay sample contains no qualifying attempt.</div>
     </section>
   );
 }

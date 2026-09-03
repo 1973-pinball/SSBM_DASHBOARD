@@ -9,7 +9,7 @@ import { charName, moveGroup, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
 import { activateOnKey } from "../lib/a11y";
-import { demoCommunitySnapshot, fetchCommunitySnapshot, type CommunityExecutionRow, type CommunityMoveRow } from "../lib/community";
+import { demoCommunitySnapshot, fetchCommunitySnapshot, type CommunityBenchmarkRow, type CommunityExecutionRow, type CommunityMoveRow } from "../lib/community";
 import {
   fetchArchiveCommunityBenchmarks,
   fetchArchiveProAggregateAtlasRows,
@@ -593,6 +593,7 @@ interface ExecutionBenchmarks {
   characterId: number | null;
   characterGames: number;
   totalGames: number;
+  communityBenchmark: CommunityBenchmarkRow | null;
   communityExecution: CommunityExecutionRow | null;
   communityMoves: CommunityMoveRow[];
   venue: ArchiveRollup | null;
@@ -608,6 +609,7 @@ const emptyExecutionBenchmarks = (
   characterId,
   characterGames,
   totalGames,
+  communityBenchmark: null,
   communityExecution: null,
   communityMoves: [],
   venue: null,
@@ -647,6 +649,7 @@ function useExecutionBenchmarks(games: ResolvedGame[], isDemo: boolean): Executi
         const proRows = archive?.[1] ?? [];
         setBenchmarks({
           ...base,
+          communityBenchmark: community?.benchmarks.find((row) => row.characterId === dominant.id) ?? null,
           communityExecution: community?.execution.find((row) =>
             row.lookbackDays === null && row.characterId === dominant.id) ?? null,
           communityMoves: community?.moves.filter((row) =>
@@ -685,14 +688,65 @@ const ROLLING_METRICS: { key: ExecMetricKey; label: string; unit: string; color:
   { key: "ipm", label: "Inputs per minute", unit: "", color: "#6db3f2" },
 ];
 
+function archiveExecutionBenchmark(row: ArchiveRollup | null, metric: ExecMetricKey): number | null {
+  if (!row) return null;
+  const values = row.metrics;
+  if (metric === "lCancel") {
+    const attempts = values.lCancelSuccess + values.lCancelFail;
+    return attempts > 0 ? 100 * values.lCancelSuccess / attempts : null;
+  }
+  if (metric === "groundTechSuccess") {
+    const successes = values.techInPlace + values.techToward + values.techAway;
+    const attempts = successes + values.techMissed;
+    return attempts > 0 ? 100 * successes / attempts : null;
+  }
+  if (metric === "wallTechSuccess") {
+    const attempts = values.wallTechSuccess + values.wallTechMissed;
+    return attempts > 0 ? 100 * values.wallTechSuccess / attempts : null;
+  }
+  if (metric === "opk") return values.openingsPerKillSamples > 0 ? values.openingsPerKillSum / values.openingsPerKillSamples : null;
+  if (metric === "dpo") return values.damagePerOpeningSamples > 0 ? values.damagePerOpeningSum / values.damagePerOpeningSamples : null;
+  return values.inputsPerMinuteSamples > 0 ? values.inputsPerMinuteSum / values.inputsPerMinuteSamples : null;
+}
+
+function executionBenchmarkValue(benchmarks: ExecutionBenchmarks, kind: BenchmarkKind, metric: ExecMetricKey): number | null {
+  if (kind !== "community") {
+    if (kind === "tournament" && metric === "lCancel") {
+      const balanced = benchmarks.tournament?.metrics.playerBalanced?.lCancel.equalWeightMean;
+      if (balanced !== null && balanced !== undefined) return balanced * 100;
+    }
+    return archiveExecutionBenchmark(benchmarks[kind], metric);
+  }
+  if (metric === "lCancel") return benchmarks.communityBenchmark?.lCancel?.p50 ?? benchmarks.communityExecution?.lCancelSuccess ?? null;
+  if (metric === "groundTechSuccess") return benchmarks.communityExecution?.groundTechSuccess ?? null;
+  if (metric === "wallTechSuccess") return null;
+  if (metric === "opk") return benchmarks.communityBenchmark?.openingsPerKill?.p50 ?? null;
+  if (metric === "dpo") return benchmarks.communityBenchmark?.damagePerOpening?.p50 ?? null;
+  return benchmarks.communityBenchmark?.inputsPerMinute?.p50 ?? null;
+}
+
 /** Rolling ROLLING_WINDOW-game average of a single execution metric, chosen via chips. */
-function RollingExecChart({ games }: { games: ResolvedGame[] }) {
+function RollingExecChart({ games, benchmarks }: { games: ResolvedGame[]; benchmarks: ExecutionBenchmarks }) {
   const [metric, setMetric] = useState<ExecMetricKey>("lCancel");
+  const [showOpp, setShowOpp] = useState(false);
   const def = ROLLING_METRICS.find((m) => m.key === metric)!;
-  const data = useMemo(() => rollingExecutionSeries(games, metric), [games, metric]);
+  const points = useMemo(() => rollingExecutionSeries(games, metric), [games, metric]);
+  const benchmarkValues = useMemo(() => {
+    const values = new Map<BenchmarkKind, number>();
+    for (const style of EXECUTION_BENCHMARK_STYLES) {
+      const value = executionBenchmarkValue(benchmarks, style.key, metric);
+      if (value !== null) values.set(style.key, value);
+    }
+    return values;
+  }, [benchmarks, metric]);
+  const data = useMemo(() => points.map((point) => {
+    const row = { ...point } as Record<string, string | number | null>;
+    for (const [key, value] of benchmarkValues) row[`benchmark:${key}`] = value;
+    return row;
+  }), [benchmarkValues, points]);
   // Points are thinned across the whole history, so a tick's game index is no
   // longer its position in the array — look the date up instead of deriving it.
-  const dateByIndex = useMemo(() => new Map<number, string>(data.map((p) => [p.index, p.date])), [data]);
+  const dateByIndex = useMemo(() => new Map<number, string>(points.map((p) => [p.index, p.date])), [points]);
   return (
     <div className="panel">
       <h2>Rolling {ROLLING_WINDOW}-game average</h2>
@@ -712,6 +766,15 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
             </button>
           );
         })}
+        <button
+          className={`chip ${showOpp ? "on" : ""}`}
+          aria-pressed={showOpp}
+          style={showOpp ? { borderColor: OPP_SERIES_COLOR } : undefined}
+          onClick={() => setShowOpp((value) => !value)}
+        >
+          <span className="dot" style={{ background: OPP_SERIES_COLOR, opacity: showOpp ? 1 : 0.35 }} />
+          vs opponents
+        </button>
       </div>
       <ResponsiveContainer width="100%" height={220}>
         <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
@@ -736,17 +799,33 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
           />
           <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
           <Line type="monotone" dataKey="value" name="Me" stroke={def.color} strokeWidth={2} dot={false} connectNulls />
-          <Line
-            type="monotone"
-            dataKey="oppValue"
-            name="Opponents"
-            stroke={OPP_SERIES_COLOR}
-            strokeWidth={1.5}
-            strokeDasharray="5 4"
-            strokeOpacity={0.9}
-            dot={false}
-            connectNulls
-          />
+          {showOpp && <Line
+              type="monotone"
+              dataKey="oppValue"
+              name="Opponents"
+              stroke={OPP_SERIES_COLOR}
+              strokeWidth={1.5}
+              strokeDasharray="5 4"
+              strokeOpacity={0.9}
+              dot={false}
+              connectNulls
+            />}
+          {EXECUTION_BENCHMARK_STYLES.map((style) => {
+            if (!benchmarkValues.has(style.key)) return null;
+            return <Line
+              key={style.key}
+              type="linear"
+              dataKey={`benchmark:${style.key}`}
+              name={style.label}
+              stroke={style.color}
+              strokeWidth={1.5}
+              strokeDasharray={style.dash}
+              strokeOpacity={0.95}
+              dot={false}
+              activeDot={false}
+              isAnimationActive={false}
+            />;
+          })}
         </LineChart>
       </ResponsiveContainer>
       <div className="hint">
@@ -754,6 +833,7 @@ function RollingExecChart({ games }: { games: ResolvedGame[] }) {
         games in this filter
         {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
       </div>
+      <BenchmarkFootnote benchmarks={benchmarks} />
     </div>
   );
 }
@@ -834,7 +914,7 @@ function actionBenchmarkValue(benchmarks: ExecutionBenchmarks, kind: BenchmarkKi
   return archiveActionBenchmark(benchmarks[kind], key);
 }
 
-/** Per-game line chart with chip toggles choosing which metrics are plotted. */
+/** Per-game line chart with one chip-selected action at a time. */
 function PerGameMetricChart({
   title,
   games,
@@ -848,9 +928,8 @@ function PerGameMetricChart({
   defaults: string[];
   benchmarks: ExecutionBenchmarks;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(defaults));
-  // Opponent overlay defaults on — the chip is there to turn it OFF when it clutters.
-  const [showOpp, setShowOpp] = useState(true);
+  const [selected, setSelected] = useState(() => defaults[0] ?? series[0]?.key ?? "");
+  const [showOpp, setShowOpp] = useState(false);
   const hasOpp = series.some((s) => s.oppValue);
   // All metrics (including opponent counterparts) are computed once; the chips only toggle which lines render.
   const rawData = useMemo(
@@ -878,27 +957,19 @@ function PerGameMetricChart({
   // longer its position in the array — look the date up instead of deriving it.
   const dateByIndex = useMemo(() => new Map<number, string>(rawData.map((p) => [p.index, p.date])), [rawData]);
 
-  const toggle = (key: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-
   return (
     <div className="panel">
       <h2>{title}</h2>
       <div className="chip-row">
         {series.map((s) => {
-          const on = selected.has(s.key);
+          const on = selected === s.key;
           return (
             <button
               key={s.key}
               className={`chip ${on ? "on" : ""}`}
               aria-pressed={on}
               style={on ? { borderColor: s.color } : undefined}
-              onClick={() => toggle(s.key)}
+              onClick={() => setSelected(s.key)}
             >
               <span className="dot" style={{ background: s.color, opacity: on ? 1 : 0.35 }} />
               {s.label}
@@ -917,10 +988,7 @@ function PerGameMetricChart({
           </button>
         )}
       </div>
-      {selected.size === 0 ? (
-        <div className="empty-note">Pick at least one metric above.</div>
-      ) : (
-        <ResponsiveContainer width="100%" height={220}>
+      <ResponsiveContainer width="100%" height={220}>
           <LineChart data={data} margin={{ top: 4, right: 8, left: -14, bottom: 0 }}>
             <CartesianGrid {...gridStyle} />
             {/* Unique game index as the axis key, dates as labels — see L-cancel chart. */}
@@ -944,13 +1012,13 @@ function PerGameMetricChart({
             />
             <Legend wrapperStyle={{ fontSize: 12, fontFamily: "var(--font-data)" }} />
             {series
-              .filter((s) => selected.has(s.key))
+              .filter((s) => selected === s.key)
               .map((s) => (
                 <Line key={s.key} type="monotone" dataKey={s.key} name={s.label} stroke={s.color} strokeWidth={2} dot={false} />
               ))}
             {showOpp &&
               series
-                .filter((s) => selected.has(s.key) && s.oppValue)
+                .filter((s) => selected === s.key && s.oppValue)
                 .map((s) => (
                   <Line
                     key={`opp:${s.key}`}
@@ -965,7 +1033,7 @@ function PerGameMetricChart({
                   />
                 ))}
             {series
-              .filter((s) => selected.has(s.key))
+              .filter((s) => selected === s.key)
               .flatMap((s) => EXECUTION_BENCHMARK_STYLES.map((style) => {
                 const key = `benchmark:${style.key}:${s.key}`;
                 if (!benchmarkValues.has(key)) return null;
@@ -986,8 +1054,7 @@ function PerGameMetricChart({
                 );
               }))}
           </LineChart>
-        </ResponsiveContainer>
-      )}
+      </ResponsiveContainer>
       <div className="hint">
         Each point averages the previous {ROLLING_WINDOW} games. The line spans all {games.length.toLocaleString()}{" "}
         games in this filter
@@ -1120,6 +1187,7 @@ function moveBenchmarkValue(
 function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; moves: MoveRow[]; benchmarks: ExecutionBenchmarks }) {
   const [moveKeys, setMoveKeys] = useState<Set<string>>(() => new Set(moves[0] ? [moves[0].key] : []));
   const [metric, setMetric] = useState<MoveMetricKey>("attemptsPerGame");
+  const [showOpp, setShowOpp] = useState(false);
   // Filters change which moves exist at all. Preserve selections that remain
   // available and fall back to the top move only when every held key is stale.
   const activeMoves = useMemo(() => {
@@ -1130,6 +1198,13 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
   const points = useMemo(
     () => moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric),
     [games, activeMoves, metric],
+  );
+  const hasOpponentMoveData = useMemo(() => games.some((game) => game.opp.moveStats !== undefined), [games]);
+  const opponentPoints = useMemo(
+    () => showOpp
+      ? moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric, ROLLING_WINDOW, MAX_SERIES_POINTS, "opp")
+      : [],
+    [activeMoves, games, metric, showOpp],
   );
   const benchmarkValues = useMemo(() => {
     const values = new Map<string, number>();
@@ -1143,13 +1218,15 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
     return values;
   }, [activeMoves, benchmarks, metric]);
   const data = useMemo(
-    () => points.map((point) => {
+    () => points.map((point, pointIndex) => {
       const row: Record<string, string | number | null> = { index: point.index, date: point.date };
       for (let i = 0; i < activeMoves.length; i++) row[`move-${i}`] = point.values[i] ?? null;
+      const opponentPoint = opponentPoints[pointIndex];
+      for (let i = 0; i < activeMoves.length; i++) row[`opp-move-${i}`] = opponentPoint?.values[i] ?? null;
       for (const [key, value] of benchmarkValues) row[key] = value;
       return row;
     }),
-    [activeMoves, benchmarkValues, points],
+    [activeMoves, benchmarkValues, opponentPoints, points],
   );
   // Points are thinned across the whole history, so a tick's game index is no
   // longer its position in the array — look the date up instead of deriving it.
@@ -1214,6 +1291,17 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
               ))}
             </select>
           </label>
+          <button
+            className={`chip move-trend-opponent ${showOpp ? "on" : ""}`}
+            aria-pressed={showOpp}
+            disabled={!hasOpponentMoveData}
+            title={hasOpponentMoveData ? undefined : "Opponent move data is not available in these games"}
+            style={showOpp ? { borderColor: OPP_SERIES_COLOR } : undefined}
+            onClick={() => setShowOpp((value) => !value)}
+          >
+            <span className="dot" style={{ background: OPP_SERIES_COLOR, opacity: showOpp ? 1 : 0.35 }} />
+            vs opponents
+          </button>
         </div>
       </div>
       {activeMoves.length === 0 ? (
@@ -1258,6 +1346,20 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
                   name={move.label}
                   stroke={MOVE_TREND_COLORS[i % MOVE_TREND_COLORS.length]}
                   strokeWidth={2}
+                  dot={false}
+                  connectNulls
+                />
+              ))}
+              {showOpp && activeMoves.map((move, i) => (
+                <Line
+                  key={`opp:${move.key}`}
+                  type="monotone"
+                  dataKey={`opp-move-${i}`}
+                  name={`${move.label} — opponents`}
+                  stroke={OPP_SERIES_COLOR}
+                  strokeWidth={1.5}
+                  strokeDasharray="5 4"
+                  strokeOpacity={0.9}
                   dot={false}
                   connectNulls
                 />
@@ -1341,7 +1443,7 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
         <Kpi label={`Inputs / min — last ${summary.games}`} value={int(summary.ipm)} />
       </div>
 
-      <RollingExecChart games={games} />
+      <RollingExecChart games={games} benchmarks={benchmarks} />
 
       <MoveMetricChart games={games} moves={career.rows} benchmarks={benchmarks} />
 

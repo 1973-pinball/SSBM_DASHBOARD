@@ -72,12 +72,13 @@
 .ta-stat-list dt { color: var(--muted); font-size: 12px; }
 .ta-stat-list dd { color: var(--text); font-family: var(--font-data); font-size: 12px; }
 
-.ta-techs { display: grid; gap: 7px; margin-top: 14px; }
-.ta-techs > div { display: grid; grid-template-columns: 62px minmax(70px, 1fr) 38px; align-items: center; gap: 8px; font-size: 11px; }
-.ta-techs span { color: var(--muted); }
-.ta-techs div > div { height: 6px; overflow: hidden; border-radius: 4px; background: var(--bg-raised); }
-.ta-techs i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
-.ta-techs b { font-family: var(--font-data); font-weight: 500; text-align: right; }
+.ta-mini-heading { margin: 14px 0 8px; color: var(--faint); font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; }
+.ta-damage-moves { display: grid; gap: 7px; }
+.ta-damage-moves > div { display: grid; grid-template-columns: 120px minmax(70px, 1fr) 44px; align-items: center; gap: 8px; font-size: 11px; }
+.ta-damage-moves span { overflow: hidden; color: var(--muted); text-overflow: ellipsis; white-space: nowrap; }
+.ta-damage-moves div > div { height: 6px; overflow: hidden; border-radius: 4px; background: var(--bg-raised); }
+.ta-damage-moves i { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.ta-damage-moves b { font-family: var(--font-data); font-weight: 500; text-align: right; }
 
 .ta-rate-list { display: grid; gap: 8px; }
 .ta-rate-list > div { display: grid; grid-template-columns: 125px minmax(80px, 1fr) 48px; align-items: center; gap: 8px; padding: 3px 0; }

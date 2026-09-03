@@ -1003,10 +1003,11 @@ function moveSlices(
   keyIndex: ReadonlyMap<string, number>,
   moveCount: number,
   out: Float64Array,
+  side: "me" | "opp" = "me",
 ): void {
   out.fill(0);
   let gameCount = 0, allDamage = 0, allKills = 0;
-  const ms = g.me.moveStats;
+  const ms = g[side].moveStats;
   if (ms) {
     gameCount = 1;
     for (const idStr in ms) {
@@ -1075,6 +1076,7 @@ export function moveMetricSeriesMany(
   metric: MoveMetricKey,
   window = ROLLING_WINDOW,
   maxPoints = MAX_SERIES_POINTS,
+  side: "me" | "opp" = "me",
 ): MultiMoveMetricPoint[] {
   const keys = [...new Set(moveKeys)];
   if (keys.length === 0) return [];
@@ -1092,7 +1094,7 @@ export function moveMetricSeriesMany(
   const out: MultiMoveMetricPoint[] = [];
   for (let i = 0; i < games.length; i++) {
     const g = games[i]!;
-    moveSlices(g, keyIndex, moveCount, slice);
+    moveSlices(g, keyIndex, moveCount, slice, side);
     for (let moveIndex = 0; moveIndex < moveCount; moveIndex++) {
       const ringBase = ((i % w) * moveCount + moveIndex) * 2;
       // That slot still holds the game about to leave the window; drop it first.

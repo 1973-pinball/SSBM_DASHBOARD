@@ -15,6 +15,9 @@
 .acb-move-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
 .acb-move-heading h3 { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
 .acb-move-heading select { min-width: 160px; }
+.acb-execution-comparison-heading { margin-top: 20px; }
+.acb-execution-comparison tbody td:nth-child(2) { background: rgba(143, 127, 247, 0.06); }
+.acb-execution-comparison-note { margin-top: 8px; }
 
 .acb-separation-note { margin-top: 14px; padding: 10px 12px; border-left: 2px solid var(--accent-dim); background: rgba(143, 127, 247, 0.055); color: var(--muted); font-size: 11.5px; line-height: 1.55; }
 .acb-panel .hint { line-height: 1.5; }
@@ -23,6 +26,12 @@
 .community-atlas-archive { margin-top: var(--gap); }
 .atlas-rate-cell b { display: block; font-family: var(--font-data); font-size: 13px; }
 .atlas-low-sample { opacity: 0.58; }
+.atlas-sortable { padding: 0; }
+.atlas-sortable button { display: flex; width: 100%; align-items: center; gap: 6px; padding: 10px 8px; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
+.atlas-sortable.data button { justify-content: flex-end; }
+.atlas-sortable button span { color: var(--faint); font-size: 9px; }
+.atlas-sortable.active button span, .atlas-sortable button:hover { color: var(--text); }
+.atlas-sortable button:focus-visible { outline: 1px solid var(--accent); outline-offset: -2px; }
 
 @media (max-width: 700px) {
   .acb-heading, .acb-move-heading { align-items: stretch; flex-direction: column; }
