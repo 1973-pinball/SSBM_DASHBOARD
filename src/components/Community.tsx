@@ -5,7 +5,6 @@ import {
   COMMUNITY_MIN_GAMES,
   demoCommunitySnapshot,
   fetchCommunitySnapshot,
-  type CommunityLookbackDays,
   type CommunitySnapshot,
 } from "../lib/community";
 import { charName, stageName } from "../lib/melee";
@@ -27,14 +26,6 @@ const VIEWS: { id: CommunityView; label: string }[] = [
 ];
 
 const gameTypes = ["all", "ranked", "unranked", "direct", "offline"];
-
-const LOOKBACK_OPTIONS: { value: CommunityLookbackDays; label: string }[] = [
-  { value: 30, label: "1 month" },
-  { value: 90, label: "3 months" },
-  { value: 180, label: "6 months" },
-  { value: 365, label: "1 year" },
-  { value: null, label: "Max" },
-];
 
 const EMPTY_COMMUNITY_SNAPSHOT: CommunitySnapshot = {
   refreshedAt: "",
@@ -62,7 +53,7 @@ const selectCharacters = (snapshot: CommunitySnapshot): number[] =>
 
 export function Community({ games, isDemo, onOpenAccount }: Props) {
   const [view, setView] = useState<CommunityView>("atlas");
-  const [lookbackDays, setLookbackDays] = useState<CommunityLookbackDays>(null);
+  const [lookbackInput, setLookbackInput] = useState("100");
   const [snapshot, setSnapshot] = useState<CommunitySnapshot | null>(null);
   const [loading, setLoading] = useState(!isDemo);
   const [error, setError] = useState<string | null>(null);
@@ -113,6 +104,12 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
       ? 100
       : Math.ceil((displaySnapshot.contributorCount + 1) / 100) * 100;
   const progress = Math.min(100, (displaySnapshot.contributorCount / nextMilestone) * 100);
+  const lookbackGames = normalizeGamesLookback(lookbackInput);
+  const lookback = {
+    lookbackGames,
+    lookbackInput,
+    onLookbackInputChange: setLookbackInput,
+  };
 
   return (
     <>
@@ -158,47 +155,47 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
       </div>
 
       {view === "atlas" && <>
-        <MatchupAtlas snapshot={displaySnapshot} games={games} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />
-        <StageLab snapshot={displaySnapshot} games={games} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />
-        <MoveAtlas snapshot={displaySnapshot} games={games} lookbackDays={lookbackDays} onLookbackChange={setLookbackDays} />
+        <MatchupAtlas snapshot={displaySnapshot} games={games} {...lookback} />
+        <StageLab snapshot={displaySnapshot} games={games} {...lookback} />
+        <MoveAtlas snapshot={displaySnapshot} games={games} {...lookback} />
       </>}
-      {view === "benchmarks" && <CommunityBenchmarks snapshot={displaySnapshot} games={games} />}
+      {view === "benchmarks" && <CommunityBenchmarks snapshot={displaySnapshot} games={games} {...lookback} />}
     </>
   );
 }
 
 interface LookbackProps {
-  lookbackDays: CommunityLookbackDays;
-  onLookbackChange: (days: CommunityLookbackDays) => void;
+  lookbackGames: number;
+  lookbackInput: string;
+  onLookbackInputChange: (value: string) => void;
 }
 
-function LookbackSelect({ lookbackDays, onLookbackChange }: LookbackProps) {
+function normalizeGamesLookback(input: string): number {
+  const value = Number(input);
+  return input.trim() !== "" && Number.isFinite(value) ? Math.max(1, Math.round(value)) : 100;
+}
+
+function GamesLookbackInput({ lookbackGames, lookbackInput, onLookbackInputChange }: LookbackProps) {
   return (
     <label>
-      Days lookback
-      <select
-        value={lookbackDays ?? "max"}
-        onChange={(event) => {
-          const value = event.target.value;
-          onLookbackChange(value === "max" ? null : Number(value) as CommunityLookbackDays);
-        }}
-      >
-        {LOOKBACK_OPTIONS.map((option) => (
-          <option key={option.value ?? "max"} value={option.value ?? "max"}>{option.label}</option>
-        ))}
-      </select>
+      My games lookback
+      <span className="number-suffix unitless">
+        <input
+          type="number"
+          min={1}
+          step={25}
+          inputMode="numeric"
+          value={lookbackInput}
+          onChange={(event) => onLookbackInputChange(event.target.value)}
+          onBlur={() => onLookbackInputChange(String(lookbackGames))}
+        />
+      </span>
     </label>
   );
 }
 
-const hasLookback = (row: { lookbackDays: CommunityLookbackDays }, lookbackDays: CommunityLookbackDays): boolean =>
-  row.lookbackDays === lookbackDays;
-
-const localGamesInLookback = (games: ResolvedGame[], lookbackDays: CommunityLookbackDays): ResolvedGame[] => {
-  if (lookbackDays === null) return games;
-  const cutoff = Date.now() - lookbackDays * 86_400_000;
-  return games.filter((game) => game.date !== null && game.date.getTime() >= cutoff);
-};
+const allHistory = <T extends { lookbackDays: unknown }>(row: T): boolean => row.lookbackDays === null;
+const recentGames = (games: ResolvedGame[], count: number): ResolvedGame[] => games.slice(-count);
 
 const mostPlayedCharacter = (games: ResolvedGame[]): number | null => {
   const counts = new Map<number, number>();
@@ -212,10 +209,10 @@ const defaultCharacter = (games: ResolvedGame[], available: number[]): number =>
   return mostPlayed !== null && available.includes(mostPlayed) ? mostPlayed : available[0] ?? -1;
 };
 
-function MatchupAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
-  const lookbackRows = snapshot.matchups.filter((row) => hasLookback(row, lookbackDays));
+function MatchupAtlas({ snapshot, games, ...lookback }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
+  const communityRows = snapshot.matchups.filter(allHistory);
   const chars = [...new Set([
-    ...lookbackRows.map((row) => row.characterId),
+    ...communityRows.map((row) => row.characterId),
     ...games.map((game) => game.me.characterId),
   ])]
     .sort((a, b) => charName(a).localeCompare(charName(b)));
@@ -224,7 +221,7 @@ function MatchupAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { sna
   const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const [stageId, setStageId] = useState(0);
   const [gameType, setGameType] = useState("all");
-  const rows = lookbackRows
+  const rows = communityRows
     .filter((r) => r.characterId === selectedCharacterId && r.stageId === stageId && r.gameType === gameType)
     .sort((a, b) => b.games - a.games);
   if (selectedCharacterId < 0) return <div className="panel empty-note">Choose a character to compare matchup samples.</div>;
@@ -233,19 +230,19 @@ function MatchupAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { sna
     characterId={selectedCharacterId}
     stageId={stageId}
     gameType={gameType}
-    lookbackDays={lookbackDays}
+    lookbackGames={lookback.lookbackGames}
     communityRows={rows}
     onCharacterChange={setCharacterId}
     controls={<>
       <label>Character<select value={selectedCharacterId} onChange={(event) => setCharacterId(Number(event.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
       <label>Stage<select value={stageId} onChange={(event) => setStageId(Number(event.target.value))}><option value={0}>All legal stages</option>{INCLUDED_STAGE_IDS.map((id) => <option key={id} value={id}>{stageName(id)}</option>)}</select></label>
       <label>Mode<select value={gameType} onChange={(event) => setGameType(event.target.value)}>{gameTypes.map((mode) => <option key={mode} value={mode}>{mode === "all" ? "All modes" : mode}</option>)}</select></label>
-      <LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} />
+      <GamesLookbackInput {...lookback} />
     </>}
   />;
 }
 
-function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot; games: ResolvedGame[] }) {
+function CommunityBenchmarks({ snapshot, games, ...lookback }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
   const chars = useMemo(() => {
     const ids = new Set(selectCharacters(snapshot));
     for (const game of games) ids.add(game.me.characterId);
@@ -254,11 +251,6 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
   const preferredCharacterId = defaultCharacter(games, chars);
   const [characterId, setCharacterId] = useState(preferredCharacterId);
   const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
-  const [lookbackInput, setLookbackInput] = useState("100");
-  const parsedLookback = Number(lookbackInput);
-  const lookback = Number.isFinite(parsedLookback) && parsedLookback > 0
-    ? Math.max(25, Math.round(parsedLookback))
-    : 100;
   const row = snapshot.benchmarks.find((item) => item.characterId === selectedCharacterId);
   const communityExecution = snapshot.execution.find((item) => item.lookbackDays === null && item.characterId === selectedCharacterId);
   const communityCharacter = snapshot.characters.find((item) => item.characterId === selectedCharacterId);
@@ -266,9 +258,9 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
   const selected = useMemo(
     () => {
       const matching = games.filter((game) => game.me.characterId === selectedCharacterId);
-      return matching.slice(-lookback);
+      return recentGames(matching, lookback.lookbackGames);
     },
-    [games, lookback, selectedCharacterId],
+    [games, lookback.lookbackGames, selectedCharacterId],
   );
   return <ArchiveCommunityBenchmark
     games={selected}
@@ -279,58 +271,53 @@ function CommunityBenchmarks({ snapshot, games }: { snapshot: CommunitySnapshot;
     communityCharacter={communityCharacter}
     controls={<>
       <label>Character<select value={selectedCharacterId} onChange={(event) => setCharacterId(Number(event.target.value))}>{chars.length === 0 && <option value={-1}>—</option>}{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
-      <label>
-        My games lookback
-        <span className="number-suffix unitless">
-          <input type="number" min={25} step={25} inputMode="numeric" value={lookbackInput} onChange={(event) => setLookbackInput(event.target.value)} onBlur={() => setLookbackInput(String(lookback))} />
-        </span>
-      </label>
+      <GamesLookbackInput {...lookback} />
     </>}
     onCharacterChange={setCharacterId}
   />;
 }
 
-function MoveAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
-  const lookbackMoves = snapshot.moves.filter((row) => hasLookback(row, lookbackDays));
-  const lookbackExecution = snapshot.execution.filter((row) => hasLookback(row, lookbackDays));
+function MoveAtlas({ snapshot, games, ...lookback }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
+  const communityMoves = snapshot.moves.filter(allHistory);
+  const communityExecution = snapshot.execution.filter(allHistory);
   const chars = [...new Set([
-    ...lookbackMoves.map((m) => m.characterId),
-    ...lookbackExecution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
+    ...communityMoves.map((m) => m.characterId),
+    ...communityExecution.filter((r) => r.characterId !== -1).map((r) => r.characterId),
     ...games.map((game) => game.me.characterId),
   ])].sort((a, b) => charName(a).localeCompare(charName(b)));
   const preferredCharacterId = defaultCharacter(games, chars);
   const [characterId, setCharacterId] = useState(preferredCharacterId);
   const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
-  const rows = lookbackMoves.filter((m) => m.characterId === selectedCharacterId).sort((a, b) => b.damage - a.damage);
-  const execution = lookbackExecution.find((row) => row.characterId === selectedCharacterId);
+  const rows = communityMoves.filter((m) => m.characterId === selectedCharacterId).sort((a, b) => b.damage - a.damage);
+  const execution = communityExecution.find((row) => row.characterId === selectedCharacterId);
   const benchmark = snapshot.benchmarks.find((row) => row.characterId === selectedCharacterId);
   if (selectedCharacterId < 0) return <div className="panel empty-note">Choose a character to compare move samples.</div>;
   return <ArchiveMoveAtlasComparison
     games={games}
     characterId={selectedCharacterId}
-    lookbackDays={lookbackDays}
+    lookbackGames={lookback.lookbackGames}
     communityRows={rows}
     communityExecution={execution}
     communityBenchmark={benchmark}
     onCharacterChange={setCharacterId}
     controls={<>
       <label>Character<select value={selectedCharacterId} onChange={(event) => setCharacterId(Number(event.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
-      <LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} />
+      <GamesLookbackInput {...lookback} />
     </>}
   />;
 }
 
-function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
-  const overall = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays) && r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
-  const localGames = localGamesInLookback(games, lookbackDays);
+function StageLab({ snapshot, games, ...lookback }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
+  const overall = snapshot.matchups.filter((r) => allHistory(r) && r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
   const chars = [...new Set([
     ...overall.map((row) => row.characterId),
-    ...localGames.map((game) => game.me.characterId),
+    ...games.map((game) => game.me.characterId),
   ])]
     .sort((a, b) => charName(a).localeCompare(charName(b)));
   const preferredCharacterId = defaultCharacter(games, chars);
   const [characterId, setCharacterId] = useState(preferredCharacterId);
   const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
+  const localGames = recentGames(games.filter((game) => game.me.characterId === selectedCharacterId), lookback.lookbackGames);
   const communityOpponents = overall.filter((r) => r.characterId === selectedCharacterId);
   const opponentIds = [...new Set([
     ...communityOpponents.map((row) => row.opponentCharacterId),
@@ -340,7 +327,7 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
   const selectedOpponentId = opponentId === null || opponentIds.includes(opponentId)
     ? opponentId
     : null;
-  const rows = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays)
+  const rows = snapshot.matchups.filter((r) => allHistory(r)
     && r.characterId === selectedCharacterId
     && (selectedOpponentId === null || r.opponentCharacterId === selectedOpponentId)
     && r.stageId !== 0
@@ -350,7 +337,7 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
     games={games}
     characterId={selectedCharacterId}
     opponentId={selectedOpponentId}
-    lookbackDays={lookbackDays}
+    lookbackGames={lookback.lookbackGames}
     communityRows={rows}
     onCharacterChange={(id) => {
       setCharacterId(id);
@@ -362,7 +349,7 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
     controls={<>
       <label>Character<select value={selectedCharacterId} onChange={(event) => { const id = Number(event.target.value); setCharacterId(id); if (selectedOpponentId === null) return; const nextCommunity = overall.find((row) => row.characterId === id)?.opponentCharacterId; const nextLocal = localGames.find((game) => game.me.characterId === id)?.opp.characterId; setOpponentId(nextCommunity ?? nextLocal ?? null); }}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
       <label>Opponent<select value={selectedOpponentId ?? "all"} onChange={(event) => setOpponentId(event.target.value === "all" ? null : Number(event.target.value))}><option value="all">All opponents</option>{opponentIds.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>
-      <LookbackSelect lookbackDays={lookbackDays} onLookbackChange={onLookbackChange} />
+      <GamesLookbackInput {...lookback} />
     </>}
   />;
 }

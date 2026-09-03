@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from
 import type {
   CommunityBenchmarkRow,
   CommunityExecutionRow,
-  CommunityLookbackDays,
   CommunityMatchupRow,
   CommunityMoveRow,
 } from "../lib/community";
@@ -122,11 +121,7 @@ function useArchiveAtlas(characterId: number): ArchiveAtlasState {
   };
 }
 
-function localLookback(games: ResolvedGame[], days: CommunityLookbackDays): ResolvedGame[] {
-  if (days === null) return games;
-  const cutoff = Date.now() - days * 24 * 60 * 60 * 1_000;
-  return games.filter((game) => game.date !== null && game.date.getTime() >= cutoff);
-}
+const recentGames = (games: ResolvedGame[], count: number): ResolvedGame[] => games.slice(-count);
 
 function ProControl({ archive, onCharacterChange }: { archive: ArchiveAtlasState; onCharacterChange?: (characterId: number) => void }) {
   return (
@@ -231,7 +226,7 @@ export function ArchiveMatchupAtlasComparison({
   characterId,
   stageId,
   gameType,
-  lookbackDays,
+  lookbackGames,
   communityRows,
   controls,
   onCharacterChange,
@@ -240,7 +235,7 @@ export function ArchiveMatchupAtlasComparison({
   characterId: number;
   stageId: number;
   gameType: string;
-  lookbackDays: CommunityLookbackDays;
+  lookbackGames: number;
   communityRows: CommunityMatchupRow[];
   controls?: ReactNode;
   onCharacterChange?: (characterId: number) => void;
@@ -252,16 +247,17 @@ export function ArchiveMatchupAtlasComparison({
   }, [archive.selectedPro, sort.key]);
   const local = useMemo(() => {
     const rows = new Map<number, RateSummary>();
-    for (const game of localLookback(games, lookbackDays)) {
-      if (game.me.characterId !== characterId || (stageId !== 0 && game.rec.stageId !== stageId)) continue;
-      if (gameType !== "all" && game.rec.gameType !== gameType) continue;
+    const matching = games.filter((game) => game.me.characterId === characterId
+      && (stageId === 0 || game.rec.stageId === stageId)
+      && (gameType === "all" || game.rec.gameType === gameType));
+    for (const game of recentGames(matching, lookbackGames)) {
       const row = rows.get(game.opp.characterId) ?? { wins: 0, decided: 0, games: 0 };
       row.games++;
       if (game.isWin !== null) { row.decided++; if (game.isWin) row.wins++; }
       rows.set(game.opp.characterId, row);
     }
     return rows;
-  }, [characterId, gameType, games, lookbackDays, stageId]);
+  }, [characterId, gameType, games, lookbackGames, stageId]);
   const community = new Map(communityRows.map((row) => [row.opponentCharacterId, {
     wins: row.wins,
     decided: row.games,
@@ -330,6 +326,7 @@ export function ArchiveMatchupAtlasComparison({
       {opponents.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("opponent", "Opponent")}{sortableHeader("games", "Games", true)}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {opponents.map((opponentId) => <tr key={opponentId}><td>{charName(opponentId)}</td><td className="data">{local.get(opponentId)?.games.toLocaleString() ?? "—"}</td><RateCell value={local.get(opponentId)} showSample={false} /><RateCell value={community.get(opponentId)} /><RateCell value={broad.get(opponentId)} /><RateCell value={conservative.get(opponentId)} /><RateCell value={proAggregate.get(opponentId)} />{archive.selectedPro && <RateCell value={pro.get(opponentId)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No matching matchup samples are available.</div>}
+      <div className="hint">My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
       {gameType !== "all" && <div className="hint">Your and SSBM Stats columns use the selected mode. Historical archive columns are offline event games.</div>}
     </ArchiveFrame>
   );
@@ -359,7 +356,7 @@ export function ArchiveStageAtlasComparison({
   games,
   characterId,
   opponentId,
-  lookbackDays,
+  lookbackGames,
   communityRows,
   controls,
   onCharacterChange,
@@ -367,7 +364,7 @@ export function ArchiveStageAtlasComparison({
   games: ResolvedGame[];
   characterId: number;
   opponentId: number | null;
-  lookbackDays: CommunityLookbackDays;
+  lookbackGames: number;
   communityRows: CommunityMatchupRow[];
   controls?: ReactNode;
   onCharacterChange?: (characterId: number) => void;
@@ -379,15 +376,16 @@ export function ArchiveStageAtlasComparison({
   }, [archive.selectedPro, sort.key]);
   const local = useMemo(() => {
     const rows = new Map<number, RateSummary>();
-    for (const game of localLookback(games, lookbackDays)) {
-      if (game.me.characterId !== characterId || (opponentId !== null && game.opp.characterId !== opponentId)) continue;
+    const matching = games.filter((game) => game.me.characterId === characterId
+      && (opponentId === null || game.opp.characterId === opponentId));
+    for (const game of recentGames(matching, lookbackGames)) {
       const row = rows.get(game.rec.stageId) ?? { wins: 0, decided: 0, games: 0 };
       row.games++;
       if (game.isWin !== null) { row.decided++; if (game.isWin) row.wins++; }
       rows.set(game.rec.stageId, row);
     }
     return rows;
-  }, [characterId, games, lookbackDays, opponentId]);
+  }, [characterId, games, lookbackGames, opponentId]);
   // The published community snapshot has privacy-thresholded matchup cells,
   // not a true character-by-stage all-opponents aggregate. Summing those cells
   // would silently omit suppressed matchups, so leave this source blank until
@@ -444,6 +442,7 @@ export function ArchiveStageAtlasComparison({
       {stages.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("stage", "Stage")}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {stages.map((id) => <tr key={id}><td>{stageName(id)}</td><RateCell value={local.get(id)} /><RateCell value={community.get(id)} /><RateCell value={broad.get(id)} /><RateCell value={conservative.get(id)} /><RateCell value={proAggregate.get(id)} />{archive.selectedPro && <RateCell value={pro.get(id)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No stage-specific sample is available for this matchup.</div>}
+      <div className="hint">My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
       {opponentId === null && <div className="hint">SSBM Stats stays blank in All opponents mode until a privacy-safe character-by-stage aggregate is published; your local and archive columns are exact all-opponent totals.</div>}
     </ArchiveFrame>
   );
@@ -610,7 +609,7 @@ function normalizedMinimum(input: string): number {
 export function ArchiveMoveAtlasComparison({
   games,
   characterId,
-  lookbackDays,
+  lookbackGames,
   communityRows,
   communityExecution,
   communityBenchmark,
@@ -619,7 +618,7 @@ export function ArchiveMoveAtlasComparison({
 }: {
   games: ResolvedGame[];
   characterId: number;
-  lookbackDays: CommunityLookbackDays;
+  lookbackGames: number;
   communityRows: CommunityMoveRow[];
   communityExecution?: CommunityExecutionRow;
   communityBenchmark?: CommunityBenchmarkRow;
@@ -634,8 +633,8 @@ export function ArchiveMoveAtlasComparison({
   const minAttempts = normalizedMinimum(minAttemptsInput);
   const minActions = normalizedMinimum(minActionsInput);
   const localGames = useMemo(
-    () => localLookback(games, lookbackDays).filter((game) => game.me.characterId === characterId),
-    [characterId, games, lookbackDays],
+    () => recentGames(games.filter((game) => game.me.characterId === characterId), lookbackGames),
+    [characterId, games, lookbackGames],
   );
   const localMoves = useMemo(() => moveTable(localGames), [localGames]);
   const localActions = useMemo(() => actionAverages(localGames), [localGames]);
@@ -665,15 +664,8 @@ export function ArchiveMoveAtlasComparison({
   };
   const moveKeys = [...new Set([...localByKey.keys(), ...communityByKey.keys(), ...broadMoves.keys(), ...conservativeMoves.keys(), ...proAggregateMoves.keys(), ...proMoves.keys()])]
     .filter((key) => {
-      const rates = [
-        localMoveMetric(localByKey.get(key), "attempts", localMoves.covered),
-        archiveMoveMetric(broadMoves.get(key), "attempts", broadRow),
-        archiveMoveMetric(conservativeMoves.get(key), "attempts", conservativeRow),
-        archiveMoveMetric(proAggregateMoves.get(key), "attempts", proAggregateRow),
-      ].filter((value): value is number => value !== null);
-      // Specials and throws have no attempt counter. Keep those unknown rows so
-      // this filter cannot erase their landed, damage, or kill metrics.
-      return rates.length === 0 || rates.some((value) => value >= minAttempts);
+      const myAttempts = localMoveMetric(localByKey.get(key), "attempts", localMoves.covered);
+      return myAttempts !== null && myAttempts >= minAttempts;
     })
     .sort((a, b) => {
       const aLabel = localByKey.get(a)?.label ?? moveGroupLabel(a);
@@ -722,14 +714,14 @@ export function ArchiveMoveAtlasComparison({
       label: "SSBM Stats",
       sampleNote: communityExecution ? `≈${communityExecution.games.toLocaleString()} player-games` : "sample not yet publishable",
       fields: {
-        lCancel: lookbackDays !== null || communityBenchmark?.lCancel?.p50 === null || communityBenchmark?.lCancel?.p50 === undefined
+        lCancel: communityBenchmark?.lCancel?.p50 === null || communityBenchmark?.lCancel?.p50 === undefined
           ? communityExecution?.lCancelSuccess === null || communityExecution?.lCancelSuccess === undefined
             ? null
             : communityExecution.lCancelSuccess / 100
           : communityBenchmark.lCancel.p50 / 100,
         groundTech: communityExecution?.groundTechSuccess === null || communityExecution?.groundTechSuccess === undefined ? null : communityExecution.groundTechSuccess / 100,
         wallTech: null,
-        ipm: lookbackDays === null ? communityBenchmark?.inputsPerMinute?.p50 ?? null : null,
+        ipm: communityBenchmark?.inputsPerMinute?.p50 ?? null,
       },
       actionPerGame: (key) => communityActionPerGame(communityExecution, key),
       approximateActions: true,
@@ -799,7 +791,7 @@ export function ArchiveMoveAtlasComparison({
           const comparisonLabel = tournamentField !== null ? "tournament" : "venue";
           return <tr key={key}><td>{localByKey.get(key)?.label ?? moveGroupLabel(key)}</td><td className={`data ${difference ? `community-diff-${difference.direction}` : ""}`} style={differenceStyle(difference)} title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined} aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}>{localValue}{difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}</td><td className="data">{communityMoveValue(communityByKey.get(key), metric, communityDamage)}</td><td className="data">{archiveMoveValue(broadMoves.get(key), metric, broadRow)}</td><td className="data">{archiveMoveValue(conservativeMoves.get(key), metric, conservativeRow)}</td><td className="data">{archiveMoveValue(proAggregateMoves.get(key), metric, proAggregateRow)}</td>{archive.selectedPro && <td className="data">{archiveMoveValue(proMoves.get(key), metric, proRow)}</td>}</tr>;
         })}
-      </tbody></table></div> : <div className="empty-note">No tracked move clears the current attempts-per-game minimum. Lower it to see more.</div>}
+      </tbody></table></div> : <div className="empty-note">No locally tracked move clears the current attempts-per-game minimum. Lower it to see more.</div>}
 
       <div className="acb-move-heading acb-action-heading">
         <h3>Execution &amp; actions</h3>
@@ -839,10 +831,10 @@ export function ArchiveMoveAtlasComparison({
         Action rows are per game so every published source can be compared directly. SSBM Stats action rates are
         approximate because its public game denominator is privacy-rounded; its per-game move rates are approximate
         for the same reason, and its damage/kill shares cover published move rows. These values do not decide which
-        rows clear the minimum. Unknown move-attempt rows, including specials and throws, remain visible. Both minimums default to 1,
+        rows clear the minimum. The move minimum applies to the You column, so lower rates and unavailable attempt counts are hidden. Both minimums default to 1,
         and selecting a named pro does not change which rows appear. The You action cells compare with Tournament, or
-        Venue when Tournament is unavailable, and brighter red or blue means a larger difference. SSBM Stats inputs
-        per minute is an all-history median, so it stays blank for bounded lookbacks.
+        Venue when Tournament is unavailable, and brighter red or blue means a larger difference. My games lookback
+        scopes only the You column; every benchmark column retains its full published sample.
       </div>
     </ArchiveFrame>
   );
