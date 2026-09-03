@@ -1986,8 +1986,7 @@ const moveAttemptsLabel = (p: PlayerSide, rec: GameRecord, moveIds: number[]): s
 const COMBINED_ACTION_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls", "grabs", "ledgeGrabs"]);
 
 const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, rec: GameRecord) => string }[] = [
-  { label: "Kills", value: (p) => int(p.kills) },
-  { label: "Stocks left", value: (p) => (p.stocksRemaining === null ? "—" : int(p.stocksRemaining)) },
+  { label: "Kills/Stocks left", value: (p) => `${int(p.kills)}/${p.stocksRemaining === null ? "—" : int(p.stocksRemaining)}` },
   { label: "Damage done", value: (p) => int(p.totalDamage) },
   { label: "Damage / opening", value: (p) => num(p.damagePerOpening, 1) },
   { label: "Openings / kill", value: (p) => num(p.openingsPerKill, 1) },
@@ -1995,9 +1994,7 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
   { label: "Tilts (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [7, 8, 9]) },
   { label: "Jabs (1/2/3/R)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [2, 3, 4, 5]) },
-  { label: "Neutral wins", value: (p, o) => withShare(p.neutralWins, o.neutralWins) },
-  { label: "Counter hits", value: (p, o) => withShare(p.counterHits, o.counterHits) },
-  { label: "Beneficial trades", value: (p, o) => withShare(p.beneficialTrades, o.beneficialTrades) },
+  { label: "Neutral (Wins/CH/Trades)", value: (p) => `${int(p.neutralWins)}/${int(p.counterHits)}/${int(p.beneficialTrades)}` },
   {
     label: "L-cancels",
     value: (p) => {
