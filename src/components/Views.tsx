@@ -4,7 +4,7 @@ import type { Account, ActionCounts, GameRecord, PlayerSide, ResolvedGame } from
 import { ACTION_LABELS, codeShort, hasCurrentStats } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, ExecutionSummary, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
-import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
+import { pct, num, int, shortDate, duration, winRateColor, countNoun } from "../lib/format";
 import { charName, moveGroup, moveGroupTracksAttempts, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
@@ -1176,6 +1176,17 @@ function archiveMoveOpeningsPerGame(row: ArchiveRollup | null, moveKey: string):
   return (groupedArchiveMove(row, moveKey)?.openings ?? 0) / row.game_count;
 }
 
+function archiveMoveOpeningShare(row: ArchiveRollup | null, moveKey: string): number | null {
+  if (!row || row.metrics.moves === null) return null;
+  const total = Object.values(row.metrics.moves).reduce((sum, move) => sum + move.openings, 0);
+  return total > 0 ? (groupedArchiveMove(row, moveKey)?.openings ?? 0) / total : null;
+}
+
+function archiveBenchmarkSample(row: ArchiveRollup | null, includeProCount = false): string {
+  const games = `${row?.game_count.toLocaleString() ?? "—"} player-games`;
+  return includeProCount ? `${games} · ${countNoun(row?.identified_player_count, "pro")}` : games;
+}
+
 function communityMoveBenchmark(rows: CommunityMoveRow[], moveKey: string, metric: MoveMetricKey): number | null {
   const move = rows.find((row) => row.moveKey === moveKey);
   if (!move || move.characterGames <= 0) return null;
@@ -1594,9 +1605,9 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
                   <th className="data">Per game</th>
                   <th className="data">Per minute</th>
                   <th className="data">Opp per game</th>
-                  <th className="data">Venue / game</th>
-                  <th className="data">Tournament / game</th>
-                  <th className="data">Pro / game</th>
+                  <th className="data metric-header-wrap">Venue / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.venue)}</span></th>
+                  <th className="data metric-header-wrap">Tournament / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.tournament)}</span></th>
+                  <th className="data metric-header-wrap">Pro / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.pro, true)}</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -1669,9 +1680,11 @@ function MovesSection({
   recent: { rows: MoveRow[]; covered: number };
   benchmarks: ExecutionBenchmarks;
 }) {
+  type OpeningSortKey = "openings" | "venue" | "tournament" | "pro" | "share" | "venueShare" | "damage";
   const [minMoveUsageInput, setMinMoveUsageInput] = useState("3");
   const [minOpeningShareInput, setMinOpeningShareInput] = useState("3");
   const [minDamageShareInput, setMinDamageShareInput] = useState("2");
+  const [openingSortKey, setOpeningSortKey] = useState<OpeningSortKey | null>(null);
   // Moves and actions ride the same heavy-vs-light analysis, one sorted table.
   const impact = useMemo(
     () => [...moveImpact(games), ...actionImpact(games)].sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0)),
@@ -1683,10 +1696,29 @@ function MovesSection({
     ? Math.min(100, Math.max(0, Math.round(openingShareValue * 10) / 10))
     : 3;
   const visibleOpeningRows = useMemo(
-    () => recent.rows
-      .filter((row) => row.openings > 0 && (row.openingShare ?? 0) * 100 >= minOpeningShare)
-      .sort((a, b) => b.openings - a.openings),
-    [recent.rows, minOpeningShare],
+    () => {
+      const rows = recent.rows
+        .filter((row) => row.openings > 0 && (row.openingShare ?? 0) * 100 >= minOpeningShare);
+      const originalOrder = (a: MoveRow, b: MoveRow) => b.openings - a.openings;
+      if (openingSortKey === null) return rows.sort(originalOrder);
+      const value = (row: MoveRow): number | null => {
+        if (openingSortKey === "openings") return recent.covered > 0 ? row.openings / recent.covered : null;
+        if (openingSortKey === "venue") return archiveMoveOpeningsPerGame(benchmarks.venue, row.key);
+        if (openingSortKey === "tournament") return archiveMoveOpeningsPerGame(benchmarks.tournament, row.key);
+        if (openingSortKey === "pro") return archiveMoveOpeningsPerGame(benchmarks.pro, row.key);
+        if (openingSortKey === "share") return row.openingShare;
+        if (openingSortKey === "venueShare") return archiveMoveOpeningShare(benchmarks.venue, row.key);
+        return row.dmgPerOpening;
+      };
+      return rows.sort((a, b) => {
+        const aValue = value(a);
+        const bValue = value(b);
+        if (aValue === null) return bValue === null ? originalOrder(a, b) : 1;
+        if (bValue === null) return -1;
+        return bValue - aValue || originalOrder(a, b);
+      });
+    },
+    [benchmarks.pro, benchmarks.tournament, benchmarks.venue, minOpeningShare, openingSortKey, recent.covered, recent.rows],
   );
   const damageShareValue = Number(minDamageShareInput);
   const minDamageShare = minDamageShareInput.trim() !== "" && Number.isFinite(damageShareValue)
@@ -1714,6 +1746,22 @@ function MovesSection({
     );
   }
   const deltaColor = (d: number | null) => (d === null ? undefined : { color: d >= 0 ? "#3fcf8e" : "#f0564f" });
+  const openingSortableHeader = (key: OpeningSortKey, label: string, sampleNote?: string) => {
+    const active = openingSortKey === key;
+    return (
+      <th className={`metric-sortable data${active ? " active" : ""}`} aria-sort={active ? "descending" : "none"}>
+        <button
+          type="button"
+          title={active ? `Clear ${label} sorting` : `Sort by ${label}, highest first`}
+          aria-label={active ? `Clear ${label} sorting` : `Sort by ${label}, highest first`}
+          onClick={() => setOpeningSortKey((previous) => previous === key ? null : key)}
+        >
+          {label}<span aria-hidden="true">{active ? "▼" : "↕"}</span>
+        </button>
+        {sampleNote && <span className="sample-note">{sampleNote}</span>}
+      </th>
+    );
+  };
   return (
     <>
       <div className="panel">
@@ -1743,9 +1791,9 @@ function MovesSection({
             <tr>
               <th>Move</th>
               <th className="data">Attempted / game</th>
-              <th className="data">Venue / game</th>
-              <th className="data">Tournament / game</th>
-              <th className="data">Pro / game</th>
+              <th className="data metric-header-wrap">Venue / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.venue)}</span></th>
+              <th className="data metric-header-wrap">Tournament / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.tournament)}</span></th>
+              <th className="data metric-header-wrap">Pro / game<span className="sample-note">{archiveBenchmarkSample(benchmarks.pro, true)}</span></th>
               <th className="data">Landed / game</th>
               <th className="data">Dmg share</th>
               <th className="data">Kill share</th>
@@ -1830,12 +1878,13 @@ function MovesSection({
           <thead>
             <tr>
               <th>Move</th>
-              <th className="data">Openings / game</th>
-              <th className="data">Venue / game</th>
-              <th className="data">Tournament / game</th>
-              <th className="data">Pro / game</th>
-              <th className="data">Share of openings</th>
-              <th className="data">Damage per opening</th>
+              {openingSortableHeader("openings", "Openings / game")}
+              {openingSortableHeader("venue", "Venue / game", archiveBenchmarkSample(benchmarks.venue))}
+              {openingSortableHeader("tournament", "Tournament / game", archiveBenchmarkSample(benchmarks.tournament))}
+              {openingSortableHeader("pro", "Pro / game", archiveBenchmarkSample(benchmarks.pro, true))}
+              {openingSortableHeader("share", "My share % of openings")}
+              {openingSortableHeader("venueShare", "Venue share % of openings", archiveBenchmarkSample(benchmarks.venue))}
+              {openingSortableHeader("damage", "My damage per opening")}
             </tr>
           </thead>
           <tbody>
@@ -1866,6 +1915,7 @@ function MovesSection({
                   <td className="data">{num(tournamentRate, 1)}</td>
                   <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.pro, r.key), 1)}</td>
                   <td className="data">{pct(r.openingShare, 0)}</td>
+                  <td className="data">{pct(archiveMoveOpeningShare(benchmarks.venue, r.key), 0)}</td>
                   <td className="data">{num(r.dmgPerOpening, 1)}</td>
                 </tr>
               );
