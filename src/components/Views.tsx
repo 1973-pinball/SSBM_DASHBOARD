@@ -2003,8 +2003,15 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Tech dirs (IP/in/away)", value: techDirectionLabel },
   { label: "Inputs / minute", value: (p) => int(p.inputsPerMinute) },
   {
-    label: "Grabs (Landed/Total/Ledge)",
-    value: (p) => `${int(p.grabSuccess)}/${int(p.actions?.grabs ?? null)}/${int(p.actions?.ledgeGrabs ?? null)}`,
+    label: "Landed grabs/Ledge grabs",
+    value: (p) => `${int(p.grabSuccess)}/${int(p.actions?.ledgeGrabs ?? null)}`,
+  },
+  {
+    label: "Grab success %",
+    value: (p) => {
+      const attempts = p.actions?.grabs ?? 0;
+      return attempts === 0 ? "—" : `${pct(p.grabSuccess / attempts, 0)} (${p.grabSuccess}/${attempts})`;
+    },
   },
   {
     label: "Dodges (Air/Spot/Roll)",
