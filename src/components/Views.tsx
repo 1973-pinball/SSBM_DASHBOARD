@@ -1957,9 +1957,6 @@ function MovesSection({
 const GAME_LOG_ROWS = 50;
 
 /** Count plus this player's share of the game total, e.g. "13 (57%)". */
-const withShare = (mine: number, theirs: number) =>
-  mine + theirs > 0 ? `${mine} (${pct(mine / (mine + theirs), 0)})` : "0";
-
 const techSuccessLabel = (p: PlayerSide): string => {
   const t = p.techs;
   if (!t) return "—";
@@ -1983,7 +1980,7 @@ const moveAttemptsLabel = (p: PlayerSide, rec: GameRecord, moveIds: number[]): s
     ? moveIds.map((moveId) => p.moveStats?.[moveId]?.attempts ?? 0).join("/")
     : "—";
 
-const COMBINED_ACTION_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls", "grabs", "ledgeGrabs"]);
+const COMBINED_ACTION_KEYS = new Set<keyof ActionCounts>(["airDodges", "spotDodges", "rolls", "grabs", "ledgeGrabs", "wavedashes", "wavelands"]);
 
 const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, rec: GameRecord) => string }[] = [
   { label: "Kills/Stocks left", value: (p) => `${int(p.kills)}/${p.stocksRemaining === null ? "—" : int(p.stocksRemaining)}` },
@@ -1994,7 +1991,7 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   { label: "Smashes (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [10, 11, 12]) },
   { label: "Tilts (F/U/D)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [7, 8, 9]) },
   { label: "Jabs (1/2/3/R)", value: (p, _other, rec) => moveAttemptsLabel(p, rec, [2, 3, 4, 5]) },
-  { label: "Neutral (Wins/CH/Trades)", value: (p) => `${int(p.neutralWins)}/${int(p.counterHits)}/${int(p.beneficialTrades)}` },
+  { label: "Neutral (Wins/Counter hits/Trades)", value: (p) => `${int(p.neutralWins)}/${int(p.counterHits)}/${int(p.beneficialTrades)}` },
   {
     label: "L-cancels",
     value: (p) => {
@@ -2012,6 +2009,10 @@ const DETAIL_STATS: { label: string; value: (p: PlayerSide, other: PlayerSide, r
   {
     label: "Dodges (Air/Spot/Roll)",
     value: (p) => (["airDodges", "spotDodges", "rolls"] as const).map((key) => int(p.actions?.[key] ?? null)).join("/"),
+  },
+  {
+    label: "Wavedashes/Wavelands",
+    value: (p) => `${int(p.actions?.wavedashes ?? null)}/${int(p.actions?.wavelands ?? null)}`,
   },
   ...ACTION_LABELS.filter(({ key }) => !COMBINED_ACTION_KEYS.has(key)).map(({ key, label }) => ({
     label,
