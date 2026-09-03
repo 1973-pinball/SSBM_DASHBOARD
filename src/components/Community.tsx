@@ -330,10 +330,10 @@ function StageLab({ snapshot, games, lookbackDays, onLookbackChange }: { snapsho
     ...communityOpponents.map((row) => row.opponentCharacterId),
     ...localGames.filter((game) => game.me.characterId === selectedCharacterId).map((game) => game.opp.characterId),
   ])].sort((a, b) => charName(a).localeCompare(charName(b)));
-  const [opponentId, setOpponentId] = useState<number | null>(opponentIds[0] ?? null);
+  const [opponentId, setOpponentId] = useState<number | null>(null);
   const selectedOpponentId = opponentId === null || opponentIds.includes(opponentId)
     ? opponentId
-    : opponentIds[0] ?? null;
+    : null;
   const rows = snapshot.matchups.filter((r) => hasLookback(r, lookbackDays)
     && r.characterId === selectedCharacterId
     && (selectedOpponentId === null || r.opponentCharacterId === selectedOpponentId)

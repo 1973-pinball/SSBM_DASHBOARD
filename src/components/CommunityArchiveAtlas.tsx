@@ -198,6 +198,7 @@ interface RateSummary {
 }
 
 type MatchupSortKey = "opponent" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
+type StageSortKey = "stage" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
 type SortDirection = "asc" | "desc";
 
 const rateSummary = (row: ArchiveRollup | undefined): RateSummary | null => row ? {
@@ -361,6 +362,10 @@ export function ArchiveStageAtlasComparison({
   onCharacterChange?: (characterId: number) => void;
 }) {
   const archive = useArchiveAtlas(characterId);
+  const [sort, setSort] = useState<{ key: StageSortKey | null; direction: SortDirection }>({ key: null, direction: "desc" });
+  useEffect(() => {
+    if (!archive.selectedPro && sort.key === "pro") setSort({ key: null, direction: "desc" });
+  }, [archive.selectedPro, sort.key]);
   const local = useMemo(() => {
     const rows = new Map<number, RateSummary>();
     for (const game of localLookback(games, lookbackDays)) {
@@ -383,11 +388,49 @@ export function ArchiveStageAtlasComparison({
   const conservative = archiveStageMap(archive.fieldRows, "conservative", opponentId);
   const proAggregate = archiveStageMap(archive.proAggregateRows, "conservative", opponentId);
   const pro = archiveStageMap(archive.proRows, "conservative", opponentId);
-  const stages = INCLUDED_STAGE_IDS.filter((id) => local.has(id) || community.has(id) || broad.has(id) || conservative.has(id) || proAggregate.has(id) || pro.has(id));
+  const sourceFor = (key: StageSortKey, stageId: number): RateSummary | null | undefined => {
+    if (key === "you") return local.get(stageId);
+    if (key === "community") return community.get(stageId);
+    if (key === "venue") return broad.get(stageId);
+    if (key === "tournament") return conservative.get(stageId);
+    if (key === "proAggregate") return proAggregate.get(stageId);
+    if (key === "pro") return pro.get(stageId);
+    return null;
+  };
+  const stages = INCLUDED_STAGE_IDS
+    .filter((id) => local.has(id) || community.has(id) || broad.has(id) || conservative.has(id) || proAggregate.has(id) || pro.has(id))
+    .sort((a, b) => {
+      if (sort.key === null) return INCLUDED_STAGE_IDS.indexOf(a) - INCLUDED_STAGE_IDS.indexOf(b);
+      if (sort.key === "stage") {
+        const order = stageName(a).localeCompare(stageName(b));
+        return sort.direction === "asc" ? order : -order;
+      }
+      const left = sourceFor(sort.key, a);
+      const right = sourceFor(sort.key, b);
+      const leftRate = left && left.decided > 0 ? left.wins / left.decided : null;
+      const rightRate = right && right.decided > 0 ? right.wins / right.decided : null;
+      if (leftRate === null && rightRate === null) return stageName(a).localeCompare(stageName(b));
+      if (leftRate === null) return 1;
+      if (rightRate === null) return -1;
+      const direction = sort.direction === "asc" ? 1 : -1;
+      return direction * (leftRate - rightRate)
+        || direction * ((left?.games ?? 0) - (right?.games ?? 0))
+        || stageName(a).localeCompare(stageName(b));
+    });
+  const sortableHeader = (key: StageSortKey, label: string, data = false) => {
+    const active = sort.key === key;
+    return <th className={`atlas-sortable${data ? " data" : ""}${active ? " active" : ""}`} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => setSort((previous) => previous.key === key
+        ? { key, direction: previous.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: key === "stage" ? "asc" : "desc" })}>
+        {label}<span aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
+      </button>
+    </th>;
+  };
 
   return (
     <ArchiveFrame archive={archive} eyebrow="Stage Atlas" title={`${charName(characterId)} vs ${opponentId === null ? "all opponents" : charName(opponentId)} across the full field`} controls={controls} onCharacterChange={onCharacterChange}>
-      {stages.length ? <div className="table-scroll"><table><thead><tr><th>Stage</th><th className="data">You</th><th className="data">SSBM Stats</th><th className="data">Venue archive</th><th className="data">Tournament archive</th><th className="data">Pro tournament archive</th>{archive.selectedPro && <th className="data">{archive.selectedPro.display_name}</th>}</tr></thead><tbody>
+      {stages.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("stage", "Stage")}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {stages.map((id) => <tr key={id}><td>{stageName(id)}</td><RateCell value={local.get(id)} /><RateCell value={community.get(id)} /><RateCell value={broad.get(id)} /><RateCell value={conservative.get(id)} /><RateCell value={proAggregate.get(id)} />{archive.selectedPro && <RateCell value={pro.get(id)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No stage-specific sample is available for this matchup.</div>}
       {opponentId === null && <div className="hint">SSBM Stats stays blank in All opponents mode until a privacy-safe character-by-stage aggregate is published; your local and archive columns are exact all-opponent totals.</div>}

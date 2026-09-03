@@ -30,19 +30,18 @@ export const shortDate = (d: Date | string | null): string => {
 };
 
 /**
- * Map a win rate in [0,1] to a loss→win color, with null as neutral.
- * The old midpoint was a dark slate: most real-world 40–60% values had the
- * weakest contrast. These stops keep the full scale readable against panels
- * and keep dark text readable inside matrix cells.
+ * Map a win rate in [0,1] to a blue-low → red-high color, with null as neutral.
+ * The light violet midpoint keeps ordinary 40–60% values readable against
+ * panels and keeps dark text readable inside matrix cells.
  */
 export function winRateColor(rate: number | null, alpha = 1): string {
   if (rate === null) return `rgba(137, 129, 174, ${0.5 * alpha})`;
   const t = Math.max(0, Math.min(1, rate));
-  // bright loss coral → light neutral violet → bright win mint
+  // bright blue → light neutral violet → bright red
   const mix = (a: number, b: number, u: number) => Math.round(a + (b - a) * u);
   const [r, g, b] =
     t < 0.5
-      ? [mix(255, 170, t * 2), mix(113, 163, t * 2), mix(106, 201, t * 2)]
-      : [mix(170, 82, (t - 0.5) * 2), mix(163, 214, (t - 0.5) * 2), mix(201, 160, (t - 0.5) * 2)];
+      ? [mix(109, 170, t * 2), mix(179, 163, t * 2), mix(242, 201, t * 2)]
+      : [mix(170, 240, (t - 0.5) * 2), mix(163, 86, (t - 0.5) * 2), mix(201, 79, (t - 0.5) * 2)];
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }

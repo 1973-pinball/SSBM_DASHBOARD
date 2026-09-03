@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
 import { ACTION_LABELS, codeShort } from "../lib/types";
@@ -191,7 +191,7 @@ export function Matchups({ games, onSelect }: { games: ResolvedGame[]; onSelect:
   );
 }
 
-/** Color-scale key for the win-rate matrices: loss red → neutral → win green. */
+/** Color-scale key for the win-rate matrices: blue low → neutral → red high. */
 function MatrixLegend() {
   return (
     <div className="matrix-legend">
@@ -914,6 +914,30 @@ function actionBenchmarkValue(benchmarks: ExecutionBenchmarks, kind: BenchmarkKi
   return archiveActionBenchmark(benchmarks[kind], key);
 }
 
+function actionRateDifference(
+  mine: number,
+  field: number | null,
+  localGames: number,
+  fieldGames: number,
+): { direction: "above" | "below"; strength: number } | null {
+  if (field === null || localGames < 10 || fieldGames < 25) return null;
+  const gap = mine - field;
+  const threshold = Math.max(0.5, Math.abs(field) * 0.35);
+  if (Math.abs(gap) < threshold) return null;
+  return {
+    direction: gap > 0 ? "above" : "below",
+    strength: Math.min(1, 0.15 + Math.max(0, Math.abs(gap) / threshold - 1) * 0.425),
+  };
+}
+
+function actionRateDifferenceStyle(difference: ReturnType<typeof actionRateDifference>): CSSProperties | undefined {
+  if (!difference) return undefined;
+  return {
+    "--diff-bg": String(0.06 + difference.strength * 0.28),
+    "--diff-border": String(0.18 + difference.strength * 0.42),
+  } as CSSProperties;
+}
+
 /** Per-game line chart with one chip-selected action at a time. */
 function PerGameMetricChart({
   title,
@@ -1147,6 +1171,11 @@ function archiveMoveBenchmark(row: ArchiveRollup | null, moveKey: string, metric
   return attempts > 0 ? 100 * move.lCancelSuccess / attempts : null;
 }
 
+function archiveMoveOpeningsPerGame(row: ArchiveRollup | null, moveKey: string): number | null {
+  if (!row || row.game_count <= 0 || row.metrics.moves === null) return null;
+  return (groupedArchiveMove(row, moveKey)?.openings ?? 0) / row.game_count;
+}
+
 function communityMoveBenchmark(rows: CommunityMoveRow[], moveKey: string, metric: MoveMetricKey): number | null {
   const move = rows.find((row) => row.moveKey === moveKey);
   if (!move || move.characterGames <= 0) return null;
@@ -1178,6 +1207,29 @@ function moveBenchmarkValue(
   return archiveMoveBenchmark(benchmarks[kind], moveKey, metric);
 }
 
+function hasOpponentMoveMetric(
+  games: ResolvedGame[],
+  moveKeys: ReadonlySet<string>,
+  metric: MoveMetricKey,
+): boolean {
+  for (const game of games) {
+    const moves = game.opp.moveStats;
+    if (!moves) continue;
+    if (metric === "landedPerGame" || metric === "dmgPerGame" || metric === "killsPerGame") return true;
+    for (const [moveId, move] of Object.entries(moves)) {
+      const selected = moveKeys.has(moveGroup(Number(moveId)).key);
+      if (metric === "dmgShare" && move.damage > 0) return true;
+      if (metric === "killShare" && move.kills > 0) return true;
+      if (!selected) continue;
+      if (metric === "attemptsPerGame" && move.attempts !== undefined) return true;
+      if (metric === "avgDmgPerHit" && move.landed > 0) return true;
+      if (metric === "avgKillPct" && move.kills > 0) return true;
+      if (metric === "lCancelPct" && (move.lcSuccess ?? 0) + (move.lcFail ?? 0) > 0) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Any cell of the Move effectiveness table, plotted over time. That table is a
  * snapshot of the last ROLLING_WINDOW games; this is the same figure computed
@@ -1199,12 +1251,18 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
     () => moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric),
     [games, activeMoves, metric],
   );
-  const hasOpponentMoveData = useMemo(() => games.some((game) => game.opp.moveStats !== undefined), [games]);
+  const hasOpponentMoveData = useMemo(
+    () => hasOpponentMoveMetric(games, new Set(activeMoves.map((move) => move.key)), metric),
+    [activeMoves, games, metric],
+  );
+  useEffect(() => {
+    if (!hasOpponentMoveData) setShowOpp(false);
+  }, [hasOpponentMoveData]);
   const opponentPoints = useMemo(
-    () => showOpp
+    () => showOpp && hasOpponentMoveData
       ? moveMetricSeriesMany(games, activeMoves.map((move) => move.key), metric, ROLLING_WINDOW, MAX_SERIES_POINTS, "opp")
       : [],
-    [activeMoves, games, metric, showOpp],
+    [activeMoves, games, hasOpponentMoveData, metric, showOpp],
   );
   const benchmarkValues = useMemo(() => {
     const values = new Map<string, number>();
@@ -1253,6 +1311,17 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
       <div className="panel-heading-row">
         <div>
           <h2 className="panel-title">Move trend — {ROLLING_WINDOW}-game rolling average</h2>
+          <button
+            className={`chip move-trend-opponent ${showOpp ? "on" : ""}`}
+            aria-pressed={showOpp}
+            disabled={!hasOpponentMoveData}
+            title={hasOpponentMoveData ? undefined : "Opponent move data is not available in these games"}
+            style={showOpp ? { borderColor: OPP_SERIES_COLOR } : undefined}
+            onClick={() => setShowOpp((value) => !value)}
+          >
+            <span className="dot" style={{ background: OPP_SERIES_COLOR, opacity: showOpp ? 1 : 0.35 }} />
+            vs opponents
+          </button>
         </div>
         <div className="panel-controls">
           <div className="panel-control">
@@ -1291,17 +1360,6 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
               ))}
             </select>
           </label>
-          <button
-            className={`chip move-trend-opponent ${showOpp ? "on" : ""}`}
-            aria-pressed={showOpp}
-            disabled={!hasOpponentMoveData}
-            title={hasOpponentMoveData ? undefined : "Opponent move data is not available in these games"}
-            style={showOpp ? { borderColor: OPP_SERIES_COLOR } : undefined}
-            onClick={() => setShowOpp((value) => !value)}
-          >
-            <span className="dot" style={{ background: OPP_SERIES_COLOR, opacity: showOpp ? 1 : 0.35 }} />
-            vs opponents
-          </button>
         </div>
       </div>
       {activeMoves.length === 0 ? (
@@ -1533,30 +1591,58 @@ export function Execution({ games, isDemo = false }: { games: ResolvedGame[]; is
                   <th className="data">Per game</th>
                   <th className="data">Per minute</th>
                   <th className="data">Opp per game</th>
-                  <th className="data">Opp per minute</th>
+                  <th className="data">Venue / game</th>
+                  <th className="data">Tournament / game</th>
+                  <th className="data">Pro / game</th>
                 </tr>
               </thead>
               <tbody>
-                {actions.rows.map((a) => (
-                  <tr key={a.key}>
-                    <td>{a.label}</td>
-                    <td className="data">{num(a.perGame, 1)}</td>
-                    <td className="data">{num(a.perMinute, 1)}</td>
-                    <td className="data">{num(a.oppPerGame, 1)}</td>
-                    <td className="data">{num(a.oppPerMinute, 1)}</td>
-                  </tr>
-                ))}
+                {actions.rows.map((a) => {
+                  const venueRate = archiveActionBenchmark(benchmarks.venue, a.key);
+                  const tournamentRate = archiveActionBenchmark(benchmarks.tournament, a.key);
+                  const comparisonRate = tournamentRate ?? venueRate;
+                  const comparisonGames = tournamentRate !== null
+                    ? benchmarks.tournament?.game_count ?? 0
+                    : benchmarks.venue?.game_count ?? 0;
+                  const comparisonLabel = tournamentRate !== null ? "tournament" : "venue";
+                  const difference = actionRateDifference(a.perGame, comparisonRate, actions.covered, comparisonGames);
+                  const localValue = num(a.perGame, 1);
+                  return (
+                    <tr key={a.key}>
+                      <td>{a.label}</td>
+                      <td
+                        className={`data ${difference ? `community-diff-${difference.direction}` : ""}`}
+                        style={actionRateDifferenceStyle(difference)}
+                        title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined}
+                        aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}
+                      >
+                        {localValue}
+                        {difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}
+                      </td>
+                      <td className="data">{num(a.perMinute, 1)}</td>
+                      <td className="data">{num(a.oppPerGame, 1)}</td>
+                      <td className="data">{num(venueRate, 1)}</td>
+                      <td className="data">{num(tournamentRate, 1)}</td>
+                      <td className="data">{num(archiveActionBenchmark(benchmarks.pro, a.key), 1)}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             <div className="hint">
-              Your most recent {actions.covered.toLocaleString()} games in this filter — your counts and your
-              opponents'. Per-minute normalizes for game length, which is the fairer comparison across filters.
+              Your most recent {actions.covered.toLocaleString()} games in this filter, compared with fixed Venue,
+              Tournament, and aggregate Pro per-game benchmarks for {benchmarks.characterId === null
+                ? "your selected character"
+                : charName(benchmarks.characterId)}. Per-minute normalizes your rate for game length; a dash means
+              that archive has no qualifying published sample. Your per-game cell is highlighted when it differs
+              materially from Tournament, or Venue when Tournament is unavailable; brighter shading means a larger
+              difference.
             </div>
           </>
         )}
       </div>
 
-      <MovesSection games={games} career={career} recent={recentMoves} />
+      <MovesSection games={games} career={career} recent={recentMoves} benchmarks={benchmarks} />
     </>
   );
 }
@@ -1573,10 +1659,12 @@ function MovesSection({
   games,
   career,
   recent,
+  benchmarks,
 }: {
   games: ResolvedGame[];
   career: { rows: MoveRow[]; covered: number };
   recent: { rows: MoveRow[]; covered: number };
+  benchmarks: ExecutionBenchmarks;
 }) {
   const [minMoveUsageInput, setMinMoveUsageInput] = useState("3");
   const [minOpeningShareInput, setMinOpeningShareInput] = useState("3");
@@ -1720,6 +1808,9 @@ function MovesSection({
             <tr>
               <th>Move</th>
               <th className="data">Openings / game</th>
+              <th className="data">Venue / game</th>
+              <th className="data">Tournament / game</th>
+              <th className="data">Pro / game</th>
               <th className="data">Share of openings</th>
               <th className="data">Damage per opening</th>
             </tr>
@@ -1729,6 +1820,9 @@ function MovesSection({
                 <tr key={r.key}>
                   <td>{r.label}</td>
                   <td className="data">{num(recent.covered ? r.openings / recent.covered : 0, 1)}</td>
+                  <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.venue, r.key), 1)}</td>
+                  <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.tournament, r.key), 1)}</td>
+                  <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.pro, r.key), 1)}</td>
                   <td className="data">{pct(r.openingShare, 0)}</td>
                   <td className="data">{num(r.dmgPerOpening, 1)}</td>
                 </tr>
@@ -1737,10 +1831,12 @@ function MovesSection({
         </table>
         <div className="hint">
           The first move of each conversion, over your most recent {recent.covered.toLocaleString()} games in this
-          filter. High damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to
-          see whether you're converting them. A short window makes the rare openings noisy — a move with a handful of
-          them can top the damage column on one good conversion. Moves below {minOpeningShare}% of your openings are
-          hidden.
+          filter. Venue, Tournament, and Pro are fixed openings-per-game benchmarks for {benchmarks.characterId === null
+            ? "your selected character"
+            : charName(benchmarks.characterId)}; a dash means that archive has no qualifying published sample. High
+          damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to see whether
+          you're converting them. A short window makes rare openings noisy. Moves below {minOpeningShare}% of your
+          openings are hidden.
         </div>
       </div>
 
