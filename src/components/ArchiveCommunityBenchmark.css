@@ -15,6 +15,9 @@
 .acb-move-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
 .acb-move-heading h3 { color: var(--muted); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
 .acb-move-heading select { min-width: 160px; }
+.acb-profile-controls { display: flex; align-items: flex-end; gap: 10px; }
+.acb-profile-controls input { width: 100px; }
+.acb-action-heading { margin-top: 20px; }
 .acb-execution-comparison-heading { margin-top: 20px; }
 .acb-execution-comparison tbody td:nth-child(2) { background: rgba(143, 127, 247, 0.06); }
 .acb-execution-comparison-note { margin-top: 8px; }
@@ -35,5 +38,6 @@
 
 @media (max-width: 700px) {
   .acb-heading, .acb-move-heading { align-items: stretch; flex-direction: column; }
-  .acb-heading label, .acb-heading select, .acb-move-heading select { width: 100%; }
+  .acb-heading label, .acb-heading select, .acb-move-heading select, .acb-profile-controls input { width: 100%; }
+  .acb-profile-controls { align-items: stretch; flex-direction: column; }
 }

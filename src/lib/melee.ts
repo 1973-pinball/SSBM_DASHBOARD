@@ -107,6 +107,12 @@ for (const [ids, key, label] of MOVE_GROUPS) {
 }
 
 const OTHER_MOVE: MoveGroup = { key: "other", label: "Other" };
+const ATTEMPT_TRACKED_MOVE_KEYS = new Set([
+  "jab", "dash", "ftilt", "utilt", "dtilt", "fsmash", "usmash", "dsmash",
+  "nair", "fair", "bair", "uair", "dair",
+]);
 
 export const moveGroup = (moveId: number): MoveGroup => MOVE_GROUP_BY_ID.get(moveId) ?? OTHER_MOVE;
 export const moveGroupLabel = (key: string): string => MOVE_GROUP_LABEL_BY_KEY.get(key) ?? OTHER_MOVE.label;
+/** Slippi's action counter reports initiations only for normals and aerials. */
+export const moveGroupTracksAttempts = (key: string): boolean => ATTEMPT_TRACKED_MOVE_KEYS.has(key);

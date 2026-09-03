@@ -745,13 +745,15 @@ select:disabled { opacity: 0.45; }
 .stage-rate b { position: absolute; inset: 0 9px 0 auto; display: flex; align-items: center; color: #18152a; font-family: var(--font-data); }
 .community-warmup { max-width: 720px; margin: 30px auto; padding: 28px; }
 .community-warmup .primary { margin-top: 16px; }
-.community-preview-progress { max-width: none; margin: 0 0 var(--gap); padding: 18px 22px; }
-.community-preview-progress h2 { margin: 4px 0 8px; font-size: 22px; }
-.community-preview-progress p { max-width: 1050px; font-size: 12px; line-height: 1.5; }
-.community-preview-progress .primary { margin-top: 10px; padding: 9px 14px; font-size: 12px; }
-.community-progress { height: 7px; margin-top: 12px; overflow: hidden; border-radius: 999px; background: var(--panel-2); }
+.community-preview-progress { max-width: none; margin: 0 0 var(--gap); padding: 9px 12px; }
+.community-preview-progress .eyebrow { font-size: 9px; line-height: 1.2; }
+.community-preview-progress h2 { margin: 2px 0 3px; font-size: 16px; line-height: 1.1; }
+.community-preview-progress p { max-width: none; margin: 0; font-size: 10px; line-height: 1.3; }
+.community-preview-progress .primary { flex: 0 0 auto; margin: 0; padding: 5px 9px; min-height: 0; font-size: 10px; }
+.community-progress { height: 4px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: var(--panel-2); }
 .community-progress span { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--win)); }
-.community-progress-label { margin-top: 6px; color: var(--muted); font-family: var(--font-data); font-size: 11px; }
+.community-progress-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 4px; }
+.community-progress-label { color: var(--muted); font-family: var(--font-data); font-size: 9px; line-height: 1.25; }
 .community-progress-label b { color: var(--text); }
 .community-placeholder { border-style: dashed; }
 .community-placeholder .community-card-value,
@@ -1780,7 +1782,9 @@ input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-off
 @media (pointer: coarse) {
   button,
   select,
-  input[type="text"] { min-height: 44px; }
+  input[type="text"],
+  input[type="number"] { min-height: 44px; }
+  .community-preview-progress .primary { min-height: 44px; }
   td, th { padding-top: 10px; padding-bottom: 10px; }
   .matrix td.cell { min-height: 48px; }
 }

@@ -129,13 +129,15 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           >
             <span style={{ width: `${progress}%` }} />
           </div>
-          <div className="community-progress-label">
-            <b>{hasSnapshot ? displaySnapshot.contributorCount.toLocaleString() : "—"}</b> / {nextMilestone.toLocaleString()} SSBM Stats users toward the next milestone ·{" "}
-            <b>{hasSnapshot ? displaySnapshot.playerGameCount.toLocaleString() : "—"}</b> opt-in player-games ·{" "}
-            <b>{archiveGames === null ? "—" : archiveGames.toLocaleString()}</b> historical games
-            {archivePlayerGames === null ? null : <> ({archivePlayerGames.toLocaleString()} player-games)</>}
+          <div className="community-progress-footer">
+            <div className="community-progress-label">
+              <b>{hasSnapshot ? displaySnapshot.contributorCount.toLocaleString() : "—"}</b> / {nextMilestone.toLocaleString()} SSBM Stats users toward the next milestone ·{" "}
+              <b>{hasSnapshot ? displaySnapshot.playerGameCount.toLocaleString() : "—"}</b> opt-in player-games ·{" "}
+              <b>{archiveGames === null ? "—" : archiveGames.toLocaleString()}</b> historical games
+              {archivePlayerGames === null ? null : <> ({archivePlayerGames.toLocaleString()} player-games)</>}
+            </div>
+            <button className="primary" onClick={onOpenAccount}>Review contribution settings</button>
           </div>
-          <button className="primary" onClick={onOpenAccount}>Review contribution settings</button>
           {error && <div className="error-note" role="alert">{error}</div>}
       </div>
 
@@ -300,12 +302,16 @@ function MoveAtlas({ snapshot, games, lookbackDays, onLookbackChange }: { snapsh
   const [characterId, setCharacterId] = useState(preferredCharacterId);
   const selectedCharacterId = chars.includes(characterId) ? characterId : preferredCharacterId;
   const rows = lookbackMoves.filter((m) => m.characterId === selectedCharacterId).sort((a, b) => b.damage - a.damage);
+  const execution = lookbackExecution.find((row) => row.characterId === selectedCharacterId);
+  const benchmark = snapshot.benchmarks.find((row) => row.characterId === selectedCharacterId);
   if (selectedCharacterId < 0) return <div className="panel empty-note">Choose a character to compare move samples.</div>;
   return <ArchiveMoveAtlasComparison
     games={games}
     characterId={selectedCharacterId}
     lookbackDays={lookbackDays}
     communityRows={rows}
+    communityExecution={execution}
+    communityBenchmark={benchmark}
     onCharacterChange={setCharacterId}
     controls={<>
       <label>Character<select value={selectedCharacterId} onChange={(event) => setCharacterId(Number(event.target.value))}>{chars.map((id) => <option key={id} value={id}>{charName(id)}</option>)}</select></label>

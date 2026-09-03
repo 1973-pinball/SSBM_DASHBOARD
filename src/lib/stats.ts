@@ -1,7 +1,7 @@
 import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame, TechCounts } from "./types";
-import { ACTION_LABELS, hasFullStats } from "./types";
+import { ACTION_LABELS, hasCurrentStats, hasFullStats } from "./types";
 import { INCLUDED_CHARACTER_ID_SET, INCLUDED_STAGE_ID_SET } from "./config";
-import { moveGroup } from "./melee";
+import { moveGroup, moveGroupTracksAttempts } from "./melee";
 
 /**
  * Every side is a character anyone could actually have picked. One malformed
@@ -874,6 +874,16 @@ export interface MoveRow {
 }
 
 /**
+ * v11/v12 records can carry move-attempt counts without the later tech schema,
+ * while older move rows have no attempt fields at all. Current records are
+ * known-capable even when every tracked move was unused; legacy records count
+ * only when an actual normal/aerial attempt field proves that capability.
+ */
+const hasMoveAttemptStats = (game: ResolvedGame, moves: PlayerSide["moveStats"]): boolean =>
+  moves !== undefined && (hasCurrentStats(game.rec) || Object.entries(moves).some(([moveId, move]) =>
+    move.attempts !== undefined && moveGroupTracksAttempts(moveGroup(Number(moveId)).key)));
+
+/**
  * Aggregate the per-game move stats into one row per move group. `covered` is
  * how many games actually carry move data (rows parsed before the moveStats
  * schema, and all teams games, have none).
@@ -881,11 +891,14 @@ export interface MoveRow {
 export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: number } {
   const agg = new Map<string, { label: string; landed: number; damage: number; kills: number; killPctSum: number; openings: number; openingDmg: number; lcS: number; lcF: number; attempts: number | null }>();
   let covered = 0;
+  let attemptCovered = 0;
   let totalDamage = 0, totalKills = 0, totalOpenings = 0;
   for (const g of games) {
     const ms = g.me.moveStats;
     if (!ms) continue;
     covered++;
+    const attemptsAvailable = hasMoveAttemptStats(g, ms);
+    if (attemptsAvailable) attemptCovered++;
     for (const [idStr, m] of Object.entries(ms)) {
       const grp = moveGroup(Number(idStr));
       let a = agg.get(grp.key);
@@ -893,7 +906,7 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
         a = { label: grp.label, landed: 0, damage: 0, kills: 0, killPctSum: 0, openings: 0, openingDmg: 0, lcS: 0, lcF: 0, attempts: null as number | null };
         agg.set(grp.key, a);
       }
-      if (m.attempts !== undefined) a.attempts = (a.attempts ?? 0) + m.attempts;
+      if (attemptsAvailable && m.attempts !== undefined) a.attempts = (a.attempts ?? 0) + m.attempts;
       a.landed += m.landed;
       a.damage += m.damage;
       a.kills += m.kills;
@@ -909,26 +922,29 @@ export function moveTable(games: ResolvedGame[]): { rows: MoveRow[]; covered: nu
   }
   const rows: MoveRow[] = Array.from(agg.entries())
     .filter(([, a]) => a.landed > 0 || a.lcS + a.lcF > 0)
-    .map(([key, a]) => ({
-      key,
-      label: a.label,
-      attempts: a.attempts,
-      attemptsPerGame: a.attempts !== null && covered ? a.attempts / covered : null,
-      landed: a.landed,
-      landedPerGame: covered ? a.landed / covered : 0,
-      damage: a.damage,
-      dmgPerGame: covered ? a.damage / covered : 0,
-      dmgShare: totalDamage > 0 ? a.damage / totalDamage : null,
-      avgDmgPerHit: a.landed ? a.damage / a.landed : null,
-      kills: a.kills,
-      killShare: totalKills > 0 ? a.kills / totalKills : null,
-      avgKillPct: a.kills ? a.killPctSum / a.kills : null,
-      openings: a.openings,
-      openingShare: totalOpenings > 0 ? a.openings / totalOpenings : null,
-      dmgPerOpening: a.openings ? a.openingDmg / a.openings : null,
-      lCancelAttempts: a.lcS + a.lcF,
-      lCancelPct: a.lcS + a.lcF > 0 ? a.lcS / (a.lcS + a.lcF) : null,
-    }))
+    .map(([key, a]) => {
+      const attempts = moveGroupTracksAttempts(key) && attemptCovered > 0 ? a.attempts ?? 0 : null;
+      return {
+        key,
+        label: a.label,
+        attempts,
+        attemptsPerGame: attempts !== null ? attempts / attemptCovered : null,
+        landed: a.landed,
+        landedPerGame: covered ? a.landed / covered : 0,
+        damage: a.damage,
+        dmgPerGame: covered ? a.damage / covered : 0,
+        dmgShare: totalDamage > 0 ? a.damage / totalDamage : null,
+        avgDmgPerHit: a.landed ? a.damage / a.landed : null,
+        kills: a.kills,
+        killShare: totalKills > 0 ? a.kills / totalKills : null,
+        avgKillPct: a.kills ? a.killPctSum / a.kills : null,
+        openings: a.openings,
+        openingShare: totalOpenings > 0 ? a.openings / totalOpenings : null,
+        dmgPerOpening: a.openings ? a.openingDmg / a.openings : null,
+        lCancelAttempts: a.lcS + a.lcF,
+        lCancelPct: a.lcS + a.lcF > 0 ? a.lcS / (a.lcS + a.lcF) : null,
+      };
+    })
     .sort((a, b) => b.damage - a.damage);
   return { rows, covered };
 }
@@ -953,14 +969,14 @@ export type MoveMetricKey =
  */
 const MV = {
   attempts: 0,
-  attemptsTracked: 1, // 1 when the move reported attempts at all — see MoveAgg
+  attemptGames: 1, // games that actually carry the attempt-count schema
   landed: 2,
   damage: 3,
   kills: 4,
   killPctSum: 5,
   lCancelSuccess: 6,
   lCancelTotal: 7,
-  games: 8, // games carrying move data at all, the per-game denominators
+  games: 8, // games carrying move data at all, the other per-game denominators
   allDamage: 9, // whole arsenal, for the share columns
   allKills: 10,
 } as const;
@@ -969,13 +985,13 @@ const MV_STRIDE = 11;
 /**
  * Each move-table column as a numerator/denominator pair, so a windowed value
  * is a ratio of sliding sums. The denominators differ on purpose: per-game
- * rates divide by the games that carry move data, shares by that window's
- * whole-arsenal total, and the quality columns (avg damage, avg kill %,
- * L-cancel) by their own event count — so a window in which the move went
- * unused reads as no data rather than as a zero, which is a different claim.
+ * rates divide by the games that carry their schema (attempts exclude older
+ * rows without attempt counters), shares by that window's whole-arsenal total,
+ * and the quality columns (avg damage, avg kill %, L-cancel) by their own event
+ * count — so an unavailable measurement never becomes a fabricated zero.
  */
 const MOVE_METRICS: Record<MoveMetricKey, { num: number; den: number; scale: number }> = {
-  attemptsPerGame: { num: MV.attempts, den: MV.attemptsTracked, scale: 1 },
+  attemptsPerGame: { num: MV.attempts, den: MV.attemptGames, scale: 1 },
   landedPerGame: { num: MV.landed, den: MV.games, scale: 1 },
   dmgPerGame: { num: MV.damage, den: MV.games, scale: 1 },
   dmgShare: { num: MV.damage, den: MV.allDamage, scale: 100 },
@@ -1010,6 +1026,7 @@ function moveSlices(
   const ms = g[side].moveStats;
   if (ms) {
     gameCount = 1;
+    const attemptsAvailable = hasMoveAttemptStats(g, ms);
     for (const idStr in ms) {
       const m = ms[Number(idStr)];
       if (!m) continue;
@@ -1020,7 +1037,6 @@ function moveSlices(
       const base = moveIndex * MV_STRIDE;
       if (m.attempts !== undefined) {
         out[base + MV.attempts] = out[base + MV.attempts]! + m.attempts;
-        out[base + MV.attemptsTracked] = 1;
       }
       out[base + MV.landed] = out[base + MV.landed]! + m.landed;
       out[base + MV.damage] = out[base + MV.damage]! + m.damage;
@@ -1029,6 +1045,11 @@ function moveSlices(
       out[base + MV.lCancelSuccess] = out[base + MV.lCancelSuccess]! + (m.lcSuccess ?? 0);
       out[base + MV.lCancelTotal] =
         out[base + MV.lCancelTotal]! + (m.lcSuccess ?? 0) + (m.lcFail ?? 0);
+    }
+    if (attemptsAvailable) {
+      for (let moveIndex = 0; moveIndex < moveCount; moveIndex++) {
+        out[moveIndex * MV_STRIDE + MV.attemptGames] = 1;
+      }
     }
   }
   for (let moveIndex = 0; moveIndex < moveCount; moveIndex++) {
@@ -1046,10 +1067,11 @@ function moveSlices(
  *
  * Single pass, and only a window's worth of slices is held (the ring buffer
  * above), which is what keeps it cheap on a 30k-game library even though the
- * picker refits it on every dropdown change. `null` wherever the window has no
- * denominator — a move never thrown, an aerial before its first landing, or a
- * column that move doesn't report — and the chart draws those as gaps, since a
- * zero there would read as "attempted it and got nothing".
+ * picker refits it on every dropdown change. Tracked attempts use every
+ * attempt-capable game carrying move data as their denominator, so a window
+ * where the move was not initiated correctly reads zero without treating an
+ * older schema as zero. `null` is reserved for an unavailable denominator or
+ * a column the move does not report, and the chart draws those as gaps.
  */
 export function moveMetricSeries(
   games: ResolvedGame[],
@@ -1115,7 +1137,9 @@ export function moveMetricSeriesMany(
       index: i + 1,
       date: dayLabel(g.date),
       values: keys.map((_, moveIndex) =>
-        denSums[moveIndex]! > 0 ? (numSums[moveIndex]! / denSums[moveIndex]!) * scale : null,
+        metric === "attemptsPerGame" && !moveGroupTracksAttempts(keys[moveIndex]!)
+          ? null
+          : denSums[moveIndex]! > 0 ? (numSums[moveIndex]! / denSums[moveIndex]!) * scale : null,
       ),
     });
   }

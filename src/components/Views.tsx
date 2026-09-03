@@ -1,11 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { LineChart, Line, XAxis, YAxis, Tooltip, Legend, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Account, ActionCounts, PlayerSide, ResolvedGame } from "../lib/types";
-import { ACTION_LABELS, codeShort } from "../lib/types";
+import { ACTION_LABELS, codeShort, hasCurrentStats } from "../lib/types";
 import { matchupMatrix, byStage, byOpponent, byOppCharacter, computeSets, setsSummary, executionSummary, rollingExecutionSeries, ROLLING_WINDOW, MAX_SERIES_POINTS, actionAverages, actionImpact, moveTable, moveImpact, moveMetricSeriesMany, neutralSummary, perGameSeries, stageCharMatrix } from "../lib/stats";
 import type { ExecMetricKey, ExecutionSummary, GameSet, MoveMetricKey, MoveRow, SetsSummary } from "../lib/stats";
 import { pct, num, int, shortDate, duration, winRateColor } from "../lib/format";
-import { charName, moveGroup, stageName } from "../lib/melee";
+import { charName, moveGroup, moveGroupTracksAttempts, stageName } from "../lib/melee";
 import { Kpi } from "./Kpi";
 import { axisStyle, tooltipStyle, gridStyle, dayTick, OPP_SERIES_COLOR } from "./chartStyle";
 import { activateOnKey } from "../lib/a11y";
@@ -1212,16 +1212,18 @@ function hasOpponentMoveMetric(
   moveKeys: ReadonlySet<string>,
   metric: MoveMetricKey,
 ): boolean {
+  const hasTrackedAttemptMove = metric === "attemptsPerGame" && [...moveKeys].some(moveGroupTracksAttempts);
   for (const game of games) {
     const moves = game.opp.moveStats;
     if (!moves) continue;
+    if (hasTrackedAttemptMove && (hasCurrentStats(game.rec) || Object.entries(moves).some(([moveId, move]) =>
+      move.attempts !== undefined && moveGroupTracksAttempts(moveGroup(Number(moveId)).key)))) return true;
     if (metric === "landedPerGame" || metric === "dmgPerGame" || metric === "killsPerGame") return true;
     for (const [moveId, move] of Object.entries(moves)) {
       const selected = moveKeys.has(moveGroup(Number(moveId)).key);
       if (metric === "dmgShare" && move.damage > 0) return true;
       if (metric === "killShare" && move.kills > 0) return true;
       if (!selected) continue;
-      if (metric === "attemptsPerGame" && move.attempts !== undefined) return true;
       if (metric === "avgDmgPerHit" && move.landed > 0) return true;
       if (metric === "avgKillPct" && move.kills > 0) return true;
       if (metric === "lCancelPct" && (move.lcSuccess ?? 0) + (move.lcFail ?? 0) > 0) return true;
@@ -1430,7 +1432,7 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
                     key={key}
                     type="linear"
                     dataKey={key}
-                    name={`${style.label} · ${move.label}`}
+                    name={`${style.key === "community" ? "≈ SSBM Stats" : style.label} · ${move.label}`}
                     stroke={style.color}
                     strokeWidth={1.5}
                     strokeDasharray={style.dash}
@@ -1448,8 +1450,9 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
             is the figure the Move effectiveness table below shows. The chart spans all{" "}
             {games.length.toLocaleString()} games in this filter
             {games.length > MAX_SERIES_POINTS ? `, sampled down to ${MAX_SERIES_POINTS.toLocaleString()} points` : ""}.
-            Gaps are windows with no denominator — games you never threw it in — rather than zeroes, which would claim
-            you threw it and got nothing.
+            Attempted/game correctly reaches zero when you did not initiate the move; gaps mean the selected metric is
+            unavailable, such as initiation counts for specials and throws. SSBM Stats move rates are approximate because
+            public game counts are privacy-rounded; damage and kill shares cover published move rows.
           </div>
           <BenchmarkFootnote benchmarks={benchmarks} />
         </>
@@ -1740,34 +1743,53 @@ function MovesSection({
             <tr>
               <th>Move</th>
               <th className="data">Attempted / game</th>
+              <th className="data">Venue / game</th>
+              <th className="data">Tournament / game</th>
+              <th className="data">Pro / game</th>
               <th className="data">Landed / game</th>
-              <th className="data">Dmg / game</th>
               <th className="data">Dmg share</th>
-              <th className="data">Avg dmg / hit</th>
-              <th className="data">Kills</th>
               <th className="data">Kill share</th>
-              <th className="data">Avg kill %</th>
               <th className="data">L-cancel</th>
             </tr>
           </thead>
           <tbody>
-            {visibleEffectivenessRows.map((r) => (
-              <tr key={r.key}>
-                <td>{r.label}</td>
-                <td className="data">{r.attemptsPerGame !== null ? num(r.attemptsPerGame, 1) : "—"}</td>
-                <td className="data">{num(r.landedPerGame, 1)}</td>
-                <td className="data">{num(r.dmgPerGame, 1)}</td>
-                <td className="data">{pct(r.dmgShare, 0)}</td>
-                <td className="data">{num(r.avgDmgPerHit, 1)}</td>
-                <td className="data">{r.kills.toLocaleString()}</td>
-                <td className="data">{pct(r.killShare, 0)}</td>
-                <td className="data">{r.avgKillPct !== null ? `${num(r.avgKillPct, 0)}%` : "—"}</td>
-                <td className="data" title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}>
-                  {pct(r.lCancelPct)}
-                  {r.lCancelAttempts > 0 && <span className="sample-note">{r.lCancelAttempts.toLocaleString()} att.</span>}
-                </td>
-              </tr>
-            ))}
+            {visibleEffectivenessRows.map((r) => {
+              const venueAttempts = archiveMoveBenchmark(benchmarks.venue, r.key, "attemptsPerGame");
+              const tournamentAttempts = archiveMoveBenchmark(benchmarks.tournament, r.key, "attemptsPerGame");
+              const comparisonAttempts = tournamentAttempts ?? venueAttempts;
+              const comparisonGames = tournamentAttempts !== null
+                ? benchmarks.tournament?.game_count ?? 0
+                : benchmarks.venue?.game_count ?? 0;
+              const comparisonLabel = tournamentAttempts !== null ? "tournament" : "venue";
+              const difference = r.attemptsPerGame === null
+                ? null
+                : actionRateDifference(r.attemptsPerGame, comparisonAttempts, recent.covered, comparisonGames);
+              const localValue = r.attemptsPerGame !== null ? num(r.attemptsPerGame, 1) : "—";
+              return (
+                <tr key={r.key}>
+                  <td>{r.label}</td>
+                  <td
+                    className={`data ${difference ? `community-diff-${difference.direction}` : ""}`}
+                    style={actionRateDifferenceStyle(difference)}
+                    title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined}
+                    aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}
+                  >
+                    {localValue}
+                    {difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}
+                  </td>
+                  <td className="data">{num(venueAttempts, 1)}</td>
+                  <td className="data">{num(tournamentAttempts, 1)}</td>
+                  <td className="data">{num(archiveMoveBenchmark(benchmarks.pro, r.key, "attemptsPerGame"), 1)}</td>
+                  <td className="data">{num(r.landedPerGame, 1)}</td>
+                  <td className="data">{pct(r.dmgShare, 0)}</td>
+                  <td className="data">{pct(r.killShare, 0)}</td>
+                  <td className="data" title={r.lCancelAttempts ? `${r.lCancelAttempts.toLocaleString()} attempts` : undefined}>
+                    {pct(r.lCancelPct)}
+                    {r.lCancelAttempts > 0 && <span className="sample-note">{r.lCancelAttempts.toLocaleString()} att.</span>}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
         <div className="hint">
@@ -1775,9 +1797,10 @@ function MovesSection({
           career averages. Attempted counts every initiation (whiffs included) and is tracked for normals and aerials
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
-          headline rate, which corrects for edge-cancels). Avg kill % is the opponent's percent when the move closed a
-          stock — a high number on a kill move means you're fishing with it stale. Moves below {minDamageShare}% of
-          your damage are hidden.
+          headline rate, which corrects for edge-cancels). Venue, Tournament, and Pro show fixed attempted-per-game
+          references for your benchmark character. Your attempted-per-game cell compares with Tournament, or Venue
+          when Tournament is unavailable; brighter red or blue means a larger difference. Moves below {minDamageShare}%
+          of your damage are hidden.
         </div>
       </div>
 
@@ -1816,17 +1839,37 @@ function MovesSection({
             </tr>
           </thead>
           <tbody>
-            {visibleOpeningRows.map((r) => (
+            {visibleOpeningRows.map((r) => {
+              const mine = recent.covered ? r.openings / recent.covered : 0;
+              const venueRate = archiveMoveOpeningsPerGame(benchmarks.venue, r.key);
+              const tournamentRate = archiveMoveOpeningsPerGame(benchmarks.tournament, r.key);
+              const comparisonRate = tournamentRate ?? venueRate;
+              const comparisonGames = tournamentRate !== null
+                ? benchmarks.tournament?.game_count ?? 0
+                : benchmarks.venue?.game_count ?? 0;
+              const comparisonLabel = tournamentRate !== null ? "tournament" : "venue";
+              const difference = actionRateDifference(mine, comparisonRate, recent.covered, comparisonGames);
+              const localValue = num(mine, 1);
+              return (
                 <tr key={r.key}>
                   <td>{r.label}</td>
-                  <td className="data">{num(recent.covered ? r.openings / recent.covered : 0, 1)}</td>
-                  <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.venue, r.key), 1)}</td>
-                  <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.tournament, r.key), 1)}</td>
+                  <td
+                    className={`data ${difference ? `community-diff-${difference.direction}` : ""}`}
+                    style={actionRateDifferenceStyle(difference)}
+                    title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined}
+                    aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}
+                  >
+                    {localValue}
+                    {difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}
+                  </td>
+                  <td className="data">{num(venueRate, 1)}</td>
+                  <td className="data">{num(tournamentRate, 1)}</td>
                   <td className="data">{num(archiveMoveOpeningsPerGame(benchmarks.pro, r.key), 1)}</td>
                   <td className="data">{pct(r.openingShare, 0)}</td>
                   <td className="data">{num(r.dmgPerOpening, 1)}</td>
                 </tr>
-              ))}
+              );
+            })}
           </tbody>
         </table>
         <div className="hint">
@@ -1836,7 +1879,8 @@ function MovesSection({
             : charName(benchmarks.characterId)}; a dash means that archive has no qualifying published sample. High
           damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to see whether
           you're converting them. A short window makes rare openings noisy. Moves below {minOpeningShare}% of your
-          openings are hidden.
+          openings are hidden. Your openings-per-game cell uses the same red-above/blue-below benchmark gradient as
+          attempted move usage.
         </div>
       </div>
 

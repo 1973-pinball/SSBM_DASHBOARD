@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type {
+  CommunityBenchmarkRow,
+  CommunityExecutionRow,
   CommunityLookbackDays,
   CommunityMatchupRow,
   CommunityMoveRow,
@@ -18,8 +20,8 @@ import {
   type ArchiveProOption,
   type ArchiveRollup,
 } from "../lib/publicArchive";
-import { moveTable } from "../lib/stats";
-import type { ResolvedGame } from "../lib/types";
+import { actionAverages, executionSummary, moveTable } from "../lib/stats";
+import { ACTION_LABELS, type ActionCounts, type ResolvedGame } from "../lib/types";
 import "./ArchiveCommunityBenchmark.css";
 
 interface ArchiveAtlasState {
@@ -484,13 +486,15 @@ function groupArchiveMoves(row: ArchiveRollup | null): Map<string, GroupedArchiv
 }
 
 type MoveMetric = "attempts" | "landed" | "damage" | "kills" | "killPct";
+type MoveSortKey = "move" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
 
 function localMoveValue(move: ReturnType<typeof moveTable>["rows"][number] | undefined, metric: MoveMetric, games: number) {
   return formatMoveMetric(localMoveMetric(move, metric, games), metric);
 }
 
 function communityMoveValue(move: CommunityMoveRow | undefined, metric: MoveMetric, totalDamage: number) {
-  return formatMoveMetric(communityMoveMetric(move, metric, totalDamage), metric);
+  const value = formatMoveMetric(communityMoveMetric(move, metric, totalDamage), metric);
+  return value === "—" || metric === "killPct" ? value : `≈${value}`;
 }
 
 function archiveMoveValue(move: GroupedArchiveMove | undefined, metric: MoveMetric, row: ArchiveRollup | null) {
@@ -555,11 +559,61 @@ function differenceStyle(difference: ReturnType<typeof moveDifference>): CSSProp
   } as CSSProperties;
 }
 
+const ratio = (numerator: number, denominator: number): number | null => denominator > 0 ? numerator / denominator : null;
+
+function archiveActionPerGame(row: ArchiveRollup | null, key: keyof ActionCounts): number | null {
+  if (!row || row.game_count <= 0) return null;
+  const value = row.metrics.actions?.[key];
+  return value === undefined ? null : value / row.game_count;
+}
+
+function communityActionPerGame(row: CommunityExecutionRow | undefined, key: keyof ActionCounts): number | null {
+  if (!row || row.games <= 0 || !row.actionCounts) return null;
+  return row.actionCounts[key] / row.games;
+}
+
+type ExecutionProfileField = "lCancel" | "groundTech" | "wallTech" | "ipm";
+
+interface ExecutionProfileSource {
+  key: string;
+  label: string;
+  sampleNote: string;
+  fields: Record<ExecutionProfileField, number | null>;
+  actionPerGame: (key: keyof ActionCounts) => number | null;
+  approximateActions?: boolean;
+}
+
+const EXECUTION_PROFILE_ROWS: { key: ExecutionProfileField; label: string; percent: boolean }[] = [
+  { key: "lCancel", label: "L-cancel success", percent: true },
+  { key: "groundTech", label: "Ground tech success", percent: true },
+  { key: "wallTech", label: "Wall tech success", percent: true },
+  { key: "ipm", label: "Inputs / min", percent: false },
+];
+
+function archiveExecutionFields(row: ArchiveRollup | null): Record<ExecutionProfileField, number | null> {
+  if (!row) return { lCancel: null, groundTech: null, wallTech: null, ipm: null };
+  const metrics = row.metrics;
+  const groundSuccess = metrics.techInPlace + metrics.techToward + metrics.techAway;
+  return {
+    lCancel: ratio(metrics.lCancelSuccess, metrics.lCancelSuccess + metrics.lCancelFail),
+    groundTech: ratio(groundSuccess, groundSuccess + metrics.techMissed),
+    wallTech: ratio(metrics.wallTechSuccess, metrics.wallTechSuccess + metrics.wallTechMissed),
+    ipm: ratio(metrics.inputsPerMinuteSum, metrics.inputsPerMinuteSamples),
+  };
+}
+
+function normalizedMinimum(input: string): number {
+  const value = Number(input);
+  return input.trim() !== "" && Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 1;
+}
+
 export function ArchiveMoveAtlasComparison({
   games,
   characterId,
   lookbackDays,
   communityRows,
+  communityExecution,
+  communityBenchmark,
   controls,
   onCharacterChange,
 }: {
@@ -567,16 +621,25 @@ export function ArchiveMoveAtlasComparison({
   characterId: number;
   lookbackDays: CommunityLookbackDays;
   communityRows: CommunityMoveRow[];
+  communityExecution?: CommunityExecutionRow;
+  communityBenchmark?: CommunityBenchmarkRow;
   controls?: ReactNode;
   onCharacterChange?: (characterId: number) => void;
 }) {
   const archive = useArchiveAtlas(characterId);
   const [metric, setMetric] = useState<MoveMetric>("attempts");
+  const [sort, setSort] = useState<{ key: MoveSortKey; direction: SortDirection }>({ key: "you", direction: "desc" });
+  const [minAttemptsInput, setMinAttemptsInput] = useState("1");
+  const [minActionsInput, setMinActionsInput] = useState("1");
+  const minAttempts = normalizedMinimum(minAttemptsInput);
+  const minActions = normalizedMinimum(minActionsInput);
   const localGames = useMemo(
     () => localLookback(games, lookbackDays).filter((game) => game.me.characterId === characterId),
     [characterId, games, lookbackDays],
   );
   const localMoves = useMemo(() => moveTable(localGames), [localGames]);
+  const localActions = useMemo(() => actionAverages(localGames), [localGames]);
+  const localExecution = useMemo(() => executionSummary(localGames, Number.MAX_SAFE_INTEGER), [localGames]);
   const localByKey = new Map(localMoves.rows.map((row) => [row.key, row]));
   const communityByKey = new Map(communityRows.map((row) => [row.moveKey, row]));
   const broadRow = archive.fieldRows.find((row) => row.population === "broad" && row.opponent_character_id === null && row.stage_id === null) ?? null;
@@ -587,28 +650,200 @@ export function ArchiveMoveAtlasComparison({
   const conservativeMoves = groupArchiveMoves(conservativeRow);
   const proAggregateMoves = groupArchiveMoves(proAggregateRow);
   const proMoves = groupArchiveMoves(proRow);
-  const comparisonRow = conservativeRow ?? broadRow;
-  const comparisonMoves = conservativeRow ? conservativeMoves : broadMoves;
+  useEffect(() => {
+    if (!archive.selectedPro && sort.key === "pro") setSort({ key: "you", direction: "desc" });
+  }, [archive.selectedPro, sort.key]);
   const communityDamage = communityRows.reduce((sum, row) => sum + row.damage, 0);
+  const sortValue = (key: string, source: MoveSortKey): number | null => {
+    if (source === "you") return localMoveMetric(localByKey.get(key), metric, localMoves.covered);
+    if (source === "community") return communityMoveMetric(communityByKey.get(key), metric, communityDamage);
+    if (source === "venue") return archiveMoveMetric(broadMoves.get(key), metric, broadRow);
+    if (source === "tournament") return archiveMoveMetric(conservativeMoves.get(key), metric, conservativeRow);
+    if (source === "proAggregate") return archiveMoveMetric(proAggregateMoves.get(key), metric, proAggregateRow);
+    if (source === "pro") return archiveMoveMetric(proMoves.get(key), metric, proRow);
+    return null;
+  };
   const moveKeys = [...new Set([...localByKey.keys(), ...communityByKey.keys(), ...broadMoves.keys(), ...conservativeMoves.keys(), ...proAggregateMoves.keys(), ...proMoves.keys()])]
-    .sort((a, b) => Math.max(localByKey.get(b)?.dmgShare ?? 0, communityDamage > 0 ? (communityByKey.get(b)?.damage ?? 0) / communityDamage : 0) - Math.max(localByKey.get(a)?.dmgShare ?? 0, communityDamage > 0 ? (communityByKey.get(a)?.damage ?? 0) / communityDamage : 0));
+    .filter((key) => {
+      const rates = [
+        localMoveMetric(localByKey.get(key), "attempts", localMoves.covered),
+        archiveMoveMetric(broadMoves.get(key), "attempts", broadRow),
+        archiveMoveMetric(conservativeMoves.get(key), "attempts", conservativeRow),
+        archiveMoveMetric(proAggregateMoves.get(key), "attempts", proAggregateRow),
+      ].filter((value): value is number => value !== null);
+      // Specials and throws have no attempt counter. Keep those unknown rows so
+      // this filter cannot erase their landed, damage, or kill metrics.
+      return rates.length === 0 || rates.some((value) => value >= minAttempts);
+    })
+    .sort((a, b) => {
+      const aLabel = localByKey.get(a)?.label ?? moveGroupLabel(a);
+      const bLabel = localByKey.get(b)?.label ?? moveGroupLabel(b);
+      if (sort.key === "move") {
+        const order = aLabel.localeCompare(bLabel);
+        return sort.direction === "asc" ? order : -order;
+      }
+      const left = sortValue(a, sort.key);
+      const right = sortValue(b, sort.key);
+      if (left === null && right === null) return aLabel.localeCompare(bLabel);
+      if (left === null) return 1;
+      if (right === null) return -1;
+      const direction = sort.direction === "asc" ? 1 : -1;
+      return direction * (left - right) || aLabel.localeCompare(bLabel);
+    });
   const communityGames = communityRows.length
     ? Math.max(...communityRows.map((row) => row.characterGames))
     : null;
+  const localActionByKey = new Map(localActions.rows.map((row) => [row.key, row.perGame]));
+  const archiveFields = {
+    broad: archiveExecutionFields(broadRow),
+    conservative: {
+      ...archiveExecutionFields(conservativeRow),
+      lCancel: conservativeRow?.metrics.playerBalanced?.lCancel.equalWeightMean
+        ?? archiveExecutionFields(conservativeRow).lCancel,
+    },
+    proAggregate: archiveExecutionFields(proAggregateRow),
+    pro: archiveExecutionFields(proRow),
+  };
+  const executionSources: ExecutionProfileSource[] = [
+    {
+      key: "you",
+      label: "You",
+      sampleNote: `${localActions.covered.toLocaleString()} measured games`,
+      fields: {
+        lCancel: localExecution.lCancel === null ? null : localExecution.lCancel / 100,
+        groundTech: localExecution.groundTechSuccess === null ? null : localExecution.groundTechSuccess / 100,
+        wallTech: localExecution.wallTechSuccess === null ? null : localExecution.wallTechSuccess / 100,
+        ipm: localExecution.ipm,
+      },
+      actionPerGame: (key) => localActionByKey.get(key) ?? null,
+    },
+    {
+      key: "community",
+      label: "SSBM Stats",
+      sampleNote: communityExecution ? `≈${communityExecution.games.toLocaleString()} player-games` : "sample not yet publishable",
+      fields: {
+        lCancel: lookbackDays !== null || communityBenchmark?.lCancel?.p50 === null || communityBenchmark?.lCancel?.p50 === undefined
+          ? communityExecution?.lCancelSuccess === null || communityExecution?.lCancelSuccess === undefined
+            ? null
+            : communityExecution.lCancelSuccess / 100
+          : communityBenchmark.lCancel.p50 / 100,
+        groundTech: communityExecution?.groundTechSuccess === null || communityExecution?.groundTechSuccess === undefined ? null : communityExecution.groundTechSuccess / 100,
+        wallTech: null,
+        ipm: lookbackDays === null ? communityBenchmark?.inputsPerMinute?.p50 ?? null : null,
+      },
+      actionPerGame: (key) => communityActionPerGame(communityExecution, key),
+      approximateActions: true,
+    },
+    {
+      key: "venue",
+      label: "Venue archive",
+      sampleNote: `${broadRow?.game_count.toLocaleString() ?? "—"} player-games`,
+      fields: archiveFields.broad,
+      actionPerGame: (key) => archiveActionPerGame(broadRow, key),
+    },
+    {
+      key: "tournament",
+      label: "Tournament archive",
+      sampleNote: `${conservativeRow?.game_count.toLocaleString() ?? "—"} player-games`,
+      fields: archiveFields.conservative,
+      actionPerGame: (key) => archiveActionPerGame(conservativeRow, key),
+    },
+    {
+      key: "pro-aggregate",
+      label: "Pro tournament archive",
+      sampleNote: `${proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · ${countNoun(proAggregateRow?.identified_player_count, "pro")}`,
+      fields: archiveFields.proAggregate,
+      actionPerGame: (key) => archiveActionPerGame(proAggregateRow, key),
+    },
+  ];
+  if (archive.selectedPro) executionSources.push({
+    key: `pro:${archive.selectedPro.id}`,
+    label: archive.selectedPro.display_name,
+    sampleNote: `${proRow?.game_count.toLocaleString() ?? "—"} games`,
+    fields: archiveFields.pro,
+    actionPerGame: (key) => archiveActionPerGame(proRow, key),
+  });
+  const visibleActions = ACTION_LABELS.filter(({ key }) => executionSources
+    .filter((source) => !source.approximateActions && !source.key.startsWith("pro:"))
+    .some((source) => (source.actionPerGame(key) ?? -Infinity) >= minActions));
+  const sortableMoveHeader = (key: MoveSortKey, label: string, sampleNote?: string) => {
+    const active = sort.key === key;
+    return <th className={`atlas-sortable${key === "move" ? "" : " data"}${active ? " active" : ""}`} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
+      <button type="button" onClick={() => setSort((previous) => previous.key === key
+        ? { key, direction: previous.direction === "asc" ? "desc" : "asc" }
+        : { key, direction: key === "move" ? "asc" : "desc" })}>
+        {label}<span aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
+      </button>
+      {sampleNote && <span className="sample-note">{sampleNote}</span>}
+    </th>;
+  };
 
   return (
     <ArchiveFrame archive={archive} eyebrow="Move Atlas" title={`Your ${charName(characterId)} move profile across the full field`} controls={controls} onCharacterChange={onCharacterChange}>
-      <div className="acb-move-heading"><h3>Move profile</h3><label>Measure<select value={metric} onChange={(event) => setMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label></div>
-      {moveKeys.length ? <div className="table-scroll"><table><thead><tr><th>Move</th><th className="data">You<span className="sample-note">{localMoves.covered.toLocaleString()} games</span></th><th className="data">SSBM Stats<span className="sample-note">{communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`}</span></th><th className="data">Venue archive<span className="sample-note">{broadRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Tournament archive<span className="sample-note">{conservativeRow?.game_count.toLocaleString() ?? "—"} player-games</span></th><th className="data">Pro tournament archive<span className="sample-note">{proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · {countNoun(proAggregateRow?.identified_player_count, "pro")}</span></th>{archive.selectedPro && <th className="data">{archive.selectedPro.display_name}<span className="sample-note">{proRow?.game_count.toLocaleString() ?? "—"} games</span></th>}</tr></thead><tbody>
+      <div className="acb-move-heading">
+        <h3>Move profile</h3>
+        <div className="acb-profile-controls">
+          <label>Minimum attempts / game<span className="number-suffix unitless"><input type="number" min="0" max="100" step="1" inputMode="numeric" value={minAttemptsInput} onChange={(event) => setMinAttemptsInput(event.target.value)} onBlur={() => setMinAttemptsInput(String(minAttempts))} /></span></label>
+          <label>Measure<select value={metric} onChange={(event) => setMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label>
+        </div>
+      </div>
+      {moveKeys.length ? <div className="table-scroll"><table><thead><tr>{sortableMoveHeader("move", "Move")}{sortableMoveHeader("you", "You", `${localMoves.covered.toLocaleString()} games`)}{sortableMoveHeader("community", "SSBM Stats", communityGames === null ? "sample not yet publishable" : `≈${communityGames.toLocaleString()} player-games`)}{sortableMoveHeader("venue", "Venue archive", `${broadRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("tournament", "Tournament archive", `${conservativeRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("proAggregate", "Pro tournament archive", `${proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · ${countNoun(proAggregateRow?.identified_player_count, "pro")}`)}{archive.selectedPro && sortableMoveHeader("pro", archive.selectedPro.display_name, `${proRow?.game_count.toLocaleString() ?? "—"} games`)}</tr></thead><tbody>
         {moveKeys.map((key) => {
           const mine = localMoveMetric(localByKey.get(key), metric, localMoves.covered);
-          const field = archiveMoveMetric(comparisonMoves.get(key), metric, comparisonRow);
-          const difference = moveDifference(mine, field, metric, localMoves.covered, comparisonRow?.game_count ?? 0);
+          const tournamentField = archiveMoveMetric(conservativeMoves.get(key), metric, conservativeRow);
+          const venueField = archiveMoveMetric(broadMoves.get(key), metric, broadRow);
+          const field = tournamentField ?? venueField;
+          const comparisonGames = tournamentField !== null ? conservativeRow?.game_count ?? 0 : broadRow?.game_count ?? 0;
+          const difference = moveDifference(mine, field, metric, localMoves.covered, comparisonGames);
           const localValue = localMoveValue(localByKey.get(key), metric, localMoves.covered);
-          const comparisonLabel = conservativeRow ? "tournament" : "venue";
+          const comparisonLabel = tournamentField !== null ? "tournament" : "venue";
           return <tr key={key}><td>{localByKey.get(key)?.label ?? moveGroupLabel(key)}</td><td className={`data ${difference ? `community-diff-${difference.direction}` : ""}`} style={differenceStyle(difference)} title={difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined} aria-label={difference ? `${localValue}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}>{localValue}{difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}</td><td className="data">{communityMoveValue(communityByKey.get(key), metric, communityDamage)}</td><td className="data">{archiveMoveValue(broadMoves.get(key), metric, broadRow)}</td><td className="data">{archiveMoveValue(conservativeMoves.get(key), metric, conservativeRow)}</td><td className="data">{archiveMoveValue(proAggregateMoves.get(key), metric, proAggregateRow)}</td>{archive.selectedPro && <td className="data">{archiveMoveValue(proMoves.get(key), metric, proRow)}</td>}</tr>;
         })}
-      </tbody></table></div> : <div className="empty-note">No move sample is available for this character.</div>}
+      </tbody></table></div> : <div className="empty-note">No tracked move clears the current attempts-per-game minimum. Lower it to see more.</div>}
+
+      <div className="acb-move-heading acb-action-heading">
+        <h3>Execution &amp; actions</h3>
+        <div className="acb-profile-controls">
+          <label>Minimum actions / game<span className="number-suffix unitless"><input type="number" min="0" max="100" step="1" inputMode="numeric" value={minActionsInput} onChange={(event) => setMinActionsInput(event.target.value)} onBlur={() => setMinActionsInput(String(minActions))} /></span></label>
+        </div>
+      </div>
+      <div className="table-scroll acb-execution-comparison">
+        <table>
+          <thead><tr><th>Metric</th>{executionSources.map((source) => <th className="data" key={source.key}>{source.label}<span className="sample-note">{source.sampleNote}</span></th>)}</tr></thead>
+          <tbody>
+            {EXECUTION_PROFILE_ROWS.map((row) => <tr key={row.key}><td>{row.label}</td>{executionSources.map((source) => <td className="data" key={source.key}>{row.percent ? pct(source.fields[row.key]) : num(source.fields[row.key], 1)}</td>)}</tr>)}
+            {visibleActions.map(({ key, label }) => {
+              const mine = executionSources[0]!.actionPerGame(key);
+              const tournamentField = archiveActionPerGame(conservativeRow, key);
+              const venueField = archiveActionPerGame(broadRow, key);
+              const field = tournamentField ?? venueField;
+              const comparisonGames = tournamentField !== null ? conservativeRow?.game_count ?? 0 : broadRow?.game_count ?? 0;
+              const difference = moveDifference(mine, field, "attempts", localActions.covered, comparisonGames);
+              const comparisonLabel = tournamentField !== null ? "tournament" : "venue";
+              return <tr key={key}><td>{key === "grabs" ? "Grab attempts" : label} / game</td>{executionSources.map((source, index) => {
+                const value = source.actionPerGame(key);
+                const formatted = value === null ? "—" : `${source.approximateActions ? "≈" : ""}${num(value, 2)}`;
+                return <td
+                  className={`data ${index === 0 && difference ? `community-diff-${difference.direction}` : ""}`}
+                  style={index === 0 ? differenceStyle(difference) : undefined}
+                  title={index === 0 && difference ? `${difference.direction === "above" ? "Higher than" : "Lower than"} the ${comparisonLabel} archive benchmark; highlight intensity reflects the size of the difference` : undefined}
+                  aria-label={index === 0 && difference ? `${formatted}, ${difference.direction === "above" ? "higher" : "lower"} than the ${comparisonLabel} archive benchmark` : undefined}
+                  key={source.key}
+                >{formatted}{index === 0 && difference && <span className="community-diff-cue" aria-hidden="true">{difference.direction === "above" ? "▲" : "▼"}</span>}</td>;
+              })}</tr>;
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div className="hint acb-execution-comparison-note">
+        Action rows are per game so every published source can be compared directly. SSBM Stats action rates are
+        approximate because its public game denominator is privacy-rounded; its per-game move rates are approximate
+        for the same reason, and its damage/kill shares cover published move rows. These values do not decide which
+        rows clear the minimum. Unknown move-attempt rows, including specials and throws, remain visible. Both minimums default to 1,
+        and selecting a named pro does not change which rows appear. The You action cells compare with Tournament, or
+        Venue when Tournament is unavailable, and brighter red or blue means a larger difference. SSBM Stats inputs
+        per minute is an all-history median, so it stays blank for bounded lookbacks.
+      </div>
     </ArchiveFrame>
   );
 }
