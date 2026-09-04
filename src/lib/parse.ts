@@ -555,6 +555,7 @@ function parseReplayWithMode(id: string, path: string, buf: ArrayBuffer, bounded
     const post = latestFrame?.players?.[p.playerIndex]?.post;
     return {
       port: (p.port ?? p.playerIndex + 1) as number,
+      isCpu: p.type === 1,
       connectCode: p.connectCode || null,
       displayName: p.displayName || null,
       characterId: p.characterId ?? -1,
@@ -765,6 +766,7 @@ function buildHeaderRecord(
 
   const players: PlayerSide[] = settings.players.map((p) => ({
     port: (p.port ?? p.playerIndex + 1) as number,
+    isCpu: p.type === 1,
     connectCode: p.connectCode || null,
     displayName: p.displayName || null,
     characterId: p.characterId ?? -1,

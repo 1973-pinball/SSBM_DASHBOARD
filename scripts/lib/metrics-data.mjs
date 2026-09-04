@@ -12,6 +12,10 @@ export const SECTIONS = [
     title: "Results",
     items: [
       {
+        term: "CPU games",
+        def: "Games containing any CPU player are excluded from your dashboard, including teams with a CPU teammate. Older synced games with unknown CPU status stay excluded until you refresh your replay folder.",
+      },
+      {
         term: "Win rate",
         def: "Wins ÷ decided games. Games under 30 seconds, and quit-outs with no determinable result, stay out of the denominator — they read “n/a” in the game log.",
       },
