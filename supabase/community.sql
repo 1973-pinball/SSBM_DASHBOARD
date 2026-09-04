@@ -807,7 +807,7 @@ begin
   if not changed and exists (
     select 1 from public.community_snapshot
     where snapshot_id = 'current' and min_contributors = 1 and min_games = 100
-      and payload->>'thresholdVersion' = 'unique-players-v1'
+      and payload->>'thresholdVersion' = 'unique-players-v2'
   ) then
     return;
   end if;
@@ -848,6 +848,23 @@ begin
            sum(wins)::bigint as wins
     from matchup_user, params
     group by lookback_days, character_id, opponent_character_id, stage_id, game_type,
+             params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
+  ),
+  character_stage_rollup as (
+    -- Combine private opponent cells before suppression. Each game's opponent
+    -- character is fixed, so these distinct-game counts are disjoint. Mirrors
+    -- already count once for unique_games and twice for player samples.
+    select lookback_days, character_id, stage_id, game_type,
+      sum(games)::bigint as games,
+      count(distinct user_id)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
+      sum(wins)::bigint as wins
+    from matchup_user, params
+    where stage_id <> 0
+    group by lookback_days, character_id, stage_id, game_type,
              params.min_players, params.min_games
     having sum(unique_games) >= params.min_games
        and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
@@ -1098,7 +1115,7 @@ begin
   ),
   assembled as (
     select jsonb_build_object(
-      'thresholdVersion', 'unique-players-v1',
+      'thresholdVersion', 'unique-players-v2',
       'matchups', coalesce((select jsonb_agg(jsonb_build_object(
         'lookbackDays', lookback_days,
         'characterId', character_id, 'opponentCharacterId', opponent_character_id,
@@ -1110,6 +1127,16 @@ begin
         'wins', public.pub_bucket(wins, 25),
         'winRate', round(wins::numeric / games, 3)
       ) order by games desc) from matchup_rollup), '[]'::jsonb),
+      'characterStages', coalesce((select jsonb_agg(jsonb_build_object(
+        'lookbackDays', lookback_days, 'characterId', character_id,
+        'stageId', stage_id, 'gameType', game_type,
+        'games', public.pub_bucket(games, 25),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
+        'wins', public.pub_bucket(wins, 25),
+        'winRate', round(wins::numeric / games, 3)
+      ) order by games desc) from character_stage_rollup), '[]'::jsonb),
       'benchmarks', coalesce((select jsonb_agg(jsonb_build_object(
         'characterId', character_id, 'games', public.pub_bucket(games, 25),
         'contributors', greatest(1, public.pub_bucket(contributors, 5)),

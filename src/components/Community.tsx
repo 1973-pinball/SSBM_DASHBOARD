@@ -38,6 +38,7 @@ const EMPTY_COMMUNITY_SNAPSHOT: CommunitySnapshot = {
   minPlayers: COMMUNITY_MIN_PLAYERS,
   minGames: COMMUNITY_MIN_GAMES,
   matchups: [],
+  characterStages: [],
   benchmarks: [],
   moves: [],
   execution: [],
@@ -333,8 +334,10 @@ function MoveAtlas({ snapshot, games, ...lookback }: { snapshot: CommunitySnapsh
 
 function StageLab({ snapshot, games, ...lookback }: { snapshot: CommunitySnapshot; games: ResolvedGame[] } & LookbackProps) {
   const overall = snapshot.matchups.filter((r) => allHistory(r) && r.stageId === 0 && r.gameType === "all").sort((a, b) => b.games - a.games);
+  const characterStages = snapshot.characterStages.filter((r) => allHistory(r) && r.gameType === "all");
   const chars = [...new Set([
     ...overall.map((row) => row.characterId),
+    ...characterStages.map((row) => row.characterId),
     ...games.map((game) => game.me.characterId),
   ])]
     .sort((a, b) => charName(a).localeCompare(charName(b)));
@@ -363,6 +366,7 @@ function StageLab({ snapshot, games, ...lookback }: { snapshot: CommunitySnapsho
     opponentId={selectedOpponentId}
     lookbackGames={lookback.lookbackGames}
     communityRows={rows}
+    communityCharacterStages={characterStages.filter((r) => r.characterId === selectedCharacterId)}
     onCharacterChange={(id) => {
       setCharacterId(id);
       if (selectedOpponentId === null) return;

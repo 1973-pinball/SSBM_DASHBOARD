@@ -487,15 +487,11 @@ function formatArchiveMove(move: GroupedArchiveMove | undefined, metric: MoveMet
 
 function formatCommunityMove(move: CommunityMoveRow | undefined, metric: MoveMetric, totalDamage: number): string {
   if (!move || move.characterGames === 0) return "—";
-  if (metric === "attempts") return approximateMoveMetric(formatMoveMetric(move.attempts === null ? null : move.attempts / move.characterGames, metric));
-  if (metric === "landed") return approximateMoveMetric(formatMoveMetric(move.landed / move.characterGames, metric));
-  if (metric === "damage") return approximateMoveMetric(formatMoveMetric(ratio(move.damage, totalDamage), metric));
-  if (metric === "kills") return approximateMoveMetric(formatMoveMetric(move.kills / move.characterGames, metric));
+  if (metric === "attempts") return formatMoveMetric(move.attempts === null ? null : move.attempts / move.characterGames, metric);
+  if (metric === "landed") return formatMoveMetric(move.landed / move.characterGames, metric);
+  if (metric === "damage") return formatMoveMetric(ratio(move.damage, totalDamage), metric);
+  if (metric === "kills") return formatMoveMetric(move.kills / move.characterGames, metric);
   return formatMoveMetric(move.kills > 0 ? move.killPctSum / move.kills : null, metric);
-}
-
-function approximateMoveMetric(value: string): string {
-  return value === "—" ? value : `≈${value}`;
 }
 
 function localMoveMetric(move: ReturnType<typeof moveTable>["rows"][number] | undefined, metric: MoveMetric, covered: number): number | null {

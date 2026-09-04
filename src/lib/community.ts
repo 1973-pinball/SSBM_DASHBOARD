@@ -35,6 +35,9 @@ export interface CommunityMatchupRow extends CommunityLookbackRow, CommunitySamp
   winRate: number;
 }
 
+/** All opponents combined before applying publication thresholds. */
+export type CommunityCharacterStageRow = Omit<CommunityMatchupRow, "opponentCharacterId">;
+
 export interface CommunityBenchmarkRow extends CommunitySampleSize {
   characterId: number; // -1 = every character
   games: number;
@@ -118,6 +121,7 @@ export interface CommunitySnapshot {
   minPlayers: number;
   minGames: number;
   matchups: CommunityMatchupRow[];
+  characterStages: CommunityCharacterStageRow[];
   benchmarks: CommunityBenchmarkRow[];
   moves: CommunityMoveRow[];
   execution: CommunityExecutionRow[];
@@ -129,6 +133,7 @@ export interface CommunitySnapshot {
 
 interface SnapshotPayload {
   matchups?: CommunityMatchupRow[];
+  characterStages?: CommunityCharacterStageRow[];
   benchmarks?: CommunityBenchmarkRow[];
   moves?: CommunityMoveRow[];
   execution?: CommunityExecutionRow[];
@@ -180,7 +185,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     minContributors: COMMUNITY_MIN_CONTRIBUTORS,
     minPlayers: COMMUNITY_MIN_PLAYERS,
     minGames: COMMUNITY_MIN_GAMES,
-    matchups: [], benchmarks: [], moves: [], execution: [], months: [], characters: [], stages: [],
+    matchups: [], characterStages: [], benchmarks: [], moves: [], execution: [], months: [], characters: [], stages: [],
   };
   const payload = (data.payload ?? {}) as SnapshotPayload;
   return {
@@ -191,6 +196,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     minPlayers: Number(data.min_players ?? COMMUNITY_MIN_PLAYERS),
     minGames: Number(data.min_games ?? COMMUNITY_MIN_GAMES),
     matchups: (payload.matchups ?? []).map(withLookback).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
+    characterStages: (payload.characterStages ?? []).map(withLookback).filter((r) => playable(r.characterId)),
     benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
     moves: (payload.moves ?? []).map(withLookback).filter((r) => playable(r.characterId)),
     execution: (payload.execution ?? []).map(normalizeExecution).filter((r) => playable(r.characterId)),
@@ -265,6 +271,7 @@ export function demoCommunitySnapshot(contributedGames: ResolvedGame[]): Communi
   }
   type MatchAgg = Omit<CommunityMatchupRow, "contributors" | "winRate">;
   const matchups = new Map<string, MatchAgg>();
+  const characterStages = new Map<string, Omit<MatchAgg, "opponentCharacterId">>();
   const months = new Map<string, { playerGames: number; seconds: number; ranked: number; unranked: number; direct: number; offline: number }>();
   const chars = new Map<number, { playerGames: number; wins: number; decided: number }>();
   const stages = new Map<number, { playerGames: number; seconds: number }>();
@@ -295,6 +302,12 @@ export function demoCommunitySnapshot(contributedGames: ResolvedGame[]): Communi
         const key = `${lookbackDays ?? "max"}:${g.me.characterId}:${g.opp.characterId}:${stageId}:${gameType}`;
         const row = matchups.get(key) ?? { lookbackDays, characterId: g.me.characterId, opponentCharacterId: g.opp.characterId, stageId, gameType, games: 0, wins: 0 };
         row.games++; if (g.isWin) row.wins++; matchups.set(key, row);
+        if (stageId !== 0) {
+          const stageKey = `${lookbackDays ?? "max"}:${g.me.characterId}:${stageId}:${gameType}`;
+          const stageRow = characterStages.get(stageKey) ?? { lookbackDays, characterId: g.me.characterId, stageId, gameType, games: 0, wins: 0 };
+          stageRow.games++; if (g.isWin) stageRow.wins++;
+          characterStages.set(stageKey, stageRow);
+        }
       }
     }
   }
@@ -384,6 +397,7 @@ export function demoCommunitySnapshot(contributedGames: ResolvedGame[]): Communi
     minGames: COMMUNITY_MIN_GAMES,
     demo: true,
     matchups: [...matchups.values()].filter((r) => r.games >= 5).map((r) => ({ ...r, contributors: Math.max(25, Math.min(84, Math.round(r.games / 3))), winRate: r.wins / r.games })),
+    characterStages: [...characterStages.values()].filter((r) => r.games >= 5).map((r) => ({ ...r, contributors: Math.max(25, Math.min(84, Math.round(r.games / 3))), winRate: r.wins / r.games })),
     benchmarks,
     moves,
     execution,

@@ -176,6 +176,46 @@ try {
   await putGames(7, cohort(50, 24, true));
   await refresh();
   await assertSuppressed("50 mirror games cannot pass as 100 distinct games");
+
+  // All-opponent stages must include opponents whose individual cells are
+  // suppressed, and union shared participants rather than summing cell counts.
+  const mixedOpponents = (opponents) => Object.fromEntries(
+    Object.entries(cohort(100, opponents)).map(([key, record], i) => [key, {
+      ...record,
+      players: [record.players[0], { ...record.players[1], characterId: i % 2 ? 20 : 2 }],
+      winnerIndex: i < 37 ? 0 : 1,
+    }]),
+  );
+  await putGames(7, mixedOpponents(23));
+  await refresh();
+  await assertSuppressed("the same participants in multiple opponent cells still count only once");
+  await putGames(7, mixedOpponents(24));
+  await refresh();
+  data = await snapshot();
+  assert.equal(data.matchups.length, 0, "each exact matchup has only 50 games");
+  const marthStage = data.characterStages.find((r) => r.characterId === 9 && r.stageId === 31 && r.gameType === "all" && r.lookbackDays === null);
+  assert.equal(marthStage.games, 100, "all opponents qualify together before matchup suppression");
+  assert.equal(marthStage.uniqueGames, 100);
+  assert.equal(marthStage.players, 25);
+  assert.equal(marthStage.contributors, 1, "one contributor across multiple opponent cells is counted once");
+  assert.equal(marthStage.winRate, 0.37, "the rate uses all decided results before count rounding");
+  assert.ok(data.characterStages.every((r) => r.characterId === 9 && r.stageId === 31), "no other character or stage borrows this sample");
+  const splitStages = mixedOpponents(24);
+  Object.values(splitStages).forEach((record, i) => { if (i % 2) record.stageId = 32; });
+  await putGames(7, splitStages);
+  await refresh();
+  assert.equal((await snapshot()).characterStages.length, 0, "each stage must independently reach 100 games");
+  const unknownResults = mixedOpponents(24);
+  unknownResults["cohort-0"].winnerIndex = null;
+  await putGames(7, unknownResults);
+  await refresh();
+  assert.equal((await snapshot()).characterStages.length, 0, "unknown outcomes cannot meet the decided-game threshold");
+  await putGames(7, cohort(100, 24, true));
+  await refresh();
+  const mirrorStage = (await snapshot()).characterStages.find((r) => r.gameType === "all" && r.lookbackDays === null);
+  assert.equal(mirrorStage.games, 200);
+  assert.equal(mirrorStage.uniqueGames, 100);
+  assert.equal(mirrorStage.winRate, 0.5);
   await consent(7, false);
   await refresh();
 
@@ -212,6 +252,12 @@ try {
   const before = JSON.stringify(data);
   await refresh();
   assert.equal(JSON.stringify(await snapshot()), before, "unchanged refresh is stable");
+  const privateBefore = await scalar("select jsonb_agg(to_jsonb(r) order by user_id) as value from public.community_user_rollups r");
+  await db.exec(`update public.community_snapshot set payload = jsonb_set(payload - 'characterStages', '{thresholdVersion}', '"unique-players-v1"')`);
+  await refresh();
+  assert.equal(JSON.stringify(await snapshot()), before, "old snapshots republish the new stage totals without queued users");
+  assert.deepEqual(await scalar("select jsonb_agg(to_jsonb(r) order by user_id) as value from public.community_user_rollups r"), privateBefore,
+    "adding character stages reuses the existing private cache without rebuilding it");
   await db.exec(schema);
   await refresh();
   assert.equal(await sampleCount(), 250, "migration and backfill are repeatable");

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import type {
   CommunityBenchmarkRow,
+  CommunityCharacterStageRow,
   CommunityExecutionRow,
   CommunityMatchupRow,
   CommunityMoveRow,
@@ -214,7 +215,7 @@ function RateCell({ value, showSample = true }: { value: RateSummary | null | un
   return (
     <td className={`data atlas-rate-cell ${value.games < 10 ? "atlas-low-sample" : ""}`}>
       <b style={{ color: winRateColor(rate) }}>{pct(rate)}</b>
-      {showSample && <span className="sample-note">{value.games.toLocaleString()} {value.contributors === undefined ? "games" : "player-games"}{value.players === undefined ? "" : ` · ≈${value.players.toLocaleString()} players`}</span>}
+      {showSample && <span className="sample-note">{value.games.toLocaleString()} games</span>}
     </td>
   );
 }
@@ -226,7 +227,7 @@ function rateColumnSample(
   const available = values.filter((value): value is RateSummary => value !== null && value !== undefined);
   if (available.length === 0 && source !== "you") return "No published sample";
   const games = available.reduce((total, value) => total + value.decided, 0);
-  return `${source === "community" ? "≈" : ""}${games.toLocaleString()} ${source === "you" ? "games" : "player-games"}`;
+  return `${games.toLocaleString()} ${source === "you" ? "games" : "player-games"}`;
 }
 
 function archiveRateMap(rows: ArchiveRollup[], population: "broad" | "conservative", stageId: number | null) {
@@ -357,19 +358,15 @@ function archiveStageMap(rows: ArchiveRollup[], population: "broad" | "conservat
     .map((row) => [row.stage_id!, rateSummary(row)!]));
 }
 
-function communityStageMap(rows: CommunityMatchupRow[], opponentId: number): Map<number, RateSummary> {
-  const result = new Map<number, RateSummary>();
-  for (const row of rows) {
-    if (row.opponentCharacterId !== opponentId) continue;
-    const value = result.get(row.stageId) ?? { wins: 0, decided: 0, games: 0 };
-    value.wins += row.wins;
-    value.decided += row.games;
-    value.games += row.games;
-    value.contributors = row.contributors;
-    value.players = row.players;
-    result.set(row.stageId, value);
-  }
-  return result;
+function communityStageMap(rows: CommunityCharacterStageRow[]): Map<number, RateSummary> {
+  return new Map(rows.map((row) => [row.stageId, {
+    // Use the published rate; the separate wins and games counts are rounded.
+    wins: row.winRate * row.games,
+    decided: row.games,
+    games: row.games,
+    contributors: row.contributors,
+    players: row.players,
+  }]));
 }
 
 export function ArchiveStageAtlasComparison({
@@ -378,6 +375,7 @@ export function ArchiveStageAtlasComparison({
   opponentId,
   lookbackGames,
   communityRows,
+  communityCharacterStages,
   controls,
   onCharacterChange,
 }: {
@@ -386,6 +384,7 @@ export function ArchiveStageAtlasComparison({
   opponentId: number | null;
   lookbackGames: number;
   communityRows: CommunityMatchupRow[];
+  communityCharacterStages: CommunityCharacterStageRow[];
   controls?: ReactNode;
   onCharacterChange?: (characterId: number) => void;
 }) {
@@ -406,13 +405,10 @@ export function ArchiveStageAtlasComparison({
     }
     return rows;
   }, [characterId, games, lookbackGames, opponentId]);
-  // The published community snapshot has privacy-thresholded matchup cells,
-  // not a true character-by-stage all-opponents aggregate. Summing those cells
-  // would silently omit suppressed matchups, so leave this source blank until
-  // that exact aggregate is published.
-  const community = opponentId === null
-    ? new Map<number, RateSummary>()
-    : communityStageMap(communityRows, opponentId);
+  // All-opponent totals are published independently, before matchup suppression.
+  const community = communityStageMap(opponentId === null
+    ? communityCharacterStages
+    : communityRows.filter((row) => row.opponentCharacterId === opponentId));
   const broad = archiveStageMap(archive.fieldRows, "broad", opponentId);
   const conservative = archiveStageMap(archive.fieldRows, "conservative", opponentId);
   const proAggregate = archiveStageMap(archive.proAggregateRows, "conservative", opponentId);
@@ -465,7 +461,6 @@ export function ArchiveStageAtlasComparison({
         {stages.map((id) => <tr key={id}><td>{stageName(id)}</td><RateCell value={local.get(id)} /><RateCell value={community.get(id)} /><RateCell value={broad.get(id)} /><RateCell value={conservative.get(id)} /><RateCell value={proAggregate.get(id)} />{archive.selectedPro && <RateCell value={pro.get(id)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No stage-specific sample is available for this matchup.</div>}
       <div className="hint">Header samples count decided results in the displayed stages; unknown outcomes are excluded. SSBM Stats counts are approximate. My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
-      {opponentId === null && <div className="hint">SSBM Stats stays blank in All opponents mode until a privacy-safe character-by-stage aggregate is published; your local and archive columns are exact all-opponent totals.</div>}
     </ArchiveFrame>
   );
 }
@@ -514,8 +509,7 @@ function localMoveValue(move: ReturnType<typeof moveTable>["rows"][number] | und
 }
 
 function communityMoveValue(move: CommunityMoveRow | undefined, metric: MoveMetric, totalDamage: number) {
-  const value = formatMoveMetric(communityMoveMetric(move, metric, totalDamage), metric);
-  return value === "—" || metric === "killPct" ? value : `≈${value}`;
+  return formatMoveMetric(communityMoveMetric(move, metric, totalDamage), metric);
 }
 
 function archiveMoveValue(move: GroupedArchiveMove | undefined, metric: MoveMetric, row: ArchiveRollup | null) {
@@ -734,7 +728,7 @@ export function ArchiveMoveAtlasComparison({
     {
       key: "community",
       label: "SSBM Stats",
-      sampleNote: communityExecution ? `≈${communityExecution.games.toLocaleString()} player-games` : "sample not yet publishable",
+      sampleNote: communityExecution ? `${communityExecution.games.toLocaleString()} player-games` : "sample not yet publishable",
       fields: {
         lCancel: communityBenchmark?.lCancel?.p50 === null || communityBenchmark?.lCancel?.p50 === undefined
           ? communityExecution?.lCancelSuccess === null || communityExecution?.lCancelSuccess === undefined
@@ -801,7 +795,7 @@ export function ArchiveMoveAtlasComparison({
           <label>Measure<select value={metric} onChange={(event) => setMetric(event.target.value as MoveMetric)}><option value="attempts">Attempts / game</option><option value="landed">Landed / game</option><option value="damage">Damage share</option><option value="kills">Kills / game</option><option value="killPct">Average kill %</option></select></label>
         </div>
       </div>
-      {moveKeys.length ? <div className="table-scroll"><table><thead><tr>{sortableMoveHeader("move", "Move")}{sortableMoveHeader("you", "You", `${localMoves.covered.toLocaleString()} games`)}{sortableMoveHeader("community", "SSBM Stats", communityGames === null ? "sample not yet publishable" : `≈${communityGames.toLocaleString()} player-games`)}{sortableMoveHeader("venue", "Venue archive", `${broadRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("tournament", "Tournament archive", `${conservativeRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("proAggregate", "Pro tournament archive", `${proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · ${countNoun(proAggregateRow?.identified_player_count, "pro")}`)}{archive.selectedPro && sortableMoveHeader("pro", archive.selectedPro.display_name, `${proRow?.game_count.toLocaleString() ?? "—"} games`)}</tr></thead><tbody>
+      {moveKeys.length ? <div className="table-scroll"><table><thead><tr>{sortableMoveHeader("move", "Move")}{sortableMoveHeader("you", "You", `${localMoves.covered.toLocaleString()} games`)}{sortableMoveHeader("community", "SSBM Stats", communityGames === null ? "sample not yet publishable" : `${communityGames.toLocaleString()} player-games`)}{sortableMoveHeader("venue", "Venue archive", `${broadRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("tournament", "Tournament archive", `${conservativeRow?.game_count.toLocaleString() ?? "—"} player-games`)}{sortableMoveHeader("proAggregate", "Pro tournament archive", `${proAggregateRow?.game_count.toLocaleString() ?? "—"} player-games · ${countNoun(proAggregateRow?.identified_player_count, "pro")}`)}{archive.selectedPro && sortableMoveHeader("pro", archive.selectedPro.display_name, `${proRow?.game_count.toLocaleString() ?? "—"} games`)}</tr></thead><tbody>
         {moveKeys.map((key) => {
           const mine = localMoveMetric(localByKey.get(key), metric, localMoves.covered);
           const tournamentField = archiveMoveMetric(conservativeMoves.get(key), metric, conservativeRow);
@@ -836,7 +830,7 @@ export function ArchiveMoveAtlasComparison({
               const comparisonLabel = tournamentField !== null ? "tournament" : "venue";
               return <tr key={key}><td>{key === "grabs" ? "Grab attempts" : label} / game</td>{executionSources.map((source, index) => {
                 const value = source.actionPerGame(key);
-                const formatted = value === null ? "—" : `${source.approximateActions ? "≈" : ""}${num(value, 2)}`;
+                const formatted = num(value, 2);
                 return <td
                   className={`data ${index === 0 && difference ? `community-diff-${difference.direction}` : ""}`}
                   style={index === 0 ? differenceStyle(difference) : undefined}

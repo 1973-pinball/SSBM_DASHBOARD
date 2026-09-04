@@ -1463,7 +1463,7 @@ function MoveMetricChart({ games, moves, benchmarks }: { games: ResolvedGame[]; 
                     key={key}
                     type="linear"
                     dataKey={key}
-                    name={`${style.key === "community" ? "≈ SSBM Stats" : style.label} · ${move.label}`}
+                    name={`${style.label} · ${move.label}`}
                     stroke={style.color}
                     strokeWidth={1.5}
                     strokeDasharray={style.dash}

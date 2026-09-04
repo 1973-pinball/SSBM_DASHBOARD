@@ -106,6 +106,11 @@ try {
   assert.equal(community.playerGameCount, games.length * 2, "demo includes both sides and deduplicates uploads");
   assert.equal(community.characters.reduce((total, r) => total + r.playerGames, 0), games.length * 2);
   assert.ok(community.characters.some((r) => !games.some((g) => g.me.characterId === r.characterId)), "opponent-only characters appear in demo benchmarks");
+  for (const stage of community.characterStages.filter((r) => r.lookbackDays === null && r.gameType === "all")) {
+    const expected = games.filter((g) => g.rec.stageId === stage.stageId && g.isWin !== null)
+      .reduce((count, g) => count + Number(g.me.characterId === stage.characterId) + Number(g.opp.characterId === stage.characterId), 0);
+    assert.equal(stage.games, expected, "demo stage totals include both sides and every opponent before suppression");
+  }
   console.log("Archive filters passed: exact matchup, all characters, reset, missing data, weighted pros, and atlas compatibility.");
 } finally {
   await server.close();
