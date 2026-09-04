@@ -490,7 +490,10 @@ export default function App() {
       try {
         const files = await discover();
         if (files.length === 0) {
-          if (generation.current === gen) setPhase("landing");
+          if (generation.current === gen) {
+            setPipelineError("No .slp or .slpz replays were found in that folder. Select a folder containing replays; subfolders are included.");
+            setPhase("landing");
+          }
           return;
         }
         await runParsePipeline(
@@ -764,19 +767,6 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [phase]);
 
-  // React does not expose the file input's cancel event as an onCancel prop.
-  useEffect(() => {
-    const input = topbarFolderPickRef.current;
-    if (!input) return;
-    const cancelled = () => {
-      pickerBusy.current = false;
-      setPickingFolder(false);
-      lastFolderSyncAt.current = Date.now();
-    };
-    input.addEventListener("cancel", cancelled);
-    return () => input.removeEventListener("cancel", cancelled);
-  }, [phase, publicView]);
-
   // A background scan queries permissions only; reconnect prompts need a click.
   useEffect(() => {
     if (phase !== "dashboard" || isDemo || folders.length === 0 || autoSyncDone.current) return;
@@ -834,6 +824,12 @@ export default function App() {
       // selection its own namespace; content dedup still collapses repeat games.
       // Materialize before resetting the input because FileList can be live.
       const files = discoverFromFileList(list, fromFolder ? `folder-${crypto.randomUUID()}` : "");
+      if (files.length === 0) {
+        setPipelineError(fromFolder
+          ? "No .slp or .slpz replays were found in that folder. Select a folder containing replays; subfolders are included."
+          : "No .slp or .slpz replay files were selected.");
+        return;
+      }
       if (phase === "dashboard") void syncPickedFiles(files);
       else void startPipeline(async () => files);
     },
@@ -848,14 +844,16 @@ export default function App() {
   /** Add a root in place. Cancelling never disconnects folders or clears stats. */
   const onConnectFolder = useCallback(() => {
     if (scanBusy.current || pickerBusy.current) return;
-    pickerBusy.current = true;
-    setPickingFolder(true);
     lastFolderSyncAt.current = Date.now();
     void navigator.storage?.persist?.().catch(() => false);
     if (!supportsFsAccess) {
+      // File inputs have no picker promise, and some browsers never emit cancel.
+      // Do not lock the dashboard waiting for a selection that may never arrive.
       topbarFolderPickRef.current?.click();
       return;
     }
+    pickerBusy.current = true;
+    setPickingFolder(true);
     const gen = generation.current;
     void (async () => {
       try {
@@ -1090,7 +1088,7 @@ export default function App() {
                 style={{ display: "none" }}
                 {...({ webkitdirectory: "" } as Record<string, string>)}
                 onChange={(e) => {
-                  if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files, true);
+                  if (e.currentTarget.files) onPickFiles(e.currentTarget.files, true);
                   e.currentTarget.value = "";
                 }}
               />

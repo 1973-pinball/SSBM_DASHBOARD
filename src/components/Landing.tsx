@@ -105,7 +105,7 @@ export function Landing({
         // Non-standard attribute; enables folder selection in Chromium/Firefox/Safari.
         {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => {
-          if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files, true);
+          if (e.currentTarget.files) onPickFiles(e.currentTarget.files, true);
           e.currentTarget.value = "";
         }}
       />
