@@ -1,6 +1,6 @@
 import { Component, Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
-import { DEFAULT_FILTERS, hasFullStats, needsStatsRepair } from "./lib/types";
+import { DEFAULT_FILTERS, hasFullStats, hasKnownCpu, needsStatsRepair } from "./lib/types";
 import {
   discoverFromHandle,
   discoverFromFolders,
@@ -12,7 +12,7 @@ import {
 import { allRecords, clearAll, forgetCachedRecordIds, getMyAccounts, setMyAccounts, getReplayFolders, setReplayFolders, pruneDuplicates } from "./lib/db";
 import { accessibleReplayFolders, addReplayFolder, type ReplayFolder } from "./lib/folders";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
-import { dedupeRecords } from "./lib/dedupe";
+import { dedupeRecords, mergeCpuStatus } from "./lib/dedupe";
 import { generateDemoRecords, DEMO_ACCOUNTS } from "./lib/demo";
 import { Landing } from "./components/Landing";
 import { ProgressBar, IdentityPicker } from "./components/ProgressAndIdentity";
@@ -337,8 +337,11 @@ export default function App() {
         // Never let a preview overwrite the full record it was standing in for:
         // a late-delivered header batch can arrive after the full pass has
         // already replaced that game.
-        if (cur && hasFullStats(cur) && !hasFullStats(rec)) continue;
-        byId.set(rec.id, rec);
+        const next = cur
+          ? hasFullStats(cur) && !hasFullStats(rec) ? mergeCpuStatus(cur, rec) : mergeCpuStatus(rec, cur)
+          : rec;
+        if (next === cur) continue;
+        byId.set(rec.id, next);
         changed = true;
       }
       // Map preserves insertion order, so a replaced record keeps its position.
@@ -965,8 +968,12 @@ export default function App() {
   // resolving so no aggregate ever counts a game twice.
   const deduped = useMemo(() => dedupeRecords(records), [records]);
   const myCodes = useMemo(() => new Set(accounts.map((a) => a.code)), [accounts]);
-  const resolved = useMemo(() => resolveGames(deduped, myCodes), [deduped, myCodes]);
-  const resolvedTeams = useMemo(() => resolveTeamGames(deduped, myCodes), [deduped, myCodes]);
+  const allResolved = useMemo(() => resolveGames(deduped, myCodes, true), [deduped, myCodes]);
+  const allResolvedTeams = useMemo(() => resolveTeamGames(deduped, myCodes, true), [deduped, myCodes]);
+  const withoutCpu = useMemo(() => allResolved.filter((g) => !hasKnownCpu(g.rec)), [allResolved]);
+  const teamsWithoutCpu = useMemo(() => allResolvedTeams.filter((g) => !hasKnownCpu(g.rec)), [allResolvedTeams]);
+  const resolved = filters.includeCpuGames ? allResolved : withoutCpu;
+  const resolvedTeams = filters.includeCpuGames ? allResolvedTeams : teamsWithoutCpu;
   const filtered = useMemo(() => applyFilters(resolved, filters), [resolved, filters]);
   const filteredTeams = useMemo(() => applyTeamFilters(resolvedTeams, filters), [resolvedTeams, filters]);
   // Confirms a typed code actually occurs in the library — the identity step
@@ -985,7 +992,7 @@ export default function App() {
   const isTabPending = (id: Tab) => hasPreviews && NEEDS_FULL_STATS.has(id);
 
   // Never strand the user in a teams view they have no games for.
-  const hasTeamGames = resolvedTeams.length > 0;
+  const hasTeamGames = allResolvedTeams.length > 0;
   const showTeams = hasTeamGames && filters.format === "teams";
   const activePending = isTabPending(tab);
   const busy = phase === "parsing" || syncing !== null;
@@ -1220,6 +1227,9 @@ export default function App() {
             teamGames={resolvedTeams}
             hasTeamGames={hasTeamGames}
             accounts={accounts}
+            cpuGameCount={filters.format === "teams"
+              ? allResolvedTeams.length - teamsWithoutCpu.length
+              : allResolved.length - withoutCpu.length}
           />
           {/* 2v2 has no 1v1 matchup matrix or single opponent, so it gets one
               consolidated view rather than the singles tab set. */}

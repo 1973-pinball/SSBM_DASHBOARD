@@ -54,6 +54,9 @@ export interface MoveAgg {
 
 export interface PlayerSide {
   port: number;
+  /** Optional header evidence: true = CPU, false = human; absent = unrecorded,
+   * null = conflicting copies. Neither unknown state excludes a game. */
+  isCpu?: boolean | null;
   connectCode: string | null;
   displayName: string | null;
   characterId: number;
@@ -136,6 +139,11 @@ export function hasFullStats(rec: GameRecord): boolean {
  * so no Supabase schema migration is needed.
  */
 export const CURRENT_STATS_VERSION = 1;
+
+/** Only positive CPU evidence excludes a game; old records remain eligible. */
+export function hasKnownCpu(rec: GameRecord): boolean {
+  return rec.players.some((p) => p.isCpu === true);
+}
 
 /** Older records have no `techs`; a real zero-attempt game has an all-zero object. */
 export function hasCurrentStats(rec: GameRecord): boolean {
@@ -235,6 +243,7 @@ export function accountsError(accounts: Account[]): string | null {
 }
 
 export interface Filters {
+  includeCpuGames: boolean;
   format: Format;
   range: "all" | "7d" | "14d" | "30d" | "90d" | "1y";
   day: string | null; // local YYYY-MM-DD; overrides range when set
@@ -248,6 +257,7 @@ export interface Filters {
 }
 
 export const DEFAULT_FILTERS: Filters = {
+  includeCpuGames: false,
   format: "singles",
   range: "all",
   day: null,

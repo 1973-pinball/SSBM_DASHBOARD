@@ -59,6 +59,27 @@ function preferred(a: GameRecord, b: GameRecord): boolean {
   return a.id < b.id;
 }
 
+/** Preserve optional header evidence without replacing the chosen stats.
+ * A late old cloud copy must not erase a known CPU, and conflicting evidence
+ * stays included. An explicit null preserves that conflict across later merges. */
+export function mergeCpuStatus(keep: GameRecord, other: GameRecord): GameRecord {
+  let changed = false;
+  const players = keep.players.map((player) => {
+    const match = other.players.find((p) => p.port === player.port
+      && p.characterId === player.characterId && p.connectCode === player.connectCode);
+    if (!match) return player;
+    const current = player.isCpu;
+    const incoming = match.isCpu;
+    const conflict = current === null || incoming === null
+      || (typeof current === "boolean" && typeof incoming === "boolean" && current !== incoming);
+    const next = conflict ? null : current === undefined ? incoming : current;
+    if (next === current) return player;
+    changed = true;
+    return { ...player, isCpu: next };
+  });
+  return changed ? { ...keep, players } : keep;
+}
+
 /**
  * Drop the residue of a replay that was read while Slippi was still writing it.
  *
@@ -106,7 +127,8 @@ export function dedupeRecords(records: GameRecord[]): GameRecord[] {
   for (const rec of live) {
     const key = gameKey(rec);
     const cur = best.get(key);
-    if (cur === undefined || preferred(rec, cur)) best.set(key, rec);
+    if (cur === undefined) best.set(key, rec);
+    else best.set(key, preferred(rec, cur) ? mergeCpuStatus(rec, cur) : mergeCpuStatus(cur, rec));
   }
   return best.size === live.length ? live : [...best.values()];
 }

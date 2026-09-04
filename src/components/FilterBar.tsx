@@ -12,6 +12,7 @@ interface Props {
   teamGames: ResolvedTeamGame[];
   hasTeamGames: boolean;
   accounts: Account[];
+  cpuGameCount: number;
 }
 
 const GAME_TYPES: readonly GameType[] = ["ranked", "unranked", "direct", "offline", "unknown"];
@@ -26,7 +27,7 @@ function modeSummary(modes: GameType[] | null): string {
   return `${modes.length} modes`;
 }
 
-export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames, accounts }: Props) {
+export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames, accounts, cpuGameCount }: Props) {
   const isTeams = filters.format === "teams";
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -109,6 +110,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
   };
 
   const isDefault =
+    !filters.includeCpuGames &&
     filters.range === "all" &&
     filters.day === null &&
     filters.accountCode === null &&
@@ -128,6 +130,7 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
     "1y": "Last year",
   };
   const activeFilters: { key: string; label: string; clear: () => void }[] = [];
+  if (filters.includeCpuGames) activeFilters.push({ key: "cpu", label: "CPU games included", clear: () => set({ includeCpuGames: false }) });
   if (filters.range !== "all") activeFilters.push({ key: "range", label: rangeLabels[filters.range], clear: () => set({ range: "all" }) });
   if (filters.day) activeFilters.push({ key: "day", label: shortDate(new Date(`${filters.day}T12:00:00`)), clear: () => set({ day: null }) });
   if (filters.accountCode) {
@@ -156,6 +159,15 @@ export function FilterBar({ filters, setFilters, games, teamGames, hasTeamGames,
         <span className="filter-format-label">{isTeams ? "Teams · 2v2" : "Singles · 1v1"}</span>
       </div>
       <div className="filter-fields" id="dashboard-filter-fields">
+      {(cpuGameCount > 0 || filters.includeCpuGames) && (
+        <label title="Only games explicitly marked CPU are excluded. Games with unknown CPU status stay included.">
+          CPU games
+          <select value={filters.includeCpuGames ? "include" : "exclude"} onChange={(e) => set({ includeCpuGames: e.target.value === "include" })}>
+            <option value="exclude">Exclude confirmed ({cpuGameCount.toLocaleString()})</option>
+            <option value="include">Include confirmed</option>
+          </select>
+        </label>
+      )}
       {hasTeamGames && (
         <label>
           Format

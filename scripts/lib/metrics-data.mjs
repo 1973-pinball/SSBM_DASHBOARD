@@ -12,6 +12,10 @@ export const SECTIONS = [
     title: "Results",
     items: [
       {
+        term: "CPU games",
+        def: "Newly parsed games with a player explicitly marked CPU in the replay are excluded by default, including CPU teammates in doubles. Older games with unknown CPU status stay included. When confirmed CPU games are present, the CPU games filter lets you include them again. No saved games are deleted or reparsed for this filter.",
+      },
+      {
         term: "Win rate",
         def: "Wins ÷ decided games. Games under 30 seconds, and quit-outs with no determinable result, stay out of the denominator — they read “n/a” in the game log.",
       },

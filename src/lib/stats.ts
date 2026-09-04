@@ -1,5 +1,5 @@
 import type { ActionCounts, Filters, GameRecord, GameType, PlayerSide, ResolvedGame, ResolvedTeamGame, TechCounts } from "./types";
-import { ACTION_LABELS, hasCurrentStats, hasFullStats } from "./types";
+import { ACTION_LABELS, hasCurrentStats, hasFullStats, hasKnownCpu } from "./types";
 import { INCLUDED_CHARACTER_ID_SET, INCLUDED_STAGE_ID_SET } from "./config";
 import { moveGroup, moveGroupTracksAttempts } from "./melee";
 
@@ -90,10 +90,11 @@ export function codeGameCounts(records: GameRecord[]): Map<string, number> {
 
 // ---------- Resolution & filtering ----------
 
-export function resolveGames(records: GameRecord[], myCodes: Set<string>): ResolvedGame[] {
+export function resolveGames(records: GameRecord[], myCodes: Set<string>, includeCpuGames = false): ResolvedGame[] {
   const out: ResolvedGame[] = [];
   for (const rec of records) {
     if (rec.parseError || rec.isTeams || rec.players.length !== 2) continue;
+    if (!includeCpuGames && hasKnownCpu(rec)) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     if (!playableRoster(rec.players)) continue;
     const meIdx = rec.players.findIndex((p) => p.connectCode && myCodes.has(p.connectCode));
@@ -116,10 +117,11 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
  * (3v1, free-for-all with team flags, a missing teamId) is skipped rather than
  * guessed at, since a wrong teammate silently corrupts every team stat.
  */
-export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): ResolvedTeamGame[] {
+export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>, includeCpuGames = false): ResolvedTeamGame[] {
   const out: ResolvedTeamGame[] = [];
   for (const rec of records) {
     if (rec.parseError || !rec.isTeams || rec.players.length !== 4) continue;
+    if (!includeCpuGames && hasKnownCpu(rec)) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     if (!playableRoster(rec.players)) continue;
     const me = rec.players.find((p) => p.connectCode && myCodes.has(p.connectCode));
