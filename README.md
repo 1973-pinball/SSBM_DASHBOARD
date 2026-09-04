@@ -14,6 +14,14 @@ replays → browser workers → IndexedDB → React dashboard
 
 The installable PWA works offline, and content-based deduplication prevents copied or moved replays from being counted twice.
 
+Start with **Select replay folder**, then use **Add folder** on the dashboard to
+combine more folders without clearing stats or accounts. Each pick includes all
+subfolders. Chromium remembers every connected folder, and **Refresh** checks
+them all; folders that need permission can be reconnected without blocking the
+others. Other browsers support adding folders one at a time and require picking
+them again to import new replays. **Change folders** starts over and clears the
+local library.
+
 ## Community and tournament benchmarks
 
 The Community section compares your local character stats against four separate samples:

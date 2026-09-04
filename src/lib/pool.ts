@@ -1,6 +1,7 @@
 import type { GameRecord, ParsePassMode, ParseProgress } from "./types";
 import { cachedIds, putRecords } from "./db";
 import type { WorkerResult } from "../worker/parser.worker";
+import type { ReplayFolder } from "./folders";
 
 export interface DiscoveredFile {
   id: string;
@@ -44,21 +45,22 @@ const writtenJustNow = (f: File): boolean => {
 const GETFILE_CONCURRENCY = 64;
 
 /** Recursively walk a FileSystemDirectoryHandle collecting supported replay files. */
-export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix = ""): Promise<DiscoveredFile[]> {
+export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix = "", signal?: AbortSignal): Promise<DiscoveredFile[]> {
   // Phase 1: walk the tree (subdirectories in parallel), collecting handles.
   const found: { path: string; format: DiscoveredFile["format"]; handle: FileSystemFileHandle }[] = [];
   const walk = async (d: FileSystemDirectoryHandle, p: string): Promise<void> => {
-    const subdirs: Promise<void>[] = [];
+    const subdirs: { handle: FileSystemDirectoryHandle; path: string }[] = [];
     for await (const [name, handle] of d.entries()) {
+      signal?.throwIfAborted();
       const path = p ? `${p}/${name}` : name;
       if (handle.kind === "directory") {
-        subdirs.push(walk(handle as FileSystemDirectoryHandle, path));
+        subdirs.push({ handle: handle as FileSystemDirectoryHandle, path });
       } else {
         const format = replayFormat(name);
         if (format) found.push({ path, format, handle: handle as FileSystemFileHandle });
       }
     }
-    await Promise.all(subdirs);
+    await Promise.all(subdirs.map(({ handle, path }) => walk(handle, path)));
   };
   await walk(dir, prefix);
 
@@ -72,6 +74,7 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
   let next = 0;
   const lane = async () => {
     while (next < found.length) {
+      signal?.throwIfAborted();
       const i = next++;
       const entry = found[i]!;
       try {
@@ -92,13 +95,32 @@ export async function discoverFromHandle(dir: FileSystemDirectoryHandle, prefix 
   return out.filter((f): f is DiscoveredFile => f !== null);
 }
 
+/** One combined parse queue; an unavailable drive does not block the other roots. */
+export async function discoverFromFolders(folders: readonly ReplayFolder[], signal?: AbortSignal) {
+  const files: DiscoveredFile[] = [];
+  const unavailable: ReplayFolder[] = [];
+  for (const folder of folders) {
+    signal?.throwIfAborted();
+    try {
+      const prefix = folder.id ? `${folder.id}/${folder.handle.name}` : "";
+      const discovered = await discoverFromHandle(folder.handle, prefix, signal);
+      for (const file of discovered) files.push(file);
+    } catch {
+      signal?.throwIfAborted();
+      unavailable.push(folder);
+    }
+  }
+  return { files, unavailable };
+}
+
 /** Fallback for <input webkitdirectory> file lists. */
-export function discoverFromFileList(files: FileList): DiscoveredFile[] {
+export function discoverFromFileList(files: FileList, prefix = ""): DiscoveredFile[] {
   const out: DiscoveredFile[] = [];
   for (const file of Array.from(files)) {
     const format = replayFormat(file.name);
     if (!format) continue;
-    const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+    const relativePath = file.webkitRelativePath || file.name;
+    const path = prefix ? `${prefix}/${relativePath}` : relativePath;
     out.push({ id: fileId(path, file), path, format, file });
   }
   return out;

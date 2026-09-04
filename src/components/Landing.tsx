@@ -3,7 +3,7 @@ import { GoogleG } from "./GoogleG";
 
 interface Props {
   onPickDirectory: () => void;
-  onPickFiles: (files: FileList) => void;
+  onPickFiles: (files: FileList, fromFolder?: boolean) => void;
   onDemo: () => void;
   /** Opens the scene-history tab, which needs no replays at all. */
   onBrowseHistory: () => void;
@@ -48,7 +48,7 @@ export function Landing({
         Slippi replay stats, <span className="accent">parsed in your browser</span>
       </h1>
       <p className="sub">
-        Point this page at your top-level Slippi replay folder and get a full statistical readout of your play: win rates by
+        Connect your Slippi replay folders and get a full statistical readout of your play: win rates by
         opponent, matchup, and stage, kill stats, and execution trends. Standard <span className="data">.slp</span> and
         compressed <span className="data">.slpz</span> files can be mixed together, and everything is parsed in your browser.
       </p>
@@ -92,8 +92,9 @@ export function Landing({
         )}
       </div>
       <p className="folder-scan-note">
-        <b>Select the folder that contains all your replay folders.</b> Every replay inside its month, year, and other
-        subfolders is found automatically — you do not need to select each one separately.
+        <b>Start with one replay folder, then use Add folder on your dashboard to include more.</b> All subfolders are
+        included automatically, and games found in multiple folders count once.
+        {!supportsFsAccess && " This browser requires selecting each folder again to import new replays."}
       </p>
       <input
         ref={folderInputRef}
@@ -104,7 +105,7 @@ export function Landing({
         // Non-standard attribute; enables folder selection in Chromium/Firefox/Safari.
         {...({ webkitdirectory: "" } as Record<string, string>)}
         onChange={(e) => {
-          if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+          if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files, true);
           e.currentTarget.value = "";
         }}
       />

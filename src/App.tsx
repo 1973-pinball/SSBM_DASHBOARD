@@ -3,12 +3,14 @@ import type { Account, Filters, GameRecord, ParseProgress } from "./lib/types";
 import { DEFAULT_FILTERS, hasFullStats, needsStatsRepair } from "./lib/types";
 import {
   discoverFromHandle,
+  discoverFromFolders,
   discoverFromFileList,
   runParsePipeline,
   RecordSaveError,
   type DiscoveredFile,
 } from "./lib/pool";
-import { allRecords, clearAll, forgetCachedRecordIds, getMyAccounts, setMyAccounts, getDirHandle, setDirHandle, pruneDuplicates } from "./lib/db";
+import { allRecords, clearAll, forgetCachedRecordIds, getMyAccounts, setMyAccounts, getReplayFolders, setReplayFolders, pruneDuplicates } from "./lib/db";
+import { accessibleReplayFolders, addReplayFolder, type ReplayFolder } from "./lib/folders";
 import { codeGameCounts, resolveGames, resolveTeamGames, applyFilters, applyTeamFilters } from "./lib/stats";
 import { dedupeRecords } from "./lib/dedupe";
 import { generateDemoRecords, DEMO_ACCOUNTS } from "./lib/demo";
@@ -175,7 +177,10 @@ export default function App() {
     const initial = tabFromUrl();
     return initial === "community" || initial === "liquipedia" || initial === "tournaments" ? initial : null;
   });
-  const [dirHandle, setDirHandleState] = useState<FileSystemDirectoryHandle | null>(null);
+  const [folders, setFolders] = useState<ReplayFolder[]>([]);
+  const [pickingFolder, setPickingFolder] = useState(false);
+  const [folderIssues, setFolderIssues] = useState<string[]>([]);
+  const pickerBusy = useRef(false);
   const [syncing, setSyncing] = useState<ParseProgress | null>(null);
   // What the last refresh chose not to parse. Nothing is cached for these, so
   // they are genuinely pending rather than lost — but a silent skip is exactly
@@ -378,15 +383,9 @@ export default function App() {
     const restoreController = new AbortController();
     void (async () => {
       try {
-        const [raw, accts, handle] = await Promise.all([allRecords(), getMyAccounts(), getDirHandle()]);
-        if (handle) {
-          setDirHandleState(handle);
-          try {
-            setFolderPermission(await handle.queryPermission({ mode: "read" }));
-          } catch {
-            setFolderPermission("unknown");
-          }
-        }
+        const [raw, accts, savedFolders] = await Promise.all([allRecords(), getMyAccounts(), getReplayFolders()]);
+        if (restoreController.signal.aborted) return;
+        setFolders(savedFolders);
         // A copied or re-organized replay folder leaves the same game cached
         // under several file keys; collapse them once here so the cache doesn't
         // carry the duplicates forward (see lib/dedupe.ts).
@@ -424,7 +423,7 @@ export default function App() {
             if (generation.current !== gen) return;
             if (pulled.length > 0) setRecords(pulled);
             const known = cloudAccounts.length > 0 ? cloudAccounts : accts;
-            if (known.length > 0 && (pulled.length > 0 || handle)) {
+            if (known.length > 0 && (pulled.length > 0 || savedFolders.length > 0)) {
               setAccountsState(known);
               if (cloudAccounts.length > 0) void setMyAccounts(cloudAccounts);
               setPhase("dashboard");
@@ -443,7 +442,7 @@ export default function App() {
             window.clearTimeout(timeout);
             if (generation.current === gen) setCloudRestoring(null);
           }
-        } else if (handle && accts.length > 0) {
+        } else if (savedFolders.length > 0 && accts.length > 0) {
           // A stats-schema migration may leave no cached rows, but the stored
           // handle can rebuild them without making the user pick the folder
           // again. Dashboard entry lets the auto-sync effect do that in place.
@@ -481,7 +480,7 @@ export default function App() {
       let handedOff = false;
       let onDashboard = false;
       // Held on an object rather than a plain `let` for the same reason
-      // syncFolder does: the tally arrives through the callback and is read
+      // syncFolders does: the tally arrives through the callback and is read
       // after the await.
       const tally: { last: ParseProgress | null } = { last: null };
       // A full pass running behind the dashboard keeps the folder busy: the
@@ -536,9 +535,10 @@ export default function App() {
           },
           controller.signal,
         );
-        markScanned();
         if (generation.current !== gen) return;
+        markScanned();
         const all = await allRecords();
+        if (generation.current !== gen) return;
         setRecords(all);
         // What the progress panel used to report on its last frame. After the
         // hand-off nobody is looking at it, so the tally moves to the topbar
@@ -578,11 +578,11 @@ export default function App() {
         // back to the landing page would throw all of it away.
         if (!handedOff) setPhase("landing");
       } finally {
-        scanBusy.current = false;
         // The re-focus throttle should run from the end of the parse, not from
         // whenever this tab last happened to walk the folder.
-        lastFolderSyncAt.current = Date.now();
         if (generation.current === gen) {
+          scanBusy.current = false;
+          lastFolderSyncAt.current = Date.now();
           setProgress(null);
           setSyncing(null);
         }
@@ -592,12 +592,12 @@ export default function App() {
   );
 
   /**
-   * Incremental rescan of the remembered folder. Unlike startPipeline this leaves
+   * Incremental rescan of remembered folders. Unlike startPipeline this leaves
    * the dashboard on screen — the cache dedups on path|size|mtime, so only replays
    * added since the last scan actually parse.
    */
-  const syncFolder = useCallback(
-    async (handle: FileSystemDirectoryHandle, repairIds: readonly string[] = []) => {
+  const syncFolders = useCallback(
+    async (selected: readonly ReplayFolder[], repairIds: readonly string[] = [], requestAccess = false) => {
       if (scanBusy.current) return;
       scanBusy.current = true;
       lastFolderSyncAt.current = Date.now();
@@ -611,13 +611,27 @@ export default function App() {
       // final tally through the callback, and we need it after the await.
       const tally: { last: ParseProgress | null } = { last: null };
       try {
+        const access = await accessibleReplayFolders(selected, requestAccess);
+        if (generation.current !== gen) return;
+        setFolderPermission(access.unavailable.length === 0 ? "granted" : "prompt");
+        setFolderIssues(access.unavailable.map((folder) => folder.handle.name));
+        if (access.granted.length === 0) return;
+        const discovered = await discoverFromFolders(access.granted, controller.signal);
+        if (generation.current !== gen) return;
+        const unavailable = [...access.unavailable, ...discovered.unavailable];
+        setFolderIssues(unavailable.map((folder) => folder.handle.name));
+        if (unavailable.length > 0) setFolderPermission("prompt");
+        if (discovered.unavailable.length === access.granted.length) return;
+        const files = discovered.files;
         // "Refresh execution stats" is a forced schema repair, not an ordinary
         // new-file scan. A stale row can still have an id in `seen` (for
         // example when a cloud restore raced an earlier migration); forgetting
         // that marker first prevents the scanner from instantly skipping the
         // very replay the button promised to update.
-        if (repairIds.length > 0) await forgetCachedRecordIds(repairIds);
-        const files = await discoverFromHandle(handle);
+        if (repairIds.length > 0) {
+          const foundIds = new Set(files.map((file) => file.id));
+          await forgetCachedRecordIds(repairIds.filter((id) => foundIds.has(id)));
+        }
         await runParsePipeline(
           files,
           (p, newRecords) => {
@@ -628,6 +642,7 @@ export default function App() {
           },
           controller.signal,
         );
+        if (generation.current !== gen) return;
         markScanned();
         const done = tally.last;
         if (generation.current === gen) {
@@ -643,7 +658,10 @@ export default function App() {
           // only when this run actually parsed something — the auto-sync on
           // every page load normally finds nothing and shouldn't pay for a
           // full re-read plus the resolve+sort it invalidates.
-          if (done && done.done > 0) appendRecords(await allRecords());
+          if (done && done.done > 0) {
+            const cached = await allRecords();
+            if (generation.current === gen) appendRecords(cached);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -654,11 +672,13 @@ export default function App() {
             : "Refresh failed mid-scan. Reload the page and try again — this usually happens when the site updated while this tab was open.",
         );
       } finally {
-        scanBusy.current = false;
         // Stamped again on the way out: the throttle window should run from
         // the end of a long parse, not from the moment it started.
-        lastFolderSyncAt.current = Date.now();
-        if (generation.current === gen) setSyncing(null);
+        if (generation.current === gen) {
+          scanBusy.current = false;
+          lastFolderSyncAt.current = Date.now();
+          setSyncing(null);
+        }
       }
     },
     [appendRecords, markScanned],
@@ -694,7 +714,10 @@ export default function App() {
               ? { failed: done.failed, unreadable: done.unreadable, deferred: done.deferred }
               : null,
           );
-          if (done && done.done > 0) setRecords(await allRecords());
+          if (done && done.done > 0) {
+            const cached = await allRecords();
+            if (generation.current === gen) appendRecords(cached);
+          }
         }
       } catch (err) {
         console.error(err);
@@ -705,8 +728,11 @@ export default function App() {
             : "Adding replay files failed. Reload the page and try again — this usually happens when the site updated while this tab was open.",
         );
       } finally {
-        scanBusy.current = false;
-        if (generation.current === gen) setSyncing(null);
+        if (generation.current === gen) {
+          scanBusy.current = false;
+          lastFolderSyncAt.current = Date.now();
+          setSyncing(null);
+        }
       }
     },
     [appendRecords],
@@ -738,48 +764,34 @@ export default function App() {
     return () => window.clearTimeout(id);
   }, [phase]);
 
-  // Pick up replays added since the last visit with no click at all — possible
-  // only while the folder permission is still live (same browser session).
+  // React does not expose the file input's cancel event as an onCancel prop.
   useEffect(() => {
-    if (phase !== "dashboard" || isDemo || !dirHandle || autoSyncDone.current) return;
-    autoSyncDone.current = true;
-    void (async () => {
-      try {
-        const perm = await dirHandle.queryPermission({ mode: "read" });
-        setFolderPermission(perm);
-        if (perm === "granted") await syncFolder(dirHandle);
-      } catch (err) {
-        // syncFolder handles its own failures; this is queryPermission dying.
-        console.error(err);
-        setPipelineError("Couldn't check access to the remembered replay folder — use Refresh to try again.");
-      }
-    })();
-  }, [phase, isDemo, dirHandle, syncFolder]);
+    const input = topbarFolderPickRef.current;
+    if (!input) return;
+    const cancelled = () => {
+      pickerBusy.current = false;
+      setPickingFolder(false);
+      lastFolderSyncAt.current = Date.now();
+    };
+    input.addEventListener("cancel", cancelled);
+    return () => input.removeEventListener("cancel", cancelled);
+  }, [phase, publicView]);
 
-  // Leave the dashboard open, play a session, come back: the auto-sync above
-  // already fired for this page load, so the folder was never re-walked and
-  // the games just played silently never appeared. CloudSync re-pulls on
-  // re-focus for exactly this reason; the folder needs the same. Both events
-  // are listened for because a Dolphin window that only takes OS focus never
-  // hides the tab, so visibilitychange alone misses the common setup. Cheap to
-  // double up: they share one throttle. Only while the permission is still
-  // live — re-requesting it needs a user gesture, which is Refresh's job.
+  // A background scan queries permissions only; reconnect prompts need a click.
   useEffect(() => {
-    if (phase !== "dashboard" || isDemo || !dirHandle) return;
+    if (phase !== "dashboard" || isDemo || folders.length === 0 || autoSyncDone.current) return;
+    if (pickerBusy.current || scanBusy.current) return;
+    autoSyncDone.current = true;
+    void syncFolders(folders);
+  }, [phase, isDemo, folders, syncFolders]);
+
+  // Both events matter: switching from Dolphin may focus a tab without hiding it.
+  useEffect(() => {
+    if (phase !== "dashboard" || isDemo || folders.length === 0) return;
     const maybeSync = () => {
-      if (document.visibilityState !== "visible") return;
-      if (scanBusy.current || Date.now() - lastFolderSyncAt.current < 60_000) return;
-      void (async () => {
-        try {
-          const perm = await dirHandle.queryPermission({ mode: "read" });
-          setFolderPermission(perm);
-          if (perm === "granted") await syncFolder(dirHandle);
-        } catch (err) {
-          // Silent on purpose: this runs unprompted, and the Refresh button
-          // (now reading "Reconnect folder") is the visible recourse.
-          console.error(err);
-        }
-      })();
+      if (document.visibilityState !== "visible" || pickerBusy.current || scanBusy.current) return;
+      if (Date.now() - lastFolderSyncAt.current < 60_000) return;
+      void syncFolders(folders);
     };
     document.addEventListener("visibilitychange", maybeSync);
     window.addEventListener("focus", maybeSync);
@@ -787,55 +799,41 @@ export default function App() {
       document.removeEventListener("visibilitychange", maybeSync);
       window.removeEventListener("focus", maybeSync);
     };
-  }, [phase, isDemo, dirHandle, syncFolder]);
+  }, [phase, isDemo, folders, syncFolders]);
 
-  // After a browser restart the permission lapses; re-requesting it needs a user
-  // gesture, which this click provides.
   const onRefresh = useCallback(() => {
-    if (!dirHandle) return;
-    void (async () => {
-      try {
-        let perm = await dirHandle.queryPermission({ mode: "read" });
-        if (perm !== "granted") perm = await dirHandle.requestPermission({ mode: "read" });
-        setFolderPermission(perm);
-        if (perm === "granted") {
-          const repairIds = records.filter(needsStatsRepair).map((rec) => rec.id);
-          await syncFolder(dirHandle, repairIds);
-        }
-      } catch (err) {
-        console.error(err);
-        if (!(err instanceof DOMException && err.name === "AbortError")) {
-          setPipelineError('Couldn\'t access the replay folder — re-pick it with "Change folder".');
-        }
-      }
-    })();
-  }, [dirHandle, records, syncFolder]);
+    const repairIds = records.filter(needsStatsRepair).map((rec) => rec.id);
+    void syncFolders(folders, repairIds, true);
+  }, [folders, records, syncFolders]);
 
   const onPickDirectory = useCallback(() => {
-    // Best-effort durability for libraries whose parsed cache is hundreds of
-    // megabytes. Browsers may decline silently; parsing and quota errors retain
-    // their existing behavior either way.
     void navigator.storage?.persist?.().catch(() => false);
+    const gen = generation.current;
     void startPipeline(async () => {
-      // startIn only applies the first time; afterwards the id remembers the last-picked folder.
       const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
-      setDirHandleState(dir);
+      const added = await addReplayFolder(folders, dir);
+      if (generation.current !== gen) return [];
+      setFolders(added.folders);
       setFolderPermission("granted");
-      await setDirHandle(dir);
-      // This parse walks the whole tree itself; without this the auto-sync
-      // effect would immediately re-walk it just to skip everything as cached.
+      const saved = await setReplayFolders(added.folders);
+      if (generation.current !== gen) return [];
+      if (!saved) setPipelineError("These folders work for this visit, but couldn't be remembered. Add them again next time.");
       autoSyncDone.current = true;
-      return discoverFromHandle(dir);
+      const prefix = added.folder.id ? `${added.folder.id}/${dir.name}` : "";
+      return discoverFromHandle(dir, prefix, abortRef.current?.signal);
     });
-  }, [startPipeline]);
+  }, [folders, startPipeline]);
 
   const onPickFiles = useCallback(
-    (list: FileList) => {
+    (list: FileList, fromFolder = false) => {
+      pickerBusy.current = false;
+      setPickingFolder(false);
+      lastFolderSyncAt.current = Date.now();
       void navigator.storage?.persist?.().catch(() => false);
-      // Materialize before the input value is reset. FileList is live in some
-      // browsers, so deferring discovery can otherwise turn a real selection
-      // into an empty one.
-      const files = discoverFromFileList(list);
+      // A fallback input cannot distinguish two same-named roots. Give each
+      // selection its own namespace; content dedup still collapses repeat games.
+      // Materialize before resetting the input because FileList can be live.
+      const files = discoverFromFileList(list, fromFolder ? `folder-${crypto.randomUUID()}` : "");
       if (phase === "dashboard") void syncPickedFiles(files);
       else void startPipeline(async () => files);
     },
@@ -843,47 +841,51 @@ export default function App() {
   );
 
   const onAddReplayFiles = useCallback(() => {
-    // Returning from the OS file picker fires window.focus. Without refreshing
-    // this throttle first, the automatic folder rescan can win that race and
-    // make the explicit selection arrive while the parse pool is already busy.
     lastFolderSyncAt.current = Date.now();
     topbarFilesPickRef.current?.click();
   }, []);
 
-  /**
-   * Attach a folder to a dashboard that has none — a cloud restore on a new
-   * device, or a "Change folder" that was never followed through with a pick.
-   * The stats are all there and nothing looks broken, but no replay played
-   * from that point on can ever reach the app.
-   *
-   * Deliberately not onPickDirectory: startPipeline flips to the parsing
-   * screen and lands on "landing" if the picker throws, so cancelling the OS
-   * dialog would throw the user off their own dashboard. syncFolder keeps them
-   * on it and streams into the same progress button Refresh uses.
-   */
+  /** Add a root in place. Cancelling never disconnects folders or clears stats. */
   const onConnectFolder = useCallback(() => {
+    if (scanBusy.current || pickerBusy.current) return;
+    pickerBusy.current = true;
+    setPickingFolder(true);
+    lastFolderSyncAt.current = Date.now();
     void navigator.storage?.persist?.().catch(() => false);
     if (!supportsFsAccess) {
       topbarFolderPickRef.current?.click();
       return;
     }
+    const gen = generation.current;
     void (async () => {
       try {
         const dir = await window.showDirectoryPicker({ id: "slippi-replays", mode: "read", startIn: "documents" });
-        setDirHandleState(dir);
-        setFolderPermission("granted");
-        await setDirHandle(dir);
+        const added = await addReplayFolder(folders, dir);
+        if (generation.current !== gen) return;
+        setFolders(added.folders);
+        const saved = await setReplayFolders(added.folders);
+        if (generation.current !== gen) return;
         autoSyncDone.current = true;
+        pickerBusy.current = false;
+        setPickingFolder(false);
         const repairIds = records.filter(needsStatsRepair).map((rec) => rec.id);
-        await syncFolder(dir, repairIds);
+        await syncFolders(added.folders, repairIds);
+        if (!saved && generation.current === gen) {
+          setPipelineError("These folders work for this visit, but couldn't be remembered. Add them again next time.");
+        }
       } catch (err) {
-        // AbortError is the user closing the picker — not a failure.
-        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (generation.current !== gen || (err instanceof DOMException && err.name === "AbortError")) return;
         console.error(err);
-        setPipelineError("Couldn't open that replay folder — try again, or use \"Change folder\" to start over.");
+        setPipelineError("Couldn't open that replay folder — use Add folder to try again.");
+      } finally {
+        if (generation.current === gen) {
+          pickerBusy.current = false;
+          setPickingFolder(false);
+          lastFolderSyncAt.current = Date.now();
+        }
       }
     })();
-  }, [supportsFsAccess, records, syncFolder]);
+  }, [supportsFsAccess, folders, records, syncFolders]);
 
   const onDemo = useCallback(() => {
     setIsDemo(true);
@@ -926,7 +928,7 @@ export default function App() {
     generation.current++; // invalidate in-flight scans and cloud syncs
     abortRef.current?.abort();
     abortRef.current = null;
-    if (!isDemo) void clearAll(); // also drops the stored dirHandle
+    if (!isDemo) void clearAll(); // also drops all remembered folders
     // clearAll only reaches IndexedDB; the scan timestamp is localStorage.
     // Left behind, it makes the next session — a cloud restore, say — report a
     // "Scanned <time>" produced by a folder that session never had, which
@@ -937,10 +939,16 @@ export default function App() {
     setAccountsState([]);
     setFilters(DEFAULT_FILTERS);
     setIsDemo(false);
-    setDirHandleState(null);
+    setFolders([]);
+    setFolderIssues([]);
+    pickerBusy.current = false;
+    setPickingFolder(false);
+    scanBusy.current = false;
     setFolderPermission("unknown");
     setProgress(null);
     setSyncing(null);
+    setPipelineError(null);
+    setSyncSkipped(null);
     autoSyncDone.current = false;
     setPhase("landing");
     selectTab("overview", true);
@@ -991,7 +999,7 @@ export default function App() {
   // never keep one, so neither counts as a problem — but a Chromium session
   // that lost its handle will never see another replay, and saying "Scanned
   // <time>" at it is the difference between a two-second fix and a bug report.
-  const needsFolder = !isDemo && !dirHandle && supportsFsAccess;
+  const needsFolder = !isDemo && folders.length === 0 && supportsFsAccess;
 
   return (
     <div className="shell">
@@ -1020,7 +1028,7 @@ export default function App() {
                 </span>
               </span>
               <span
-                className={`app-state ${!online ? "offline" : needsFolder || needsStatsRefresh ? "warn" : ""}`}
+                className={`app-state ${!online ? "offline" : needsFolder || needsStatsRefresh || folderIssues.length > 0 ? "warn" : ""}`}
                 title={
                   !online
                     ? "Offline — local stats still work"
@@ -1028,6 +1036,8 @@ export default function App() {
                       ? "Some cached or cloud records predate tech stats. Refresh the replay folder to update them in place."
                     : needsFolder
                       ? "These stats came from the cache or the cloud. Connect your replay folder to pick up games played from now on."
+                    : folderIssues.length > 0
+                      ? `Could not scan: ${folderIssues.join(", ")}`
                       : "Local features are ready"
                 }
               >
@@ -1037,25 +1047,39 @@ export default function App() {
                     ? "Execution stats need refresh"
                   : needsFolder
                     ? "No folder connected"
+                  : folderIssues.length > 0
+                    ? `${folderIssues.length} folder${folderIssues.length === 1 ? " needs" : "s need"} access`
                     : lastScanLabel
                       ? `Scanned ${lastScanLabel}`
                       : "Local"}
               </span>
-              {!isDemo && (
+              {!isDemo && (folders.length > 0 || supportsFsAccess) && (
                 <button
-                  className={needsFolder || needsStatsRefresh ? "ghost attn" : "ghost"}
-                  onClick={dirHandle ? onRefresh : onConnectFolder}
-                  disabled={syncing !== null}
+                  className={needsFolder || needsStatsRefresh || folderIssues.length > 0 ? "ghost attn" : "ghost"}
+                  onClick={folders.length > 0 ? onRefresh : onConnectFolder}
+                  disabled={syncing !== null || pickingFolder}
                 >
                   {syncing
                     ? syncing.total === 0
                       ? "Scanning…"
                       : `${syncing.pass === "header" ? "Reading" : "Parsing"} ${syncing.done.toLocaleString()}/${syncing.total.toLocaleString()}`
-                    : !dirHandle
-                      ? supportsFsAccess ? "Connect replay folder" : "Add replays"
+                    : pickingFolder
+                      ? "Choosing folder…"
+                    : folders.length === 0
+                      ? "Connect replay folder"
                       : folderPermission === "granted"
                         ? needsStatsRefresh ? "Refresh execution stats" : "Refresh"
-                        : needsStatsRefresh ? "Reconnect to refresh" : "Reconnect folder"}
+                        : needsStatsRefresh ? "Reconnect to refresh" : folders.length > 1 ? "Reconnect folders" : "Reconnect folder"}
+                </button>
+              )}
+              {!isDemo && folders.length > 0 && (
+                <span className="tag" title={folders.map((folder) => folder.handle.name).join("\n")}>
+                  {folders.length} folder{folders.length === 1 ? "" : "s"}
+                </span>
+              )}
+              {!isDemo && (folders.length > 0 || !supportsFsAccess) && (
+                <button className="ghost" onClick={onConnectFolder} disabled={syncing !== null || pickingFolder}>
+                  {pickingFolder ? "Choosing folder…" : "Add folder"}
                 </button>
               )}
               <input
@@ -1066,12 +1090,12 @@ export default function App() {
                 style={{ display: "none" }}
                 {...({ webkitdirectory: "" } as Record<string, string>)}
                 onChange={(e) => {
-                  if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files);
+                  if (e.currentTarget.files?.length) onPickFiles(e.currentTarget.files, true);
                   e.currentTarget.value = "";
                 }}
               />
               {!isDemo && (
-                <button className="ghost" onClick={onAddReplayFiles} disabled={syncing !== null}>
+                <button className="ghost" onClick={onAddReplayFiles} disabled={syncing !== null || pickingFolder}>
                   Add replay files
                 </button>
               )}
@@ -1108,8 +1132,8 @@ export default function App() {
               <button className="ghost" onClick={() => openOverlay("guide")}>
                 Metrics guide
               </button>
-              <button className="ghost" onClick={reset}>
-                {isDemo ? "Exit demo" : "Change folder"}
+              <button className="ghost" onClick={reset} disabled={pickingFolder}>
+                {isDemo ? "Exit demo" : folders.length > 1 ? "Change folders" : "Change folder"}
               </button>
             </div>
           )}
@@ -1129,6 +1153,13 @@ export default function App() {
           <button className="ghost" style={{ marginLeft: 10 }} onClick={() => window.location.reload()}>
             Reload
           </button>
+        </div>
+      )}
+
+      {!isDemo && !publicView && phase === "dashboard" && folderIssues.length > 0 && (
+        <div className="empty-note" role="status">
+          Couldn’t scan {folderIssues.join(", ")}. Reconnect folders to retry, or use Add folder to select them again.
+          Your saved stats are still available; accessible folders continue to update.
         </div>
       )}
 

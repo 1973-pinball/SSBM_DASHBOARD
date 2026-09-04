@@ -2,6 +2,7 @@ import Dexie, { type Table } from "dexie";
 import { CURRENT_STATS_VERSION, hasCurrentStats } from "./types";
 import type { Account, GameRecord } from "./types";
 import { dedupeRecords } from "./dedupe";
+import type { ReplayFolder } from "./folders";
 
 /**
  * Records live packed ~250 to a row: reading tens of thousands of individual
@@ -414,19 +415,25 @@ export async function setCloudSyncState(userId: string, state: StoredCloudSyncSt
  * "refresh" a single click instead of a re-pick. Chromium only; other browsers use
  * the <input webkitdirectory> path, which cannot persist a handle.
  */
-export async function getDirHandle(): Promise<FileSystemDirectoryHandle | null> {
+export async function getReplayFolders(): Promise<ReplayFolder[]> {
   try {
+    const folders = await db.kv.get("replayFolders");
+    if (folders) return folders.value as ReplayFolder[];
+    // Keep the old root's unprefixed file keys: adding folders must not force
+    // an existing library to re-parse or strand future stats repairs.
     const row = await db.kv.get("dirHandle");
-    return (row?.value as FileSystemDirectoryHandle) ?? null;
+    return row?.value ? [{ id: "", handle: row.value as FileSystemDirectoryHandle }] : [];
   } catch {
-    return null;
+    return [];
   }
 }
 
-export async function setDirHandle(handle: FileSystemDirectoryHandle): Promise<void> {
+export async function setReplayFolders(folders: readonly ReplayFolder[]): Promise<boolean> {
   try {
-    await db.kv.put({ key: "dirHandle", value: handle });
+    await db.kv.put({ key: "replayFolders", value: [...folders] });
+    return true;
   } catch {
-    // Non-fatal: refresh degrades to re-picking the folder.
+    // The current session can still scan; tell the user a re-pick is needed later.
+    return false;
   }
 }
