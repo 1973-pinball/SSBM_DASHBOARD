@@ -119,6 +119,8 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           <p>
             These counts are informational, not unlock requirements. Opt-in SSBM Stats contributions and the
             historical tournament archive remain separate comparison samples throughout the Community section.
+            {" "}Each unique contributed singles game supplies two player samples, one for each character.
+            Duplicate uploads count once; opponents do not increase the contributor count.
           </p>
           <div
             className="community-progress"

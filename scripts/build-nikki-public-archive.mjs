@@ -593,7 +593,9 @@ const addScopeRows = (scope, population, extras, record, player, opponent, slot)
   addRollup(rollupDimensions(scope, population, extras, player.characterId, null, null), record, player, slot, true);
   addRollup(rollupDimensions(scope, population, extras, player.characterId, null, record.stageId), record, player, slot, false);
   if (!record.isTeams && opponent) {
-    addRollup(rollupDimensions(scope, population, extras, player.characterId, opponent.characterId, null), record, player, slot, false);
+    // Execution comparisons need move usage for the exact character matchup.
+    // Keep stage-specific rows compact; Execution's archive references span all stages.
+    addRollup(rollupDimensions(scope, population, extras, player.characterId, opponent.characterId, null), record, player, slot, true);
     addRollup(rollupDimensions(scope, population, extras, player.characterId, opponent.characterId, record.stageId), record, player, slot, false);
   }
 };

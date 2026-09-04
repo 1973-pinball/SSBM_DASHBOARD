@@ -98,7 +98,7 @@ export function CommunityConsent({ isDemo, variant = "inline", onOpenCommunity }
             {/* The objection this answers is "does my code end up in there?",
                 so it says so before the toggle is touched, not in a modal. */}
             <span className="cc-bar-note">
-              <b>Your connect code, tag, and replay files are never shared.</b> Your stats are pooled into
+              <b>Connect codes, tags, and replay files are never shared.</b> Stats from both players in your synced games are pooled into
               anonymous aggregates only on the{" "}
               {onOpenCommunity ? (
                 <button type="button" className="linky" onClick={onOpenCommunity}>Community tab</button>
@@ -126,7 +126,7 @@ export function CommunityConsent({ isDemo, variant = "inline", onOpenCommunity }
       </div>
       <p>
         This is separate from private cloud sync. When enabled, a scheduled refresh may read your private parsed
-        stats, remove identifiers, and include them only in aggregates that clear both contributor and game-count
+        game stats for both you and your opponents, remove identifiers, and include them only in aggregates that clear both contributor and game-count
         thresholds. It never publishes connect codes, names, emails, replay paths, exact activity timelines, or rows.
       </p>
       {consent === "loading" && <div className="hint">Checking your setting…</div>}

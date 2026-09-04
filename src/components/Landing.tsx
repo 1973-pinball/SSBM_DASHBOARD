@@ -142,7 +142,7 @@ export function Landing({
             <li>Signing in syncs <b>only parsed stats</b> — never replay files — to your own private account.</li>
             <li>
               <b>Community contribution is a separate opt-in, off by default.</b> Turn it on any time from the{" "}
-              Community tab or My Account to add your anonymised stats to the shared benchmarks.
+              Community tab or My Account to add anonymised stats from both players in your games to the shared benchmarks.
             </li>
             <li>Your email is used only for sign-in — never sold, published, shared, or used for marketing or outreach.</li>
           </ul>

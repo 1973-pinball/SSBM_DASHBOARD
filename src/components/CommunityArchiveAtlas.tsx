@@ -215,6 +215,16 @@ function RateCell({ value, showSample = true }: { value: RateSummary | null | un
   );
 }
 
+function rateColumnSample(
+  values: (RateSummary | null | undefined)[],
+  source: string,
+): string {
+  const available = values.filter((value): value is RateSummary => value !== null && value !== undefined);
+  if (available.length === 0 && source !== "you") return "No published sample";
+  const games = available.reduce((total, value) => total + value.decided, 0);
+  return `${source === "community" ? "≈" : ""}${games.toLocaleString()} ${source === "you" ? "games" : "player-games"}`;
+}
+
 function archiveRateMap(rows: ArchiveRollup[], population: "broad" | "conservative", stageId: number | null) {
   return new Map(rows
     .filter((row) => row.population === population && row.opponent_character_id !== null && row.stage_id === stageId)
@@ -312,12 +322,16 @@ export function ArchiveMatchupAtlasComparison({
     });
   const sortableHeader = (key: MatchupSortKey, label: string, data = false) => {
     const active = sort.key === key;
+    const sample = key === "opponent" ? null : key === "games"
+      ? `${[...local.values()].reduce((total, value) => total + value.games, 0).toLocaleString()} games`
+      : rateColumnSample(opponents.map((id) => sourceFor(key, id)), key);
     return <th className={`atlas-sortable${data ? " data" : ""}${active ? " active" : ""}`} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
       <button type="button" onClick={() => setSort((previous) => previous.key === key
         ? { key, direction: previous.direction === "asc" ? "desc" : "asc" }
         : { key, direction: key === "opponent" ? "asc" : "desc" })}>
         {label}<span aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
       </button>
+      {sample && <span className="sample-note">{sample}</span>}
     </th>;
   };
 
@@ -326,7 +340,7 @@ export function ArchiveMatchupAtlasComparison({
       {opponents.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("opponent", "Opponent")}{sortableHeader("games", "Games", true)}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {opponents.map((opponentId) => <tr key={opponentId}><td>{charName(opponentId)}</td><td className="data">{local.get(opponentId)?.games.toLocaleString() ?? "—"}</td><RateCell value={local.get(opponentId)} showSample={false} /><RateCell value={community.get(opponentId)} /><RateCell value={broad.get(opponentId)} /><RateCell value={conservative.get(opponentId)} /><RateCell value={proAggregate.get(opponentId)} />{archive.selectedPro && <RateCell value={pro.get(opponentId)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No matching matchup samples are available.</div>}
-      <div className="hint">My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
+      <div className="hint">Header samples count decided results in the displayed matchups; unknown outcomes are excluded from win-rate columns. SSBM Stats counts are approximate. My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
       {gameType !== "all" && <div className="hint">Your and SSBM Stats columns use the selected mode. Historical archive columns are offline event games.</div>}
     </ArchiveFrame>
   );
@@ -428,12 +442,14 @@ export function ArchiveStageAtlasComparison({
     });
   const sortableHeader = (key: StageSortKey, label: string, data = false) => {
     const active = sort.key === key;
+    const sample = key === "stage" ? null : rateColumnSample(stages.map((id) => sourceFor(key, id)), key);
     return <th className={`atlas-sortable${data ? " data" : ""}${active ? " active" : ""}`} aria-sort={active ? (sort.direction === "asc" ? "ascending" : "descending") : "none"}>
       <button type="button" onClick={() => setSort((previous) => previous.key === key
         ? { key, direction: previous.direction === "asc" ? "desc" : "asc" }
         : { key, direction: key === "stage" ? "asc" : "desc" })}>
         {label}<span aria-hidden="true">{active ? (sort.direction === "asc" ? "▲" : "▼") : "↕"}</span>
       </button>
+      {sample && <span className="sample-note">{sample}</span>}
     </th>;
   };
 
@@ -442,7 +458,7 @@ export function ArchiveStageAtlasComparison({
       {stages.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("stage", "Stage")}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {stages.map((id) => <tr key={id}><td>{stageName(id)}</td><RateCell value={local.get(id)} /><RateCell value={community.get(id)} /><RateCell value={broad.get(id)} /><RateCell value={conservative.get(id)} /><RateCell value={proAggregate.get(id)} />{archive.selectedPro && <RateCell value={pro.get(id)} />}</tr>)}
       </tbody></table></div> : <div className="empty-note">No stage-specific sample is available for this matchup.</div>}
-      <div className="hint">My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
+      <div className="hint">Header samples count decided results in the displayed stages; unknown outcomes are excluded. SSBM Stats counts are approximate. My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
       {opponentId === null && <div className="hint">SSBM Stats stays blank in All opponents mode until a privacy-safe character-by-stage aggregate is published; your local and archive columns are exact all-opponent totals.</div>}
     </ArchiveFrame>
   );

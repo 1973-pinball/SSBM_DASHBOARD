@@ -1281,7 +1281,12 @@ export default function App() {
           )}
 
           {tab === "execution" && (
-            <Execution games={filtered} isDemo={isDemo} selectedCharacterId={filters.myCharacter} />
+            <Execution
+              games={filtered}
+              isDemo={isDemo}
+              selectedCharacterId={filters.myCharacter}
+              selectedOpponentCharacterId={filters.oppCharacter}
+            />
           )}
           {tab === "insights" && <Insights games={filtered} />}
 

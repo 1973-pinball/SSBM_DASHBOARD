@@ -591,6 +591,7 @@ const EXECUTION_BENCHMARK_STYLES: { key: BenchmarkKind; label: string; color: st
 
 interface ExecutionBenchmarks {
   characterId: number | null;
+  opponentCharacterId: number | null;
   communityBenchmark: CommunityBenchmarkRow | null;
   communityExecution: CommunityExecutionRow | null;
   communityMoves: CommunityMoveRow[];
@@ -599,8 +600,9 @@ interface ExecutionBenchmarks {
   pro: ArchiveRollup | null;
 }
 
-const emptyExecutionBenchmarks = (characterId: number | null): ExecutionBenchmarks => ({
+const emptyExecutionBenchmarks = (characterId: number | null, opponentCharacterId: number | null): ExecutionBenchmarks => ({
   characterId,
+  opponentCharacterId,
   communityBenchmark: null,
   communityExecution: null,
   communityMoves: [],
@@ -613,12 +615,13 @@ function useExecutionBenchmarks(
   games: ResolvedGame[],
   isDemo: boolean,
   selectedCharacterId: number | null,
+  selectedOpponentCharacterId: number | null,
 ): ExecutionBenchmarks {
   const [benchmarks, setBenchmarks] = useState<ExecutionBenchmarks>(() =>
-    emptyExecutionBenchmarks(selectedCharacterId));
+    emptyExecutionBenchmarks(selectedCharacterId, selectedOpponentCharacterId));
 
   useEffect(() => {
-    const base = emptyExecutionBenchmarks(selectedCharacterId);
+    const base = emptyExecutionBenchmarks(selectedCharacterId, selectedOpponentCharacterId);
     setBenchmarks(base);
     if (games.length === 0) return;
     let alive = true;
@@ -626,8 +629,8 @@ function useExecutionBenchmarks(
       .then(async ([community, dataset]) => {
         const archive = dataset
           ? await Promise.all([
-            fetchArchiveCommunityBenchmarks(dataset.id, selectedCharacterId),
-            fetchArchiveProAggregateAtlasRows(dataset.id, selectedCharacterId),
+            fetchArchiveCommunityBenchmarks(dataset.id, selectedCharacterId, "singles", selectedOpponentCharacterId),
+            fetchArchiveProAggregateAtlasRows(dataset.id, selectedCharacterId, "singles", selectedOpponentCharacterId),
           ])
           : null;
         if (!alive) return;
@@ -642,27 +645,32 @@ function useExecutionBenchmarks(
             row.lookbackDays === null && (selectedCharacterId === null || row.characterId === selectedCharacterId)) ?? [],
           venue: archive?.[0].broad ?? null,
           tournament: archive?.[0].conservative ?? null,
-          pro: proRows.find((row) => row.opponent_character_id === null && row.stage_id === null) ?? null,
+          pro: proRows.find((row) => row.opponent_character_id === selectedOpponentCharacterId && row.stage_id === null) ?? null,
         });
       })
       .catch(() => { /* Charts remain fully usable without remote benchmarks. */ });
     return () => { alive = false; };
-  }, [games, games.length, isDemo, selectedCharacterId]);
+  }, [games, games.length, isDemo, selectedCharacterId, selectedOpponentCharacterId]);
 
+  // Never render a previous matchup under newly selected filters while its request starts.
+  if (benchmarks.characterId !== selectedCharacterId || benchmarks.opponentCharacterId !== selectedOpponentCharacterId) {
+    return emptyExecutionBenchmarks(selectedCharacterId, selectedOpponentCharacterId);
+  }
   return benchmarks;
 }
 
+function archiveBenchmarkLabel(benchmarks: ExecutionBenchmarks): string {
+  const character = benchmarks.characterId === null ? "all characters" : charName(benchmarks.characterId);
+  const opponent = benchmarks.opponentCharacterId === null ? "all opponents" : charName(benchmarks.opponentCharacterId);
+  return `${character} vs ${opponent}`;
+}
+
 function BenchmarkFootnote({ benchmarks }: { benchmarks: ExecutionBenchmarks }) {
-  if (benchmarks.characterId === null) return (
-    <div className="hint execution-benchmark-footnote">
-      Benchmarks use all characters, matching the active Me filter. The dotted horizontal lines are fixed full-sample
-      aggregate references, not rolling histories. A missing line means that source has no qualifying published sample.
-    </div>
-  );
   return (
     <div className="hint execution-benchmark-footnote">
-      Benchmarks use {charName(benchmarks.characterId)}, matching the active Me filter. The dotted horizontal lines are fixed full-sample
-      aggregate references, not rolling histories. A missing line means that source has no qualifying published sample.
+      Venue, Tournament, and Pro use {archiveBenchmarkLabel(benchmarks)}, matching the Me and Vs filters, across all stages and dates.
+      {" "}SSBM Stats follows Me and includes all opponents. Dotted lines show full-sample averages. A missing line
+      means that source has no qualifying published sample for that metric.
     </div>
   );
 }
@@ -1507,10 +1515,12 @@ export function Execution({
   games,
   isDemo = false,
   selectedCharacterId,
+  selectedOpponentCharacterId,
 }: {
   games: ResolvedGame[];
   isDemo?: boolean;
   selectedCharacterId: number | null;
+  selectedOpponentCharacterId: number | null;
 }) {
   // The charts cover the whole filter; everything under them describes current
   // form, so it reads the trailing window the charts smooth over. The same
@@ -1523,7 +1533,7 @@ export function Execution({
   // the window pass feeds the two tables that report current habits.
   const career = useMemo(() => moveTable(games), [games]);
   const recentMoves = useMemo(() => moveTable(recentGames), [recentGames]);
-  const benchmarks = useExecutionBenchmarks(games, isDemo, selectedCharacterId);
+  const benchmarks = useExecutionBenchmarks(games, isDemo, selectedCharacterId, selectedOpponentCharacterId);
   const venueGroundTechBreakdown = archiveGroundTechBreakdown(benchmarks.venue);
   if (games.length < 2) return <div className="empty-note">Not enough games for execution trends.</div>;
   return (
@@ -1589,7 +1599,7 @@ export function Execution({
                   <th className="data">Opp %<br />breakdown</th>
                   <th
                     className="data metric-header-wrap"
-                    title={`${selectedCharacterId === null ? "All-character" : charName(selectedCharacterId)} Venue benchmark`}
+                    title={`${archiveBenchmarkLabel(benchmarks)} Venue benchmark`}
                   >
                     Venue %<br />breakdown
                     <span className="sample-note">{archiveBenchmarkSample(benchmarks.venue)}</span>
@@ -1615,9 +1625,8 @@ export function Execution({
               Your most recent {neutral.covered.toLocaleString()} games in this filter — current form, not career
               totals. Share is your count ÷ the game total, so over 50% means you're winning that kind of exchange
               more often than your opponents. The % breakdown columns show the in-place / in / away composition of your ground techs and
-              your opponents' ground techs. Venue % is the fixed successful-ground-tech mix for {selectedCharacterId === null
-                ? "all characters"
-                : charName(selectedCharacterId)}, following the Me character filter.
+              your opponents' ground techs. Venue % is the fixed successful-ground-tech mix for {archiveBenchmarkLabel(benchmarks)},
+              following the Me and Vs character filters.
             </div>
           </>
         )}
@@ -1676,9 +1685,8 @@ export function Execution({
             </table>
             <div className="hint">
               Your most recent {actions.covered.toLocaleString()} games in this filter, compared with fixed Venue,
-              Tournament, and aggregate Pro per-game benchmarks for {benchmarks.characterId === null
-                ? "all characters"
-                : charName(benchmarks.characterId)}. Per-minute normalizes your rate for game length; a dash means
+              Tournament, and aggregate Pro per-game benchmarks for {archiveBenchmarkLabel(benchmarks)}.
+              Per-minute normalizes your rate for game length; a dash means
               that archive has no qualifying published sample. Your per-game cell is highlighted when it differs
               materially from Tournament, or Venue when Tournament is unavailable; brighter shading means a larger
               difference.
@@ -1877,7 +1885,8 @@ function MovesSection({
           only — specials and throws show "—", not zero. The gap between attempted and landed is your whiff rate.
           L-cancel likewise counts every landing of that aerial (hover for attempts; it can differ a hair from the
           headline rate, which corrects for edge-cancels). Venue, Tournament, and Pro show fixed attempted-per-game
-          references for {benchmarks.characterId === null ? "all characters" : charName(benchmarks.characterId)}. Your attempted-per-game cell compares with Tournament, or Venue
+          references for {archiveBenchmarkLabel(benchmarks)}; a dash means no published move sample for that matchup.
+          Your attempted-per-game cell compares with Tournament, or Venue
           when Tournament is unavailable; brighter red or blue means a larger difference. Moves below {minDamageShare}%
           of your damage are hidden.
         </div>
@@ -1955,9 +1964,8 @@ function MovesSection({
         </table>
         <div className="hint">
           The first move of each conversion, over your most recent {recent.covered.toLocaleString()} games in this
-          filter. Venue, Tournament, and Pro are fixed openings-per-game benchmarks for {benchmarks.characterId === null
-            ? "all characters"
-            : charName(benchmarks.characterId)}; a dash means that archive has no qualifying published sample. High
+          filter. Venue, Tournament, and Pro are fixed openings-per-game benchmarks for {archiveBenchmarkLabel(benchmarks)};
+          a dash means that archive has no qualifying published sample. High
           damage-per-opening moves are the neutral wins worth hunting; pair with openings/kill above to see whether
           you're converting them. A short window makes rare openings noisy. Moves below {minOpeningShare}% of your
           openings are hidden. Your openings-per-game cell uses the same red-above/blue-below benchmark gradient as

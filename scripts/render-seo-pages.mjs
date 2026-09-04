@@ -266,7 +266,8 @@ has already seen.</p>
   parsed numbers per game can sync to your own private account so a second device can restore
   them. The replays themselves are not part of that, and are never sent.</li>
   <li><strong>Community contribution is a separate opt-in, off by default.</strong> Turning it on
-  adds your anonymised stats to shared benchmarks that only publish aggregates clearing both
+  adds anonymised stats from both players in your synced games to shared benchmarks, counting
+  duplicate uploads of a game once. These benchmarks only publish aggregates clearing both
   contributor and game-count thresholds. Connect codes, names, emails, replay paths and
   individual rows are never published.</li>
   <li><strong>No tracking.</strong> Aggregate, cookieless page-view counting is the single

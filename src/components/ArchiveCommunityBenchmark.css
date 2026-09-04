@@ -30,6 +30,7 @@
 .atlas-rate-cell b { display: block; font-family: var(--font-data); font-size: 13px; }
 .atlas-low-sample { opacity: 0.58; }
 .atlas-sortable { padding: 0; }
+.atlas-sortable > .sample-note { padding: 0 8px 8px; letter-spacing: normal; text-transform: none; }
 .atlas-sortable button { display: flex; width: 100%; align-items: center; gap: 6px; padding: 10px 8px; border: 0; background: transparent; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; cursor: pointer; }
 .atlas-sortable.data button { justify-content: flex-end; }
 .atlas-sortable button span { color: var(--faint); font-size: 9px; }

@@ -436,15 +436,16 @@ export interface ArchiveCommunityBenchmarks {
   conservative: ArchiveRollup | null;
 }
 
-/** Global archive averages, optionally scoped to one character; deliberately separate from opt-in contributor quartiles. */
+/** Global archive averages, optionally scoped to a character and opponent; separate from opt-in contributor quartiles. */
 export async function fetchArchiveCommunityBenchmarks(
   datasetId: string,
   characterId: number | null,
   format: ArchiveFormat = "singles",
+  opponentCharacterId: number | null = null,
 ): Promise<ArchiveCommunityBenchmarks> {
   const client = requireArchiveClient();
   const rows = await readAll<ArchiveRollup>(async (from, to) => {
-    const query = client
+    let query = client
       .from("archive_rollups")
       .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
       .eq("published", true)
@@ -452,8 +453,10 @@ export async function fetchArchiveCommunityBenchmarks(
       .eq("scope", "community")
       .in("population", ["broad", "conservative"])
       .eq("format", format)
-      .is("opponent_character_id", null)
       .is("stage_id", null) as unknown as TargetableQuery;
+    query = opponentCharacterId === null
+      ? query.is("opponent_character_id", null)
+      : query.eq("opponent_character_id", opponentCharacterId);
     // Character rows carry per-move metrics; the prebuilt all-character row
     // deliberately does not. Sum the disjoint character rows so an unfiltered
     // Execution view can still show honest move benchmarks.
@@ -675,7 +678,7 @@ function aggregateCommunityCharacterRows(
     if (!target) {
       target = {
         ...source,
-        rollup_key: `community-character-aggregate:${datasetId}:${format}:${source.population}`,
+        rollup_key: `community-character-aggregate:${datasetId}:${format}:${source.population}:${source.opponent_character_id ?? "all"}`,
         character_id: null,
         game_count: 0,
         win_rate_game_count: 0,
@@ -697,15 +700,18 @@ function aggregateCommunityCharacterRows(
 /**
  * Aggregate every safely resolved Top-100 player for one or all characters.
  * This is a player-game sample: when two named pros face each other, both sides belong.
+ * An explicit opponent selects that matchup (null selects all opponents).
+ * Omit it to retain the full atlas for a character, or the overall row for all characters.
  */
 export async function fetchArchiveProAggregateAtlasRows(
   datasetId: string,
   characterId: number | null,
   format: ArchiveFormat = "singles",
+  opponentCharacterId?: number | null,
 ): Promise<ArchiveRollup[]> {
   const client = requireArchiveClient();
   const sourceRows = await readAll<ArchiveRollup>(async (from, to) => {
-    const query = client
+    let query = client
       .from("archive_rollups")
       .select("rollup_key,dataset_id,scope,population,series_id,tournament_id,set_id,player_id,format,character_id,opponent_character_id,stage_id,game_count,win_rate_game_count,wins,identified_player_count,player_balanced_sample_count,metrics,stats_version")
       .eq("published", true)
@@ -717,9 +723,16 @@ export async function fetchArchiveProAggregateAtlasRows(
       .is("series_id", null)
       .is("tournament_id", null)
       .is("set_id", null) as unknown as TargetableQuery;
-    const response = await (characterId === null
-      ? query.not("character_id", "is", null).is("opponent_character_id", null).is("stage_id", null)
-      : query.eq("character_id", characterId))
+    query = characterId === null
+      ? query.not("character_id", "is", null).is("stage_id", null)
+      : query.eq("character_id", characterId);
+    if (opponentCharacterId !== undefined || characterId === null) {
+      query = opponentCharacterId == null
+        ? query.is("opponent_character_id", null)
+        : query.eq("opponent_character_id", opponentCharacterId);
+      query = query.is("stage_id", null);
+    }
+    const response = await query
       .order("rollup_key")
       .range(from, to);
     return response as unknown as PageResponse;

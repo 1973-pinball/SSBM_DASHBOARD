@@ -54,7 +54,7 @@ export function PrivacyPromise({ onClose }: { onClose: () => void }) {
           <section>
             <h3>Community contribution</h3>
             <p>Community contribution is separate from cloud sync, off by default, and reversible in My Account. Replay-derived data is never published or distributed beyond private sync without that explicit opt-in.</p>
-            <p>Public Community views contain only thresholded aggregates. They never publish connect codes, display names, replay paths, exact activity timelines, geographic inference, or downloadable row-level data.</p>
+            <p>Community aggregates use both players' stats from contributed games, counting each game once even when both players upload it. Public views contain only thresholded aggregates. They never publish connect codes, display names, replay paths, exact activity timelines, geographic inference, or downloadable row-level data.</p>
           </section>
           <section>
             <h3>Visit counting</h3>

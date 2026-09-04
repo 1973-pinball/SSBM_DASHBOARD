@@ -2,6 +2,7 @@ import type { ActionCounts, ResolvedGame } from "./types";
 import { INCLUDED_CHARACTER_ID_SET } from "./config";
 import { executionSummary, moveTable } from "./stats";
 import { supabase } from "./supabase";
+import { gameKey } from "./dedupe";
 
 export const COMMUNITY_CONSENT_VERSION = "2026-08-24";
 export const COMMUNITY_MIN_CONTRIBUTORS = 25;
@@ -234,7 +235,23 @@ const quartilesAround = (value: number | null, spread: number): Quartiles | null
  * Local-only fixture for demo mode. It exercises the complete Community UI
  * without pretending the synthetic games are real contributors.
  */
-export function demoCommunitySnapshot(games: ResolvedGame[]): CommunitySnapshot {
+export function demoCommunitySnapshot(contributedGames: ResolvedGame[]): CommunitySnapshot {
+  // Match the public population: two player samples per unique singles game.
+  // A mirror match still has two separate sides, including two move denominators.
+  const seen = new Set<string>();
+  const games: ResolvedGame[] = [];
+  for (const game of contributedGames) {
+    if (game.selfMatch) continue;
+    const key = gameKey(game.rec);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    games.push(game, {
+      ...game,
+      me: game.opp,
+      opp: game.me,
+      isWin: game.isWin === null ? null : !game.isWin,
+    });
+  }
   type MatchAgg = Omit<CommunityMatchupRow, "contributors" | "winRate">;
   const matchups = new Map<string, MatchAgg>();
   const months = new Map<string, { playerGames: number; seconds: number; ranked: number; unranked: number; direct: number; offline: number }>();

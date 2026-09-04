@@ -44,6 +44,38 @@ npm run lint
 
 Requires Node 22. Run `git config core.hooksPath .githooks` once per clone. Use `npm run verify:slpz -- <replay-folder> [count]` to compare local `.slp`/`.slpz` pairs; replay fixtures are never committed.
 
+## Benchmark filtering and community samples
+
+Matchup Atlas and Stage Atlas show each column's qualifying sample under its
+heading, matching Move Atlas. Win-rate sample totals count decided results in
+the displayed rows; community counts are approximate, and suppressed samples
+remain unavailable.
+
+Execution's Venue, Tournament, and Pro references follow both **Me** and **Vs**.
+For example, Marth vs Jigglypuff compares your moves, openings, actions, and execution
+against that exact matchup across all stages and dates. Missing matchup metrics
+stay unavailable; SSBM Stats remains an explicitly labeled all-opponent reference.
+Archive builds retain per-move metrics on matchup rows as well as character rows.
+Existing archives need a new versioned build and publication before matchup moves
+appear; they cannot be recovered from the older rollups alone.
+
+Community aggregates include both players in each contributed singles game. One
+Marth–Fox replay supplies one Marth sample and one Fox sample. A private game-key
+index chooses one contributing upload per game, so uploading it from both accounts
+does not count either side twice. Opt-out, account changes, and deletion transfer
+shared games to another eligible upload or remove them. Participation counts users
+with eligible uploads; published cells still require 25 contributing sources and
+100 player samples. Duplicate-only uploads do not supply independent samples.
+Both sides of a mirror match retain separate move and attempt denominators.
+
+To upgrade Community, apply `supabase/community.sql` and run
+`select public.refresh_community_snapshot();` to rebuild the private caches and
+public snapshot. The membership index is private under RLS; public payloads still
+exclude identities and individual games. No client replay re-parse is needed.
+`node scripts/verify-benchmark-filters.mjs` checks archive selection. The isolated
+SQL regression suite is `node scripts/verify-community.mjs`, with
+`@electric-sql/pglite` available or `PGLITE_MODULE` set to its module entry point.
+
 ## Optional cloud sync
 
 The app stays fully local unless Supabase is configured. To enable self-hosted sync:
@@ -52,7 +84,7 @@ The app stays fully local unless Supabase is configured. To enable self-hosted s
 2. Enable Google authentication in Supabase.
 3. Set `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`, and `VITE_SITE_URL`.
 
-Only parsed stats from the user's own accounts are synced—never replay files. See [`supabase/AUTH_BRANDING.md`](supabase/AUTH_BRANDING.md) for production OAuth setup.
+Only games involving one of the user's own accounts are synced, including both players' parsed stats—never replay files. See [`supabase/AUTH_BRANDING.md`](supabase/AUTH_BRANDING.md) for production OAuth setup.
 
 Projects upgrading from the legacy row-per-game mirror should run
 [`supabase/pack-migration.sql`](supabase/pack-migration.sql) repeatedly until no
