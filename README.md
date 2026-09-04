@@ -64,8 +64,13 @@ Marth–Fox replay supplies one Marth sample and one Fox sample. A private game-
 index chooses one contributing upload per game, so uploading it from both accounts
 does not count either side twice. Opt-out, account changes, and deletion transfer
 shared games to another eligible upload or remove them. Participation counts users
-with eligible uploads; published cells still require 25 contributing sources and
-100 player samples. Duplicate-only uploads do not supply independent samples.
+with eligible uploads; each published cell requires at least 25 unique players
+and 100 distinct games, including opponents. Players are identified by normalized
+connect code and unioned across both participants and all contributing sources;
+missing codes and display names cannot establish a distinct player. Contributor
+totals are informational. Duplicate uploads do not supply additional samples.
+The 100-game publication minimum is separate from **My games lookback**, which
+limits only the user's local column; Community comparisons use all history.
 Both sides of a mirror match retain separate move and attempt denominators.
 
 To upgrade Community, apply `supabase/community.sql` and run

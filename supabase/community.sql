@@ -43,12 +43,15 @@ create table if not exists public.community_snapshot (
   refreshed_at timestamptz not null default now(),
   contributor_count int not null default 0,
   player_game_count bigint not null default 0,
-  min_contributors int not null default 25,
+  min_contributors int not null default 1,
   min_games int not null default 100,
+  min_players int not null default 25,
   payload jsonb not null default '{}'::jsonb
 );
 
 alter table public.community_snapshot enable row level security;
+alter table public.community_snapshot alter column min_contributors set default 1;
+alter table public.community_snapshot add column if not exists min_players int not null default 25;
 
 drop policy if exists "community aggregate read" on public.community_snapshot;
 create policy "community aggregate read" on public.community_snapshot
@@ -59,28 +62,37 @@ revoke insert, update, delete on public.community_snapshot from anon, authentica
 
 -- Publish-time coarsening.
 --
--- The k-thresholds below protect any single snapshot; they do not protect a
--- sequence of them. This snapshot is world-readable and replaced on a schedule,
--- so an observer who archives each refresh can diff them, and a contributor
--- joining or leaving moves exact counts by a knowable amount -- which is what
--- attributes a delta to one person. Rounding published figures to a bucket puts
--- a single contributor beneath the resolution of the number, so the diff has
--- nothing to attribute.
+-- Publication requires 100 distinct games and 25 distinct connect-code player
+-- identities in each cell. Either participant can supply an identity; uploader
+-- accounts are informational. Codes are normalized and unioned across sources,
+-- never summed per uploader. Missing codes and display names cannot identify a
+-- unique player. Identity sets stay in private rollups, never the public payload.
+-- These thresholds and rounded counts are not differential privacy; repeated
+-- snapshots still reveal changes in the population.
 --
--- Rates are rounded only to the precision the UI actually renders (pct() shows
--- one decimal), on the principle that a payload should not publish digits no
--- one is shown. That is hygiene, not protection: one game moves a 100-game cell
--- by a full point, which no display-precision rounding can hide. The bucketed
--- counts are what does the work, by hiding that the population changed at all.
---
--- So this raises the cost of the attack; it is not differential privacy and does
--- not claim to be. Refresh cadence is the other half: every refresh is another
--- observation, so publish as rarely as the view can tolerate.
+-- Rates retain display precision and counts retain their existing buckets.
+-- Apply eligibility to exact counts before rounding; refresh cadence still
+-- limits how often changes to those aggregates can be observed.
 create or replace function public.pub_bucket(value numeric, bucket numeric)
 returns numeric
 language sql
 immutable
 as $$ select case when value is null then null else round(value / bucket) * bucket end $$;
+
+-- Merge private participant sets without multiplying the sample/metric sums.
+-- Only privileged refresh functions call this; browsers cannot read the sets.
+create or replace function public.community_count_players(player_sets jsonb)
+returns int
+language sql
+immutable
+set search_path = public, pg_temp
+as $$
+  select count(distinct player_key)::int
+  from jsonb_array_elements(coalesce(player_sets, '[]'::jsonb)) player_set
+  cross join lateral jsonb_array_elements_text(player_set) player_key
+  where nullif(player_key, '') is not null
+$$;
+revoke all on function public.community_count_players(jsonb) from public, anon, authenticated;
 
 -- Incremental refresh cache. Private inputs are processed only when games,
 -- account codes, or consent change. Both sides of each unique eligible game
@@ -395,6 +407,8 @@ base as materialized (
   select
     user_id,
     private_game_key,
+    nullif(upper(btrim(own_side->>'connectCode')), '') as player_key,
+    nullif(upper(btrim(opp_side->>'connectCode')), '') as opponent_player_key,
     (data->>'playedAt')::timestamptz as played_at,
     date_trunc('month', (data->>'playedAt')::timestamptz)::date as month,
     (data->>'durationFrames')::numeric / 60.0 as duration_seconds,
@@ -437,6 +451,9 @@ periods(lookback_days) as (
 windowed as materialized (
   select
     p.lookback_days,
+    b.private_game_key,
+    b.player_key,
+    b.opponent_player_key,
     b.character_id,
     b.opponent_character_id,
     b.stage_id,
@@ -474,6 +491,8 @@ matchup_rollup as (
     opponent_character_id,
     coalesce(stage_id, 0)::int as stage_id,
     coalesce(game_type, 'all') as game_type,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
     count(*)::bigint as games,
     sum(win)::bigint as wins
   from windowed
@@ -488,6 +507,8 @@ matchup_rollup as (
 benchmark_rollup as (
   select
     (case when grouping(character_id) = 1 then -1 else character_id end)::int as character_id,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
     count(*)::bigint as games,
     case when sum(l_cancel_success + l_cancel_fail) > 0
       then 100.0 * sum(l_cancel_success) / sum(l_cancel_success + l_cancel_fail)
@@ -503,6 +524,8 @@ execution_rollup as (
   select
     lookback_days,
     (case when grouping(character_id) = 1 then -1 else character_id end)::int as character_id,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
     count(*)::bigint as games,
     sum(l_cancel_success) as l_cancel_success,
     sum(l_cancel_fail) as l_cancel_fail,
@@ -536,6 +559,8 @@ move_per_game_base as (
     (b.data->>'playedAt')::timestamptz as played_at,
     b.private_game_key,
     b.own_index as player_index,
+    nullif(upper(btrim(b.own_side->>'connectCode')), '') as player_key,
+    nullif(upper(btrim(b.opp_side->>'connectCode')), '') as opponent_player_key,
     (b.own_side->>'characterId')::int as character_id,
     case
       when m.key::int in (2,3,4,5) then 'jab'
@@ -577,12 +602,14 @@ move_per_game_base as (
   from eligible b
   cross join lateral jsonb_each(coalesce(b.own_side->'moveStats', '{}'::jsonb)) m
   group by (b.data->>'playedAt')::timestamptz, b.private_game_key, b.own_index,
-           (b.own_side->>'characterId')::int, move_key
+           (b.own_side->>'characterId')::int, move_key, player_key, opponent_player_key
 ),
 move_per_game as (
   select
     p.lookback_days,
     m.private_game_key,
+    m.player_key,
+    m.opponent_player_key,
     m.character_id,
     m.move_key,
     m.landed,
@@ -608,6 +635,8 @@ move_rollup as (
     m.character_id,
     m.move_key,
     c.games as character_games,
+    count(distinct m.private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct m.player_key) || array_agg(distinct m.opponent_player_key), null) as player_keys,
     count(*)::bigint as move_games,
     sum(m.attempts) filter (where m.has_attempts) as attempts,
     count(*) filter (where m.has_attempts)::bigint as attempt_games,
@@ -628,6 +657,8 @@ move_rollup as (
 month_rollup as (
   select
     month,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
     count(*)::bigint as games,
     sum(duration_seconds) as duration_seconds,
     count(*) filter (where game_type = 'ranked')::bigint as ranked,
@@ -641,6 +672,8 @@ character_rollup as (
   select
     lookback_days,
     character_id,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
     count(*)::bigint as games,
     sum(win) filter (where win is not null)::bigint as wins,
     count(win)::bigint as decided
@@ -648,23 +681,29 @@ character_rollup as (
   group by lookback_days, character_id
 ),
 stage_rollup as (
-  select stage_id, count(*)::bigint as games, sum(duration_seconds) as duration_seconds
+  select stage_id,
+    count(distinct private_game_key)::bigint as unique_games,
+    array_remove(array_agg(distinct player_key) || array_agg(distinct opponent_player_key), null) as player_keys,
+    count(*)::bigint as games, sum(duration_seconds) as duration_seconds
   from base
   group by stage_id
 ),
 assembled as (
   select jsonb_build_object(
     'matchups', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'lookbackDays', lookback_days,
       'characterId', character_id, 'opponentCharacterId', opponent_character_id,
       'stageId', stage_id, 'gameType', game_type, 'games', games, 'wins', wins
     )) from matchup_rollup), '[]'::jsonb),
     'benchmarks', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'characterId', character_id, 'games', games, 'lCancel', l_cancel,
       'openingsPerKill', openings_per_kill, 'damagePerOpening', damage_per_opening,
       'inputsPerMinute', inputs_per_minute
     )) from benchmark_rollup), '[]'::jsonb),
     'execution', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'lookbackDays', lookback_days,
       'characterId', character_id, 'games', games,
       'lCancelSuccess', l_cancel_success, 'lCancelFail', l_cancel_fail,
@@ -684,6 +723,7 @@ assembled as (
       )
     )) from execution_rollup), '[]'::jsonb),
     'moves', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'lookbackDays', lookback_days,
       'characterId', character_id, 'moveKey', move_key,
       'characterGames', character_games, 'moveGames', move_games,
@@ -694,15 +734,18 @@ assembled as (
       'lCancelFail', l_cancel_fail
     )) from move_rollup), '[]'::jsonb),
     'months', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'month', month, 'games', games, 'durationSeconds', duration_seconds,
       'ranked', ranked, 'unranked', unranked, 'direct', direct, 'offline', offline
     )) from month_rollup), '[]'::jsonb),
     'characters', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'lookbackDays', lookback_days,
       'characterId', character_id, 'games', games,
       'wins', coalesce(wins, 0), 'decided', decided
     )) from character_rollup), '[]'::jsonb),
     'stages', coalesce((select jsonb_agg(jsonb_build_object(
+      'playerKeys', player_keys, 'uniqueGames', unique_games,
       'stageId', stage_id, 'games', games, 'durationSeconds', duration_seconds
     )) from stage_rollup), '[]'::jsonb)
   ) as payload
@@ -761,13 +804,19 @@ begin
     -- those peers too, so ownership transfers never leave a mixed snapshot.
   end loop;
 
-  if not changed and exists (select 1 from public.community_snapshot where snapshot_id = 'current') then
+  if not changed and exists (
+    select 1 from public.community_snapshot
+    where snapshot_id = 'current' and min_contributors = 1 and min_games = 100
+      and payload->>'thresholdVersion' = 'unique-players-v1'
+  ) then
     return;
   end if;
 
   with
   params as (
-    select 25::int as min_contributors, 100::int as min_games
+    -- Keep min_contributors for compatibility with existing snapshot readers.
+    -- Sources are informational; distinct participants and games gate cells.
+    select 1::int as min_contributors, 25::int as min_players, 100::int as min_games
   ),
   active as (
     select
@@ -779,6 +828,8 @@ begin
   matchup_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'opponentCharacterId')::int as opponent_character_id,
@@ -792,15 +843,20 @@ begin
   matchup_rollup as (
     select lookback_days, character_id, opponent_character_id, stage_id, game_type,
            sum(games)::bigint as games, count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
            sum(wins)::bigint as wins
     from matchup_user, params
     group by lookback_days, character_id, opponent_character_id, stage_id, game_type,
-             params.min_contributors, params.min_games
-    having sum(games) >= params.min_games and count(*) >= params.min_contributors
+             params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   benchmark_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'characterId')::int as character_id,
       (j->>'games')::bigint as games,
       (j->>'lCancel')::numeric as l_cancel,
@@ -815,25 +871,30 @@ begin
       character_id,
       sum(games)::bigint as games,
       count(*)::int as contributors,
-      case when count(l_cancel) >= params.min_contributors then
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
+      case when public.community_count_players(jsonb_agg(player_keys) filter (where l_cancel is not null)) >= params.min_players then
         (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by l_cancel) filter (where l_cancel is not null))::numeric[]
       end as l_cancel_q,
-      case when count(openings_per_kill) >= params.min_contributors then
+      case when public.community_count_players(jsonb_agg(player_keys) filter (where openings_per_kill is not null)) >= params.min_players then
         (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by openings_per_kill) filter (where openings_per_kill is not null))::numeric[]
       end as opk_q,
-      case when count(damage_per_opening) >= params.min_contributors then
+      case when public.community_count_players(jsonb_agg(player_keys) filter (where damage_per_opening is not null)) >= params.min_players then
         (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by damage_per_opening) filter (where damage_per_opening is not null))::numeric[]
       end as dpo_q,
-      case when count(inputs_per_minute) >= params.min_contributors then
+      case when public.community_count_players(jsonb_agg(player_keys) filter (where inputs_per_minute is not null)) >= params.min_players then
         (percentile_cont(array[0.25, 0.5, 0.75]) within group (order by inputs_per_minute) filter (where inputs_per_minute is not null))::numeric[]
       end as ipm_q
     from benchmark_user, params
-    group by character_id, params.min_contributors, params.min_games
-    having count(*) >= params.min_contributors and sum(games) >= params.min_games
+    group by character_id, params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   execution_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'games')::bigint as games,
@@ -860,6 +921,8 @@ begin
       character_id,
       sum(games)::bigint as games,
       count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
       case when sum(l_cancel_success + l_cancel_fail) > 0
         then 100.0 * sum(l_cancel_success) / sum(l_cancel_success + l_cancel_fail)
       end as l_cancel_success,
@@ -888,12 +951,15 @@ begin
       sum(action_ledge_grabs) as action_ledge_grabs,
       sum(action_grabs) as action_grabs
     from execution_user, params
-    group by lookback_days, character_id, params.min_contributors, params.min_games
-    having sum(games) >= params.min_games and count(*) >= params.min_contributors
+    group by lookback_days, character_id, params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   character_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       (j->>'games')::bigint as games,
@@ -910,6 +976,8 @@ begin
   move_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'lookbackDays')::int as lookback_days,
       (j->>'characterId')::int as character_id,
       j->>'moveKey' as move_key,
@@ -934,6 +1002,8 @@ begin
       m.move_key,
       c.games as character_games,
       count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(m.player_keys)) as players,
+      sum(m.unique_games)::bigint as unique_games,
       sum(m.attempts) as attempts,
       sum(m.attempt_games)::bigint as attempt_games,
       sum(m.landed) as landed,
@@ -950,14 +1020,16 @@ begin
       on c.character_id = m.character_id
      and c.lookback_days is not distinct from m.lookback_days
     cross join params
-    group by m.lookback_days, m.character_id, m.move_key, c.games, params.min_contributors, params.min_games
-    having count(*) >= params.min_contributors
-       and sum(m.move_games) >= params.min_games
+    group by m.lookback_days, m.character_id, m.move_key, c.games, params.min_players, params.min_games
+    having public.community_count_players(jsonb_agg(m.player_keys)) >= params.min_players
+       and sum(m.unique_games) >= params.min_games
        and c.games >= params.min_games
   ),
   month_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'month')::date as month,
       (j->>'games')::bigint as games,
       (j->>'durationSeconds')::numeric as duration_seconds,
@@ -973,30 +1045,38 @@ begin
       month,
       sum(games)::bigint as player_games,
       count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
       sum(duration_seconds) / nullif(sum(games), 0) as average_duration_seconds,
       sum(ranked)::bigint as ranked,
       sum(unranked)::bigint as unranked,
       sum(direct)::bigint as direct,
       sum(offline)::bigint as offline
     from month_user, params
-    group by month, params.min_contributors, params.min_games
-    having sum(games) >= params.min_games and count(*) >= params.min_contributors
+    group by month, params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   character_rollup as (
     select
       character_id,
       sum(games)::bigint as player_games,
       count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
       sum(wins)::bigint as wins,
       sum(decided)::bigint as decided
     from character_user, params
     where lookback_days is null
-    group by character_id, params.min_contributors, params.min_games
-    having sum(games) >= params.min_games and count(*) >= params.min_contributors
+    group by character_id, params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   stage_user as (
     select
       r.user_id,
+      coalesce(j->'playerKeys', '[]'::jsonb) as player_keys,
+      coalesce((j->>'uniqueGames')::bigint, 0) as unique_games,
       (j->>'stageId')::int as stage_id,
       (j->>'games')::bigint as games,
       (j->>'durationSeconds')::numeric as duration_seconds
@@ -1008,25 +1088,33 @@ begin
       stage_id,
       sum(games)::bigint as player_games,
       count(*)::int as contributors,
+      public.community_count_players(jsonb_agg(player_keys)) as players,
+      sum(unique_games)::bigint as unique_games,
       sum(duration_seconds) / nullif(sum(games), 0) as average_duration_seconds
     from stage_user, params
-    group by stage_id, params.min_contributors, params.min_games
-    having sum(games) >= params.min_games and count(*) >= params.min_contributors
+    group by stage_id, params.min_players, params.min_games
+    having sum(unique_games) >= params.min_games
+       and public.community_count_players(jsonb_agg(player_keys)) >= params.min_players
   ),
   assembled as (
     select jsonb_build_object(
+      'thresholdVersion', 'unique-players-v1',
       'matchups', coalesce((select jsonb_agg(jsonb_build_object(
         'lookbackDays', lookback_days,
         'characterId', character_id, 'opponentCharacterId', opponent_character_id,
         'stageId', stage_id, 'gameType', game_type,
         'games', public.pub_bucket(games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'wins', public.pub_bucket(wins, 25),
         'winRate', round(wins::numeric / games, 3)
       ) order by games desc) from matchup_rollup), '[]'::jsonb),
       'benchmarks', coalesce((select jsonb_agg(jsonb_build_object(
         'characterId', character_id, 'games', public.pub_bucket(games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'lCancel', case when l_cancel_q is null then null else jsonb_build_object('p25', round(l_cancel_q[1], 1), 'p50', round(l_cancel_q[2], 1), 'p75', round(l_cancel_q[3], 1)) end,
         'openingsPerKill', case when opk_q is null then null else jsonb_build_object('p25', round(opk_q[1], 1), 'p50', round(opk_q[2], 1), 'p75', round(opk_q[3], 1)) end,
         'damagePerOpening', case when dpo_q is null then null else jsonb_build_object('p25', round(dpo_q[1], 1), 'p50', round(dpo_q[2], 1), 'p75', round(dpo_q[3], 1)) end,
@@ -1035,7 +1123,9 @@ begin
       'execution', coalesce((select jsonb_agg(jsonb_build_object(
         'lookbackDays', lookback_days,
         'characterId', character_id, 'games', public.pub_bucket(games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'lCancelSuccess', round(l_cancel_success, 1),
         'groundTechSuccess', round(ground_tech_success, 1),
         'groundTechInPlace', round(ground_tech_in_place, 1),
@@ -1059,7 +1149,9 @@ begin
         'lookbackDays', lookback_days,
         'characterId', character_id, 'moveKey', move_key,
         'characterGames', public.pub_bucket(character_games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'attempts', attempts, 'attemptGames', public.pub_bucket(attempt_games, 25),
         'landed', landed, 'damage', damage, 'kills', kills,
         'killPctSum', kill_pct_sum, 'openings', openings,
@@ -1068,7 +1160,9 @@ begin
       ) order by character_id, damage desc) from move_rollup), '[]'::jsonb),
       'months', coalesce((select jsonb_agg(jsonb_build_object(
         'month', month, 'playerGames', public.pub_bucket(player_games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'averageDurationSeconds', round(average_duration_seconds, 0),
         'ranked', public.pub_bucket(ranked, 25),
         'unranked', public.pub_bucket(unranked, 25),
@@ -1077,30 +1171,35 @@ begin
       ) order by month) from month_rollup), '[]'::jsonb),
       'characters', coalesce((select jsonb_agg(jsonb_build_object(
         'characterId', character_id, 'playerGames', public.pub_bucket(player_games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'wins', public.pub_bucket(wins, 25),
         'decided', public.pub_bucket(decided, 25),
         'winRate', case when decided > 0 then round(wins::numeric / decided, 3) else null end
       ) order by player_games desc) from character_rollup), '[]'::jsonb),
       'stages', coalesce((select jsonb_agg(jsonb_build_object(
         'stageId', stage_id, 'playerGames', public.pub_bucket(player_games, 25),
-        'contributors', public.pub_bucket(contributors, 5),
+        'contributors', greatest(1, public.pub_bucket(contributors, 5)),
+        'players', public.pub_bucket(players, 5),
+        'uniqueGames', public.pub_bucket(unique_games, 25),
         'averageDurationSeconds', round(average_duration_seconds, 0)
       ) order by player_games desc) from stage_rollup), '[]'::jsonb)
     ) as payload
   )
   insert into public.community_snapshot (
     snapshot_id, refreshed_at, contributor_count, player_game_count,
-    min_contributors, min_games, payload
+    min_contributors, min_players, min_games, payload
   )
   select 'current', now(), active.contributors, active.player_games,
-         params.min_contributors, params.min_games, assembled.payload
+         params.min_contributors, params.min_players, params.min_games, assembled.payload
   from active, params, assembled
   on conflict (snapshot_id) do update set
     refreshed_at = excluded.refreshed_at,
     contributor_count = excluded.contributor_count,
     player_game_count = excluded.player_game_count,
     min_contributors = excluded.min_contributors,
+    min_players = excluded.min_players,
     min_games = excluded.min_games,
     payload = excluded.payload;
 end;

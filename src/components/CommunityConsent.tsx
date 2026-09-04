@@ -105,7 +105,7 @@ export function CommunityConsent({ isDemo, variant = "inline", onOpenCommunity }
               ) : (
                 "Community tab"
               )}{" "}
-              — never published as rows, and only above contributor and game-count thresholds. Off by default,
+              — never published as individual rows, and only in groups with at least 25 unique players and 100 games. Off by default,
               reversible any time.
             </span>
           </>
@@ -126,8 +126,9 @@ export function CommunityConsent({ isDemo, variant = "inline", onOpenCommunity }
       </div>
       <p>
         This is separate from private cloud sync. When enabled, a scheduled refresh may read your private parsed
-        game stats for both you and your opponents, remove identifiers, and include them only in aggregates that clear both contributor and game-count
-        thresholds. It never publishes connect codes, names, emails, replay paths, exact activity timelines, or rows.
+        game stats for both you and your opponents, remove identifiers, and include them only in aggregates with at least 25 unique
+        players and 100 distinct games. Players are identified by connect code and can be contributors or opponents.
+        It never publishes connect codes, names, emails, replay paths, exact activity timelines, or individual rows.
       </p>
       {consent === "loading" && <div className="hint">Checking your setting…</div>}
       {consent === "signed-out" && (

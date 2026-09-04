@@ -2,16 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import type { ResolvedGame } from "../lib/types";
 import {
   COMMUNITY_MIN_CONTRIBUTORS,
+  COMMUNITY_MIN_PLAYERS,
   COMMUNITY_MIN_GAMES,
   demoCommunitySnapshot,
   fetchCommunitySnapshot,
   type CommunitySnapshot,
 } from "../lib/community";
 import { charName, stageName } from "../lib/melee";
+import { num, pct, shortDate } from "../lib/format";
 import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { moveTabFocus } from "../lib/a11y";
 import { fetchArchivePlayerGameCount, fetchLatestArchiveDataset } from "../lib/publicArchive";
 import { ArchiveCommunityBenchmark } from "./ArchiveCommunityBenchmark";
+import { Kpi } from "./Kpi";
 import {
   ArchiveMatchupAtlasComparison,
   ArchiveMoveAtlasComparison,
@@ -32,6 +35,7 @@ const EMPTY_COMMUNITY_SNAPSHOT: CommunitySnapshot = {
   contributorCount: 0,
   playerGameCount: 0,
   minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+  minPlayers: COMMUNITY_MIN_PLAYERS,
   minGames: COMMUNITY_MIN_GAMES,
   matchups: [],
   benchmarks: [],
@@ -98,6 +102,7 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
   // of mounting placeholder controls that would retain their empty selection.
   const displaySnapshot = snapshot ?? (isDemo ? demo : EMPTY_COMMUNITY_SNAPSHOT);
   const hasSnapshot = snapshot !== null || isDemo;
+  const overallBenchmark = displaySnapshot.benchmarks.find((row) => row.characterId === -1);
   const nextMilestone = displaySnapshot.contributorCount < 25
     ? 25
     : displaySnapshot.contributorCount < 100
@@ -117,8 +122,9 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           <div className="eyebrow">Community Lab · SSBM Stats growth</div>
           <h2>See the community sample grow</h2>
           <p>
-            These counts are informational, not unlock requirements. Opt-in SSBM Stats contributions and the
-            historical tournament archive remain separate comparison samples throughout the Community section.
+            Each SSBM Stats breakdown needs at least {displaySnapshot.minPlayers} unique players and {displaySnapshot.minGames} distinct games,
+            including opponents. Players are identified by connect code; contributor counts are informational.
+            Opt-in contributions and the historical tournament archive remain separate comparison samples.
             {" "}Each unique contributed singles game supplies two player samples, one for each character.
             Duplicate uploads count once; opponents do not increase the contributor count.
           </p>
@@ -139,6 +145,22 @@ export function Community({ games, isDemo, onOpenAccount }: Props) {
           </div>
           {error && <div className="error-note" role="alert">{error}</div>}
       </div>
+
+      {overallBenchmark && <section className="panel" aria-label="SSBM Stats overall benchmarks">
+        <h2>SSBM Stats · all characters</h2>
+        <p className="hint">
+          Published medians across {overallBenchmark.contributors.toLocaleString()} contributors · all opponents and all history ·
+          approximately {overallBenchmark.games.toLocaleString()} player samples · updated {shortDate(displaySnapshot.refreshedAt)}.
+          Each contributor has equal weight. {overallBenchmark.players === undefined ? "" : `Approximately ${overallBenchmark.players.toLocaleString()} unique players are represented. `}
+          Character and matchup breakdowns qualify separately.
+        </p>
+        <div className="kpi-strip">
+          <Kpi label="L-cancel success" value={pct(overallBenchmark.lCancel === null ? null : overallBenchmark.lCancel.p50 / 100)} />
+          <Kpi label="Openings / kill" value={num(overallBenchmark.openingsPerKill?.p50 ?? null)} />
+          <Kpi label="Damage / opening" value={num(overallBenchmark.damagePerOpening?.p50 ?? null)} />
+          <Kpi label="Inputs / min" value={num(overallBenchmark.inputsPerMinute?.p50 ?? null)} />
+        </div>
+      </section>}
 
       <div className="tabs community-tabs" role="tablist" aria-label="Community views">
         {VIEWS.map((item) => (
@@ -185,7 +207,7 @@ function GamesLookbackInput({ lookbackGames, lookbackInput, onLookbackInputChang
         <input
           type="number"
           min={1}
-          step={25}
+          step={1}
           inputMode="numeric"
           value={lookbackInput}
           onChange={(event) => onLookbackInputChange(event.target.value)}

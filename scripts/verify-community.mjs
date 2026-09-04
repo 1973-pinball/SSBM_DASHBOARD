@@ -126,6 +126,59 @@ try {
   await consent(6, false);
   await refresh();
 
+  // One uploader can supply a qualifying cohort through their opponents.
+  // Participants are unioned across both player sides and duplicate uploads.
+  await addUser(7, "OWNER#7");
+  await addUser(8, "OPP#0", false);
+  const cohort = (count, opponents, mirror = false) => Object.fromEntries(
+    Array.from({ length: count }, (_, i) => [`cohort-${i}`, game(
+      player("OWNER#7", 9, 10), player(`OPP#${i % opponents}`, mirror ? 9 : 2, 30),
+    )]),
+  );
+  const assertSuppressed = async (message) => {
+    for (const rows of Object.values(await snapshot()).filter(Array.isArray)) {
+      assert.equal(rows.length, 0, message);
+    }
+  };
+  await putGames(7, cohort(100, 23));
+  await refresh();
+  await assertSuppressed("100 games with only 24 distinct players stay private");
+  const normalizedCohort = cohort(100, 23);
+  normalizedCohort["cohort-0"].players[1].connectCode = " opp#0 ";
+  normalizedCohort["cohort-1"].players[1].connectCode = "";
+  normalizedCohort["cohort-1"].players[1].displayName = "A new tag is not a new player";
+  await putGames(7, normalizedCohort);
+  await refresh();
+  await assertSuppressed("case, whitespace, missing codes, and display names cannot inflate unique players");
+  await putGames(7, cohort(99, 24));
+  await refresh();
+  await assertSuppressed("25 distinct players with only 99 games stay private");
+  await putGames(8, cohort(99, 24));
+  await consent(8, true);
+  await refresh();
+  await assertSuppressed("a duplicate uploader adds neither players nor unique games");
+  await consent(8, false);
+  await putGames(7, cohort(100, 24));
+  await refresh();
+  data = await snapshot();
+  assert.equal(await scalar("select min_players as value from public.community_snapshot"), 25);
+  const opponentMatchup = data.matchups.find((r) => r.characterId === 2 && r.stageId === 0 && r.gameType === "all" && r.lookbackDays === null);
+  assert.equal(opponentMatchup.players, 25, "both players identify the cohort, including opponents");
+  assert.equal(opponentMatchup.uniqueGames, 100);
+  assert.equal(opponentMatchup.contributors, 1, "a one-source sample cannot display zero contributors");
+  assert.equal(data.benchmarks.find((r) => r.characterId === 2).inputsPerMinute.p50, 130);
+  assert.ok(data.moves.some((r) => r.characterId === 2), "opponent moves qualify from one uploader");
+  for (const forbidden of ["playerKeys", "OWNER#", "OPP#", "connectCode", "user_id"]) {
+    assert.ok(!JSON.stringify(data).includes(forbidden), `public snapshot must omit ${forbidden}`);
+  }
+  assert.equal(await scalar(`select public.community_count_players('[ ["A#1","B#1"], ["B#1","C#1"], [null,""] ]') as value`), 3,
+    "participant sets union across sources without counting missing identities");
+  await putGames(7, cohort(50, 24, true));
+  await refresh();
+  await assertSuppressed("50 mirror games cannot pass as 100 distinct games");
+  await consent(7, false);
+  await refresh();
+
   // Each contributor plays Marth only; all Fox performance comes from opponents.
   for (let n = 10; n < 35; n++) {
     await addUser(n, `MAIN#${n}`);
@@ -135,8 +188,8 @@ try {
     if (n === 33) {
       await refresh();
       assert.equal(await scalar("select contributor_count as value from public.community_snapshot"), 24);
-      const hidden = await snapshot();
-      for (const rows of Object.values(hidden)) assert.equal(rows.length, 0, "24 contributors cannot publish a cell");
+      const published = await snapshot();
+      assert.ok(published.matchups.length > 0, "24 contributors with 48 unique players and 120 games can publish");
     }
   }
   await refresh();

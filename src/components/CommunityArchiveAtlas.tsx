@@ -5,6 +5,7 @@ import type {
   CommunityMatchupRow,
   CommunityMoveRow,
 } from "../lib/community";
+import { COMMUNITY_MIN_GAMES, COMMUNITY_MIN_PLAYERS } from "../lib/community";
 import { INCLUDED_STAGE_IDS } from "../lib/config";
 import { countNoun, num, pct, shortDate, winRateColor } from "../lib/format";
 import { charName, moveGroup, moveGroupLabel, stageName } from "../lib/melee";
@@ -174,7 +175,9 @@ function ArchiveFrame({
       </div>
       {archive.loading && archive.fieldRows.length === 0 ? <div className="empty-note">Loading historical tournament comparisons…</div> : archive.error ? <div className="acb-error" role="status">{archive.error}</div> : children}
       <div className="acb-separation-note">
-        “SSBM Stats” is the opt-in user cohort. “Venue archive” includes usable event-associated games;
+        “SSBM Stats” is the opt-in user cohort. Each published cell needs at least {COMMUNITY_MIN_PLAYERS} unique players
+        and {COMMUNITY_MIN_GAMES} distinct games for that breakdown, including opponents. Duplicate uploads count once.
+        {" "}“Venue archive” includes usable event-associated games;
         “Tournament archive” includes only conservatively curated tournament games. Pro rows use only externally
         resolved Top-100 identities. Your values are computed locally and are not uploaded by this view.
       </div>
@@ -192,6 +195,7 @@ interface RateSummary {
   decided: number;
   games: number;
   contributors?: number;
+  players?: number;
 }
 
 type MatchupSortKey = "opponent" | "games" | "you" | "community" | "venue" | "tournament" | "proAggregate" | "pro";
@@ -210,7 +214,7 @@ function RateCell({ value, showSample = true }: { value: RateSummary | null | un
   return (
     <td className={`data atlas-rate-cell ${value.games < 10 ? "atlas-low-sample" : ""}`}>
       <b style={{ color: winRateColor(rate) }}>{pct(rate)}</b>
-      {showSample && <span className="sample-note">{value.games.toLocaleString()} games{value.contributors === undefined ? "" : ` · ${value.contributors.toLocaleString()} users`}</span>}
+      {showSample && <span className="sample-note">{value.games.toLocaleString()} {value.contributors === undefined ? "games" : "player-games"}{value.players === undefined ? "" : ` · ≈${value.players.toLocaleString()} players`}</span>}
     </td>
   );
 }
@@ -273,6 +277,7 @@ export function ArchiveMatchupAtlasComparison({
     decided: row.games,
     games: row.games,
     contributors: row.contributors,
+    players: row.players,
   }]));
   const archiveStage = stageId === 0 ? null : stageId;
   const broad = archiveRateMap(archive.fieldRows, "broad", archiveStage);
@@ -361,6 +366,7 @@ function communityStageMap(rows: CommunityMatchupRow[], opponentId: number): Map
     value.decided += row.games;
     value.games += row.games;
     value.contributors = row.contributors;
+    value.players = row.players;
     result.set(row.stageId, value);
   }
   return result;

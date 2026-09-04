@@ -5,7 +5,8 @@ import { supabase } from "./supabase";
 import { gameKey } from "./dedupe";
 
 export const COMMUNITY_CONSENT_VERSION = "2026-08-24";
-export const COMMUNITY_MIN_CONTRIBUTORS = 25;
+export const COMMUNITY_MIN_CONTRIBUTORS = 1;
+export const COMMUNITY_MIN_PLAYERS = 25;
 export const COMMUNITY_MIN_GAMES = 100;
 export const COMMUNITY_LOOKBACK_DAYS = [30, 90, 180, 365, null] as const;
 
@@ -16,7 +17,14 @@ interface CommunityLookbackRow {
   lookbackDays: CommunityLookbackDays;
 }
 
-export interface CommunityMatchupRow extends CommunityLookbackRow {
+interface CommunitySampleSize {
+  /** Unique connect-code participants across both sides, coarsened at publication. */
+  players?: number;
+  /** Distinct games; a mirror supplies two player samples but only one game. */
+  uniqueGames?: number;
+}
+
+export interface CommunityMatchupRow extends CommunityLookbackRow, CommunitySampleSize {
   characterId: number;
   opponentCharacterId: number;
   stageId: number; // 0 = every legal stage
@@ -27,7 +35,7 @@ export interface CommunityMatchupRow extends CommunityLookbackRow {
   winRate: number;
 }
 
-export interface CommunityBenchmarkRow {
+export interface CommunityBenchmarkRow extends CommunitySampleSize {
   characterId: number; // -1 = every character
   games: number;
   contributors: number;
@@ -43,7 +51,7 @@ export interface Quartiles {
   p75: number;
 }
 
-export interface CommunityMoveRow extends CommunityLookbackRow {
+export interface CommunityMoveRow extends CommunityLookbackRow, CommunitySampleSize {
   characterId: number;
   moveKey: string;
   characterGames: number;
@@ -60,7 +68,7 @@ export interface CommunityMoveRow extends CommunityLookbackRow {
   lCancelFail: number;
 }
 
-export interface CommunityExecutionRow extends CommunityLookbackRow {
+export interface CommunityExecutionRow extends CommunityLookbackRow, CommunitySampleSize {
   characterId: number; // -1 = every character
   games: number;
   contributors: number;
@@ -75,7 +83,7 @@ export interface CommunityExecutionRow extends CommunityLookbackRow {
   techAwayCount: number | null;
 }
 
-export interface CommunityMonthRow {
+export interface CommunityMonthRow extends CommunitySampleSize {
   month: string;
   playerGames: number;
   contributors: number;
@@ -86,7 +94,7 @@ export interface CommunityMonthRow {
   offline: number;
 }
 
-export interface CommunityCharacterRow {
+export interface CommunityCharacterRow extends CommunitySampleSize {
   characterId: number;
   playerGames: number;
   contributors: number;
@@ -95,7 +103,7 @@ export interface CommunityCharacterRow {
   winRate: number | null;
 }
 
-export interface CommunityStageRow {
+export interface CommunityStageRow extends CommunitySampleSize {
   stageId: number;
   playerGames: number;
   contributors: number;
@@ -107,6 +115,7 @@ export interface CommunitySnapshot {
   contributorCount: number;
   playerGameCount: number;
   minContributors: number;
+  minPlayers: number;
   minGames: number;
   matchups: CommunityMatchupRow[];
   benchmarks: CommunityBenchmarkRow[];
@@ -160,7 +169,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("community_snapshot")
-    .select("refreshed_at, contributor_count, player_game_count, min_contributors, min_games, payload")
+    .select("refreshed_at, contributor_count, player_game_count, min_contributors, min_players, min_games, payload")
     .eq("snapshot_id", "current")
     .maybeSingle();
   if (error) throw error;
@@ -169,6 +178,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     contributorCount: 0,
     playerGameCount: 0,
     minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+    minPlayers: COMMUNITY_MIN_PLAYERS,
     minGames: COMMUNITY_MIN_GAMES,
     matchups: [], benchmarks: [], moves: [], execution: [], months: [], characters: [], stages: [],
   };
@@ -178,6 +188,7 @@ export async function fetchCommunitySnapshot(): Promise<CommunitySnapshot | null
     contributorCount: Number(data.contributor_count ?? 0),
     playerGameCount: Number(data.player_game_count ?? 0),
     minContributors: Number(data.min_contributors ?? COMMUNITY_MIN_CONTRIBUTORS),
+    minPlayers: Number(data.min_players ?? COMMUNITY_MIN_PLAYERS),
     minGames: Number(data.min_games ?? COMMUNITY_MIN_GAMES),
     matchups: (payload.matchups ?? []).map(withLookback).filter((r) => playable(r.characterId) && playable(r.opponentCharacterId)),
     benchmarks: (payload.benchmarks ?? []).filter((r) => playable(r.characterId)),
@@ -369,6 +380,7 @@ export function demoCommunitySnapshot(contributedGames: ResolvedGame[]): Communi
     contributorCount: 84,
     playerGameCount: games.length,
     minContributors: COMMUNITY_MIN_CONTRIBUTORS,
+    minPlayers: COMMUNITY_MIN_PLAYERS,
     minGames: COMMUNITY_MIN_GAMES,
     demo: true,
     matchups: [...matchups.values()].filter((r) => r.games >= 5).map((r) => ({ ...r, contributors: Math.max(25, Math.min(84, Math.round(r.games / 3))), winRate: r.wins / r.games })),
