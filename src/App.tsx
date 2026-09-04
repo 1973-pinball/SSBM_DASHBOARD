@@ -611,7 +611,7 @@ export default function App() {
       // final tally through the callback, and we need it after the await.
       const tally: { last: ParseProgress | null } = { last: null };
       try {
-        // "Refresh replay stats" is a forced schema repair, not an ordinary
+        // "Refresh execution stats" is a forced schema repair, not an ordinary
         // new-file scan. A stale row can still have an id in `seen` (for
         // example when a cloud restore raced an earlier migration); forgetting
         // that marker first prevents the scanner from instantly skipping the
@@ -1025,7 +1025,7 @@ export default function App() {
                   !online
                     ? "Offline — local stats still work"
                     : needsStatsRefresh
-                      ? "Some older records need a refresh. Games with unknown CPU status are excluded until you refresh the replay folder."
+                      ? "Some cached or cloud records predate tech stats. Refresh the replay folder to update them in place."
                     : needsFolder
                       ? "These stats came from the cache or the cloud. Connect your replay folder to pick up games played from now on."
                       : "Local features are ready"
@@ -1034,7 +1034,7 @@ export default function App() {
                 {!online
                   ? "Offline · local stats available"
                   : needsStatsRefresh
-                    ? "Replay stats need refresh"
+                    ? "Execution stats need refresh"
                   : needsFolder
                     ? "No folder connected"
                     : lastScanLabel
@@ -1054,7 +1054,7 @@ export default function App() {
                     : !dirHandle
                       ? supportsFsAccess ? "Connect replay folder" : "Add replays"
                       : folderPermission === "granted"
-                        ? needsStatsRefresh ? "Refresh replay stats" : "Refresh"
+                        ? needsStatsRefresh ? "Refresh execution stats" : "Refresh"
                         : needsStatsRefresh ? "Reconnect to refresh" : "Reconnect folder"}
                 </button>
               )}

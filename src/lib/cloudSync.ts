@@ -28,6 +28,12 @@ const UTF8_ENCODER = new TextEncoder();
 const stampCurrentVersion = (rec: GameRecord): GameRecord =>
   rec.statsVersion === CURRENT_STATS_VERSION ? rec : { ...rec, statsVersion: CURRENT_STATS_VERSION };
 
+// The rolled-back CPU filter wrote v2 payloads; their existing execution
+// stats are compatible with v1. Restore both, including on a nonempty cache,
+// so rolling back cannot strand either generation of the user's history.
+const compatibleStatsVersion = (version: number | string | undefined): boolean =>
+  Number(version) === CURRENT_STATS_VERSION || Number(version) === 2;
+
 export interface SyncResult {
   pushed: number;
   pulled: GameRecord[];
@@ -83,7 +89,7 @@ export async function restoreCloudRecords(
       const pack = raw as CloudPack;
       for (const [key, rec] of Object.entries(pack.records ?? {})) {
         records.push(rec);
-        if (Number(pack.versions?.[key]) === CURRENT_STATS_VERSION && hasCurrentStats(rec)) {
+        if (compatibleStatsVersion(pack.versions?.[key]) && hasCurrentStats(rec)) {
           currentPage.push(stampCurrentVersion(rec));
         }
       }
@@ -162,7 +168,7 @@ const addRemotePack = (index: RemoteIndex, row: RemotePackIndexRow): void => {
   for (const [key, version] of Object.entries(row.versions ?? {})) {
     index.observedKeys.add(key);
     index.bucketByKey.set(key, row.bucket);
-    if (Number(version) === CURRENT_STATS_VERSION) index.currentKeys.add(key);
+    if (compatibleStatsVersion(version)) index.currentKeys.add(key);
     else index.currentKeys.delete(key);
   }
   if (!index.latestUpdatedAt || row.updated_at > index.latestUpdatedAt) index.latestUpdatedAt = row.updated_at;
@@ -276,7 +282,7 @@ async function pullMissing(local: GameRecord[], remote: RemoteIndex): Promise<Ga
     for (const raw of data) {
       const pack = raw as CloudPack;
       for (const [key, rec] of Object.entries(pack.records ?? {})) {
-        if (!missing.has(key) || haveKeys.has(key) || Number(pack.versions?.[key]) !== CURRENT_STATS_VERSION) continue;
+        if (!missing.has(key) || haveKeys.has(key) || !compatibleStatsVersion(pack.versions?.[key])) continue;
         haveKeys.add(key);
         missing.delete(key);
         pulled.push(rec);

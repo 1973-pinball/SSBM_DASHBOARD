@@ -238,7 +238,6 @@ export function generateDemoRecords(count = 1600, seed = 20260716): GameRecord[]
       return {
         moveStats: mkMoveStats(rand, minutes, kills, totalDamage, isMe, isMe ? iWin : !iWin, isMe ? lcRate : 0.6 + rand() * 0.3),
         port: isMe ? 1 : 2,
-        isCpu: false,
         connectCode: isMe ? myCode : rival.code,
         displayName: isMe ? (myCode === DEMO_CODE ? "demo" : "demo alt") : rival.name,
         characterId: isMe ? mine.id : oppChar,
@@ -339,7 +338,6 @@ function generateDemoTeamRecords(rand: () => number, start: number, count: numbe
       const acts = mkActions(rand, minutes, techSkill);
       return {
         port: idx + 1,
-        isCpu: false,
         connectCode: code,
         displayName: name,
         characterId,

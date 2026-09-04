@@ -12,10 +12,6 @@ import { moveGroup, moveGroupTracksAttempts } from "./melee";
 const playableRoster = (players: PlayerSide[]): boolean =>
   players.every((p) => INCLUDED_CHARACTER_ID_SET.has(p.characterId));
 
-/** Missing CPU status in old cloud rows is unknown, not evidence of a human. */
-const humanRoster = (players: PlayerSide[]): boolean =>
-  players.every((p) => p.isCpu === false);
-
 /** Local-timezone YYYY-MM-DD, matching the dates the user sees in the UI. */
 export function localDay(d: Date): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -98,7 +94,6 @@ export function resolveGames(records: GameRecord[], myCodes: Set<string>): Resol
   const out: ResolvedGame[] = [];
   for (const rec of records) {
     if (rec.parseError || rec.isTeams || rec.players.length !== 2) continue;
-    if (!humanRoster(rec.players)) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     if (!playableRoster(rec.players)) continue;
     const meIdx = rec.players.findIndex((p) => p.connectCode && myCodes.has(p.connectCode));
@@ -125,7 +120,6 @@ export function resolveTeamGames(records: GameRecord[], myCodes: Set<string>): R
   const out: ResolvedTeamGame[] = [];
   for (const rec of records) {
     if (rec.parseError || !rec.isTeams || rec.players.length !== 4) continue;
-    if (!humanRoster(rec.players)) continue;
     if (!INCLUDED_STAGE_ID_SET.has(rec.stageId)) continue;
     if (!playableRoster(rec.players)) continue;
     const me = rec.players.find((p) => p.connectCode && myCodes.has(p.connectCode));

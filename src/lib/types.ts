@@ -54,8 +54,6 @@ export interface MoveAgg {
 
 export interface PlayerSide {
   port: number;
-  /** Slippi's player type is 1 for CPUs. Older cloud records lack this field. */
-  isCpu: boolean;
   connectCode: string | null;
   displayName: string | null;
   characterId: number;
@@ -137,12 +135,11 @@ export function hasFullStats(rec: GameRecord): boolean {
  * older cached/cloud record. The marker lives inside the cloud JSON payload,
  * so no Supabase schema migration is needed.
  */
-export const CURRENT_STATS_VERSION = 2;
+export const CURRENT_STATS_VERSION = 1;
 
-/** Old cloud rows need a reparse to recover tech counts and CPU status. */
+/** Older records have no `techs`; a real zero-attempt game has an all-zero object. */
 export function hasCurrentStats(rec: GameRecord): boolean {
-  return hasFullStats(rec) && Array.isArray(rec.players) && rec.players.length > 0
-    && rec.players.every((p) => p.techs != null && typeof p.isCpu === "boolean");
+  return hasFullStats(rec) && Array.isArray(rec.players) && rec.players.length > 0 && rec.players.every((p) => p.techs != null);
 }
 
 /**

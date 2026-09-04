@@ -277,19 +277,15 @@ class SsbmDb extends Dexie {
         }
         if (staleIds.length > 0) await tx.table("seen").bulkDelete(staleIds);
       });
-    // v15 preserves CPU status, which older rows discarded. Reparse once so
-    // CPU matches can be excluded reliably; accounts and folder stay in kv.
-    this.version(15)
-      .stores({
-        games: "id, playedAt, stageId, gameType",
-        packs: "++id",
-        seen: "id",
-        kv: "key",
-      })
-      .upgrade(async (tx) => {
-        await tx.table("packs").clear();
-        await tx.table("seen").clear();
-      });
+    // Keep the database version already opened by the CPU-filter release.
+    // Rolling it back to v14 would prevent those browsers from opening their
+    // cache. This rollback deliberately performs no further cache clearing.
+    this.version(15).stores({
+      games: "id, playedAt, stageId, gameType",
+      packs: "++id",
+      seen: "id",
+      kv: "key",
+    });
   }
 }
 
