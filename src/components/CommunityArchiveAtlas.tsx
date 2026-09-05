@@ -294,7 +294,8 @@ export function ArchiveMatchupAtlasComparison({
     if (key === "pro") return pro.get(opponentId);
     return null;
   };
-  const opponents = [...new Set([...local.keys(), ...community.keys(), ...broad.keys(), ...conservative.keys(), ...proAggregate.keys(), ...pro.keys()])]
+  const publishedOpponents = [...new Set([...community.keys(), ...broad.keys(), ...conservative.keys(), ...proAggregate.keys(), ...pro.keys()])];
+  const opponents = (games.length > 0 ? [...local.keys()] : publishedOpponents)
     .sort((a, b) => {
       if (sort.key === null) {
         return Math.max(conservative.get(b)?.games ?? 0, community.get(b)?.games ?? 0)
@@ -345,7 +346,7 @@ export function ArchiveMatchupAtlasComparison({
     <ArchiveFrame archive={archive} eyebrow="Matchup Atlas" title={`Your ${charName(characterId)} matchups across the full field`} controls={controls} onCharacterChange={onCharacterChange}>
       {opponents.length ? <div className="table-scroll"><table><thead><tr>{sortableHeader("opponent", "Opponent")}{sortableHeader("games", "Games", true)}{sortableHeader("you", "You", true)}{sortableHeader("community", "SSBM Stats", true)}{sortableHeader("venue", "Venue archive", true)}{sortableHeader("tournament", "Tournament archive", true)}{sortableHeader("proAggregate", "Pro tournament archive", true)}{archive.selectedPro && sortableHeader("pro", archive.selectedPro.display_name, true)}</tr></thead><tbody>
         {opponents.map((opponentId) => <tr key={opponentId}><td>{charName(opponentId)}</td><td className="data">{local.get(opponentId)?.games.toLocaleString() ?? "—"}</td><RateCell value={local.get(opponentId)} showSample={false} /><RateCell value={community.get(opponentId)} /><RateCell value={broad.get(opponentId)} /><RateCell value={conservative.get(opponentId)} /><RateCell value={proAggregate.get(opponentId)} />{archive.selectedPro && <RateCell value={pro.get(opponentId)} />}</tr>)}
-      </tbody></table></div> : <div className="empty-note">No matching matchup samples are available.</div>}
+      </tbody></table></div> : <div className="empty-note">{games.length > 0 ? `No opponents appear in your latest ${lookbackGames.toLocaleString()} matching games.` : "No matching matchup samples are available."}</div>}
       <div className="hint">Header samples count decided results in the displayed matchups; unknown outcomes are excluded from win-rate columns. SSBM Stats counts are approximate. My games lookback scopes only your most recent matching games; benchmark columns retain their full published samples.</div>
       {gameType !== "all" && <div className="hint">Your and SSBM Stats columns use the selected mode. Historical archive columns are offline event games.</div>}
     </ArchiveFrame>
