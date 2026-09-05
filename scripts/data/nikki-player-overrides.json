@@ -137,6 +137,7 @@
       "sourceUrl": "https://liquipedia.net/smash/GENESIS/X2/Melee/Singles_Bracket",
       "notes": "The cited singles bracket confirms attendance and each replay display name matches the public bracket tag exactly. Individual replay sides remain probable rather than bracket-verified.",
       "aliases": [
+        { "observedAlias": "aMSa", "playerId": "amsa" },
         { "observedAlias": "Axe", "playerId": "axe" },
         { "observedAlias": "Fiction", "playerId": "fiction" },
         { "observedAlias": "Hungrybox", "playerId": "hungrybox" },
@@ -172,6 +173,7 @@
         { "observedAlias": "moky", "playerId": "moky" },
         { "observedAlias": "n0ne", "playerId": "none" },
         { "observedAlias": "Ossify", "playerId": "ossify" },
+        { "observedAlias": "RapMonster", "playerId": "rapmonster" },
         { "observedAlias": "S2J", "playerId": "s2j" },
         { "observedAlias": "SFAT", "playerId": "sfat" },
         { "observedAlias": "Shroomed", "playerId": "shroomed" },
